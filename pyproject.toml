@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moju"
+version = "0.1.0"
+description = "Supervised Physics scaling and modeling for SciML."
+readme = "README.md"
+authors = [{ name = "Abiodun Olaoye", email = "your.email@example.com" }]
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+    "jax>=0.4.0",
+    "jaxlib>=0.4.0",
+    "numpy>=1.20.0"
+]
+
+[project.optional-dependencies]
+units = ["pint>=0.20"]
+dev = ["pytest", "black", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
