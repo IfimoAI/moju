@@ -21,4 +21,4 @@ units = ["pint>=0.20"]
 dev = ["pytest", "black", "ruff"]
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
