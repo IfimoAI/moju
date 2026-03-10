@@ -205,3 +205,36 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# --- JAX & ML Specific ---
+.ipynb_checkpoints
+*.ipynb
+/bazel-*
+.jax_configure.bazelrc
+# Ignore local model weights and datasets
+models/weights/
+data/raw/
+data/processed/
+
+# --- OpenFOAM & CFD Data (CRITICAL) ---
+# Ignore massive mesh and field data 
+# We only want to track metadata and scripts
+**/constant/polyMesh/
+**/processor*/
+**/postProcessing/
+**/dynamicMeshDict
+**/0/
+**/[1-9]*/
+!**/0.orig/
+*.log
+*.foam
+platforms/
+# ParaView state files
+*.pvsm
+*.pvd
+
+# --- IDE & OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
