@@ -85,6 +85,7 @@ class Operators:
     # --- Public API: single-point or batched via dispatch ---
 
     @staticmethod
+    @functools.partial(jax.jit, static_argnums=0)
     def gradient(func, params, x):
         """
         Gradient of a scalar field with respect to input x.
@@ -104,6 +105,7 @@ class Operators:
         return Operators._gradient_single(func, params, x)
 
     @staticmethod
+    @functools.partial(jax.jit, static_argnums=0)
     def jacobian(func, params, x):
         """
         Jacobian of a vector field with respect to input x.
@@ -123,6 +125,7 @@ class Operators:
         return Operators._jacobian_single(func, params, x)
 
     @staticmethod
+    @functools.partial(jax.jit, static_argnums=0)
     def divergence(func, params, x):
         """
         Divergence of a vector field (trace of the Jacobian).
@@ -142,6 +145,7 @@ class Operators:
         return Operators._divergence_single(func, params, x)
 
     @staticmethod
+    @functools.partial(jax.jit, static_argnums=0)
     def laplacian(func, params, x):
         """
         Laplacian (trace of Hessian) using JVP; faster than full Hessian for high-dimensional x.
@@ -161,6 +165,7 @@ class Operators:
         return Operators._laplacian_single(func, params, x)
 
     @staticmethod
+    @functools.partial(jax.jit, static_argnums=0)
     def curl_2d(func, params, x):
         """
         Scalar curl (vorticity) in 2D: dv/dx - du/dy.
@@ -180,6 +185,7 @@ class Operators:
         return Operators._curl_2d_single(func, params, x)
 
     @staticmethod
+    @functools.partial(jax.jit, static_argnums=0)
     def curl_3d(func, params, x):
         """
         Vector curl in 3D: (dw/dy - dv/dz, du/dz - dw/dx, dv/dx - du/dy).
@@ -213,6 +219,7 @@ class Operators:
         return jnp.einsum("...ij,...j->...i", u_grad, u)
 
     @staticmethod
+    @functools.partial(jax.jit, static_argnums=0)
     def time_derivative(func, params, t, x):
         """
         First time derivative d(phi)/dt for unsteady PDEs.
@@ -238,6 +245,7 @@ class Operators:
         return Operators._time_derivative_single(func, params, t, x)
 
     @staticmethod
+    @functools.partial(jax.jit, static_argnums=0)
     def time_derivative_second(func, params, t, x):
         """
         Second time derivative d²(phi)/dt².
@@ -265,6 +273,7 @@ class Operators:
         return Operators._time_derivative_second_single(func, params, t, x)
 
     @staticmethod
+    @functools.partial(jax.jit, static_argnums=0)
     def symmetric_gradient(func, params, x):
         """
         Symmetric part of the Jacobian (strain tensor from displacement).
