@@ -4,6 +4,8 @@ import jax.numpy as jnp
 class Groups:
     """
     JAX-accelerated suite of dimensionless groups for scaling Physics AI models.
+    Inputs may have leading batch dimensions; all operations broadcast and support
+    both single-point and batched evaluation.
     """
 
     @staticmethod
