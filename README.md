@@ -108,7 +108,7 @@ print("Laplacian at [1, 2]:", lap)
 
 ## Going further
 
-moju is JAX-native, JIT-compiled, and fully differentiable. It is built for physics-informed neural networks (PINNs) and digital twins. Residuals and operators integrate with JAX autodiff so you can train networks to satisfy the equations. We build on the principle that **physics is the ground truth** and provide the "glass box" transparency needed to deploy AI in high-stakes settings (thermal management, flow simulation, and beyond).
+moju is JAX-native, JIT-compiled, and fully differentiable. It supports a broad range of physics AI workflows: surrogate modeling, inverse problems, physics-informed training, digital twins, hybrid solvers, and anywhere else physics and machine learning meet. Residuals and operators integrate with JAX autodiff so you can train or constrain models to satisfy the equations. We build on the principle that **physics is the ground truth** and provide the "glass box" transparency needed to deploy AI in high-stakes settings (thermal management, flow simulation, and beyond).
 
 ## License
 
