@@ -7,6 +7,8 @@ _STEFAN_BOLTZMANN = 5.670374419e-8
 class Models:
     """
     Differentiable physical models for anchoring AI predictions to reality.
+    Inputs may have leading batch dimensions; all operations broadcast and support
+    both single-point and batched evaluation.
     """
 
     @staticmethod
