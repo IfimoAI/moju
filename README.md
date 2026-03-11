@@ -36,6 +36,13 @@ print("Air density (kg/m³):", rho)
 
 The current release centers on **PiRatio**, with four modules:
 
+| Module    | Core Function         | Example Output        |
+| --------- | --------------------- | --------------------- |
+| Operators | Differential Calculus | ∇u, ∇²T, ∇×u          |
+| Models    | Physical Properties   | μ(T), ρ(P,T), k(T)    |
+| Groups    | Dimensional Scaling   | Re, Pr, Pe, Ma        |
+| Laws      | Conservation Logic    | R_momentum, R_energy  |
+
 **Groups.** Scale your problem with the numbers you already use: Reynolds, Prandtl, Nusselt, Mach, and more (Re, Pr, Nu, Ma, …). JIT-compiled and differentiable; single values or batched.
 
 **Models.** Ready-made physical relationships: viscosity (Sutherland, power-law), density (ideal gas, Boussinesq), heat transfer (Stefan-Boltzmann, Fourier), friction (Darcy-Weisbach). All differentiable for use in loss functions and training.
