@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Overview — moju</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <nav class="doc-nav">
+      <a href="../index.html">Home</a>
+      <span class="here">Overview</span>
+      <a href="groups.html">Groups</a>
+      <a href="models.html">Models</a>
+      <a href="laws.html">Laws</a>
+      <a href="operators.html">Operators</a>
+    </nav>
+
+    <h1>Overview</h1>
+    <p>moju is a JAX-native library for physics-informed and physics-supervised SciML. It provides dimensionless scaling (Groups), physical property models (Models), conservation-law residuals (Laws), and differential operators (Operators) so you can train or constrain models with the equations you trust.</p>
+
+    <h2>Installation</h2>
+    <pre><code>pip install moju</code></pre>
+    <p>Optional: <code>pip install moju[units]</code> for Pint-based units; <code>pip install moju[dev]</code> for pytest, black, ruff.</p>
+
+    <h2>Quick start</h2>
+    <pre><code>import moju
+from moju.piratio import Groups, Models
+
+# Reynolds number and air density
+Re = Groups.re(u=1.0, L=0.1, rho=1000.0, mu=1e-3)
+rho = Models.ideal_gas_rho(P=101325.0, R=287.0, T=300.0)</code></pre>
+
+    <h2>API at a glance</h2>
+    <ul>
+      <li><strong><a href="groups.html">Groups</a></strong> — Dimensionless numbers: Re, Pr, Nu, Ma, Gr, Pe, St, Bi, Fo, Sc, Le, Kn, Bo, Ca, Eu, Da, Ec.</li>
+      <li><strong><a href="models.html">Models</a></strong> — Viscosity (Sutherland, VFT, power-law), density (ideal gas, Boussinesq), heat (Stefan-Boltzmann, Fourier), friction (Darcy-Weisbach, Colebrook), and more.</li>
+      <li><strong><a href="laws.html">Laws</a></strong> — Residuals for mass, momentum (Navier-Stokes, Stokes, Euler), heat/diffusion, Darcy/Brinkman, Poisson, wave, Burgers, Schrödinger, etc.</li>
+      <li><strong><a href="operators.html">Operators</a></strong> — gradient, jacobian, divergence, laplacian, curl (2D/3D), time_derivative, time_derivative_second, advection, symmetric_gradient.</li>
+    </ul>
+
+    <p>All functions are JIT-compiled and support single-point or batched inputs (leading batch dimension). Use them inside loss functions and training loops with full JAX autodiff.</p>
+
+    <p class="doc-footer">MIT License. Ifimo Lab / Ifimo Analytics.</p>
+  </div>
+</body>
+</html>

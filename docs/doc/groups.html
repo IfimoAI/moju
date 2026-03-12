@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Groups — moju</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <nav class="doc-nav">
+      <a href="../index.html">Home</a>
+      <a href="overview.html">Overview</a>
+      <span class="here">Groups</span>
+      <a href="models.html">Models</a>
+      <a href="laws.html">Laws</a>
+      <a href="operators.html">Operators</a>
+    </nav>
+
+    <h1>Groups</h1>
+    <p>JAX-accelerated dimensionless groups for scaling Physics AI models. Inputs may have leading batch dimensions; all operations broadcast. All methods are <code>@jax.jit</code>.</p>
+
+    <h2>Fluid flow</h2>
+
+    <div class="api-block">
+      <div class="name">Groups.re(u, L, rho, mu)</div>
+      <div class="sig">Reynolds number: ρ u L / μ</div>
+      <div class="desc">Ratio of inertial to viscous forces.</div>
+      <div class="params">u [m/s], L [m], rho [kg/m³], mu [Pa·s] → Re (dimensionless).</div>
+      <div class="returns">SciML: scales the diffusive term in Navier-Stokes loss.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.ma(u, a)</div>
+      <div class="sig">Mach number: u / a</div>
+      <div class="desc">Flow velocity to speed of sound.</div>
+      <div class="params">u [m/s], a [m/s] → Ma (dimensionless).</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.we(rho, u, L, sigma)</div>
+      <div class="sig">Weber number</div>
+      <div class="desc">Inertia to surface tension. rho [kg/m³], u [m/s], L [m], sigma [N/m].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.eu(dp, rho, u)</div>
+      <div class="sig">Euler number</div>
+      <div class="desc">Pressure to inertial forces. dp [Pa], rho [kg/m³], u [m/s]. Valves, orifices, pumps.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.st(f, u, L)</div>
+      <div class="sig">Strouhal number</div>
+      <div class="desc">Oscillatory to inertial. f [Hz], u [m/s], L [m]. Vortex shedding, unsteady aerodynamics.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.ca(mu, u, sigma)</div>
+      <div class="sig">Capillary number</div>
+      <div class="desc">Viscous to surface tension. Porous media, thin-film coating.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.bo(rho, g, L, sigma)</div>
+      <div class="sig">Bond number</div>
+      <div class="desc">Gravity to surface tension. Bubbles, capillary action, microfluidics.</div>
+    </div>
+
+    <h2>Heat transfer</h2>
+
+    <div class="api-block">
+      <div class="name">Groups.pr(mu, cp, k)</div>
+      <div class="sig">Prandtl number: cp μ / k</div>
+      <div class="desc">Momentum to thermal diffusivity. mu [Pa·s], cp [J/(kg·K)], k [W/(m·K)].</div>
+      <div class="returns">SciML: bridges velocity and temperature in multi-physics PINNs.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.nu(h, L, k)</div>
+      <div class="sig">Nusselt number: h L / k</div>
+      <div class="desc">Convective to conductive heat transfer. h [W/(m²·K)], L [m], k [W/(m·K)].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.gr(beta, dT, L, nu)</div>
+      <div class="sig">Grashof number</div>
+      <div class="desc">Buoyancy to viscous. beta [1/K], dT [K], L [m], nu [m²/s]. Natural convection.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.bi(h, L, k_solid)</div>
+      <div class="sig">Biot number</div>
+      <div class="desc">Internal vs external thermal resistance. Transient conduction, lumped mass.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.fo(alpha, t, L)</div>
+      <div class="sig">Fourier number</div>
+      <div class="desc">Dimensionless time for heat conduction. alpha [m²/s], t [s], L [m].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.ec(u, cp, dT)</div>
+      <div class="sig">Eckert number</div>
+      <div class="desc">Kinetic energy vs enthalpy difference. Viscous dissipation heating.</div>
+    </div>
+
+    <h2>Transport and composition</h2>
+
+    <div class="api-block">
+      <div class="name">Groups.pe(re, pr)</div>
+      <div class="sig">Péclet number: Re × Pr</div>
+      <div class="desc">Advection to diffusion. Heat/mass transfer in flowing fluids.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.sc(nu, D)</div>
+      <div class="sig">Schmidt number</div>
+      <div class="desc">Momentum to mass diffusivity. nu [m²/s], D [m²/s]. Mass transfer, CVD.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.le(sc, pr)</div>
+      <div class="sig">Lewis number: Sc / Pr</div>
+      <div class="desc">Thermal to mass diffusivity. Combined heat and mass transfer, combustion.</div>
+    </div>
+
+    <h2>Porous media and rarefaction</h2>
+
+    <div class="api-block">
+      <div class="name">Groups.da(K, L)</div>
+      <div class="sig">Darcy number</div>
+      <div class="desc">Permeability to characteristic area. K [m²], L [m]. Porous-media-informed networks.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.kn(lambda_mfp, L)</div>
+      <div class="sig">Knudsen number</div>
+      <div class="desc">Mean free path to length scale. Rarefied gas dynamics; when Navier-Stokes breaks down.</div>
+    </div>
+
+    <p class="doc-footer">MIT License. Ifimo Lab / Ifimo Analytics.</p>
+  </div>
+</body>
+</html>

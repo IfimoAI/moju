@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Models — moju</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <nav class="doc-nav">
+      <a href="../index.html">Home</a>
+      <a href="overview.html">Overview</a>
+      <a href="groups.html">Groups</a>
+      <span class="here">Models</span>
+      <a href="laws.html">Laws</a>
+      <a href="operators.html">Operators</a>
+    </nav>
+
+    <h1>Models</h1>
+    <p>Differentiable physical models for anchoring AI predictions. All support single-point or batched inputs and are <code>@jax.jit</code>.</p>
+
+    <h2>Viscosity</h2>
+
+    <div class="api-block">
+      <div class="name">Models.sutherland_mu(T, mu0, T0, S)</div>
+      <div class="sig">Sutherland's law for gases</div>
+      <div class="desc">Dynamic viscosity μ(T). T, T0 [K], mu0 [Pa·s] at T0, S [K] Sutherland constant. Returns [Pa·s].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.vft_mu(T, A, B, T0_v)</div>
+      <div class="sig">Vogel-Fulcher-Tammann (VFT)</div>
+      <div class="desc">Liquid viscosity. T [K], A [Pa·s], B [K], T0_v [K] Vogel temperature. Returns [Pa·s].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.power_law_mu(gamma_dot, K, n)</div>
+      <div class="sig">Power-law (non-Newtonian)</div>
+      <div class="desc">gamma_dot [1/s], K [Pa·s^n], n &lt; 1 shear-thinning, n &gt; 1 shear-thickening. Blood, slurries.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.kinematic_viscosity(mu, rho)</div>
+      <div class="sig">ν = μ / ρ</div>
+      <div class="desc">mu [Pa·s], rho [kg/m³] → [m²/s].</div>
+    </div>
+
+    <h2>Density and equation of state</h2>
+
+    <div class="api-block">
+      <div class="name">Models.ideal_gas_rho(P, R, T)</div>
+      <div class="sig">ρ = P / (R T)</div>
+      <div class="desc">P [Pa], R [J/(kg·K)], T [K] → [kg/m³].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.boussinesq_rho(rho0, beta, dT)</div>
+      <div class="sig">Boussinesq approximation</div>
+      <div class="desc">rho0 [kg/m³], beta [1/K], dT [K]. Density variation for natural convection.</div>
+    </div>
+
+    <h2>Heat transfer</h2>
+
+    <div class="api-block">
+      <div class="name">Models.stefan_boltzmann_flux(epsilon, T)</div>
+      <div class="sig">Radiative flux: ε σ T⁴</div>
+      <div class="desc">epsilon (0–1), T [K] → [W/m²].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.heat_flux_conduction(k, dT, dx)</div>
+      <div class="sig">Fourier's law</div>
+      <div class="desc">k [W/(m·K)], dT [K], dx [m] → heat flux [W/m²].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.thermal_diffusivity(k, rho, cp)</div>
+      <div class="sig">α = k / (ρ cp)</div>
+      <div class="desc">k [W/(m·K)], rho [kg/m³], cp [J/(kg·K)] → [m²/s].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.specific_heat_nasa(T, coeffs)</div>
+      <div class="sig">NASA 7-coefficient Cp polynomial</div>
+      <div class="desc">T [K], coeffs array of 7 (first 5 for Cp/R). Returns [J/(kg·K)].</div>
+    </div>
+
+    <h2>Flow and pressure</h2>
+
+    <div class="api-block">
+      <div class="name">Models.speed_of_sound(gamma, R, T)</div>
+      <div class="sig">a = √(γ R T)</div>
+      <div class="desc">Ideal gas. gamma, R [J/(kg·K)], T [K] → [m/s].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.dynamic_pressure(rho, u)</div>
+      <div class="sig">q = ½ ρ u²</div>
+      <div class="desc">rho [kg/m³], u [m/s] → [Pa].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.hydraulic_diameter(area, perimeter)</div>
+      <div class="sig">D_h = 4 A / P</div>
+      <div class="desc">Non-circular ducts. area [m²], perimeter [m] → [m].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.darcy_weisbach_dp(f, L, D, rho, u)</div>
+      <div class="sig">Δp = f (L/D) (ρ u²/2)</div>
+      <div class="desc">f friction factor, L,D [m], rho [kg/m³], u [m/s] → [Pa].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.colebrook_friction(re, epsilon_d)</div>
+      <div class="sig">Haaland approximation for f</div>
+      <div class="desc">re Reynolds, epsilon_d relative roughness → Darcy friction factor.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.orifice_flow(Cd, A, dp, rho)</div>
+      <div class="sig">Q = C_d A √(2 Δp/ρ)</div>
+      <div class="desc">Cd discharge coeff, A [m²], dp [Pa], rho [kg/m³] → [m³/s].</div>
+    </div>
+
+    <h2>Drag and wall laws</h2>
+
+    <div class="api-block">
+      <div class="name">Models.stokes_drag_force(mu, r, u)</div>
+      <div class="sig">Creeping flow (Re &lt; 1): F = 6π μ r u</div>
+      <div class="desc">mu [Pa·s], r [m], u [m/s] → [N].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.law_of_the_wall(y_plus)</div>
+      <div class="sig">u⁺ = 2.5 ln(y⁺) + 5</div>
+      <div class="desc">Log-law region. y_plus dimensionless wall distance → u_plus.</div>
+    </div>
+
+    <h2>Reaction and surface tension</h2>
+
+    <div class="api-block">
+      <div class="name">Models.arrhenius_rate(A, Ea, T, R=8.314)</div>
+      <div class="sig">k = A exp(-Ea/(R T))</div>
+      <div class="desc">A pre-exponential, Ea [J/mol], T [K], R [J/(mol·K)].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.surface_tension_eotvos(gamma0, T, Tc)</div>
+      <div class="sig">Eötvös rule</div>
+      <div class="desc">gamma0 [N/m], T [K], Tc [K] critical temp. Valid for T &lt; Tc.</div>
+    </div>
+
+    <p class="doc-footer">MIT License. Ifimo Lab / Ifimo Analytics.</p>
+  </div>
+</body>
+</html>

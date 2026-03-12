@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Laws — moju</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <nav class="doc-nav">
+      <a href="../index.html">Home</a>
+      <a href="overview.html">Overview</a>
+      <a href="groups.html">Groups</a>
+      <a href="models.html">Models</a>
+      <span class="here">Laws</span>
+      <a href="operators.html">Operators</a>
+    </nav>
+
+    <h1>Laws</h1>
+    <p>JIT-differentiable conservation and constitutive laws. All return a <strong>residual</strong> R; R = 0 means the law is satisfied. Use in physics-informed loss terms. Supports single-point or batched inputs.</p>
+
+    <h2>Fluid dynamics</h2>
+
+    <div class="api-block">
+      <div class="name">Laws.mass_incompressible(u_grad)</div>
+      <div class="sig">div(u) = 0</div>
+      <div class="desc">Continuity (incompressible). u_grad shape (..., d, d) [1/s]. Returns scalar residual (...,). Ma &lt; 0.3.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.mass_compressible(rho, rho_t, u, rho_grad, u_grad)</div>
+      <div class="sig">∂ρ/∂t + div(ρ u) = 0</div>
+      <div class="desc">Compressible continuity. rho [kg/m³], rho_t [kg/(m³·s)], u (..., d), rho_grad, u_grad. High-speed gas.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.momentum_navier_stokes(u_t, u, u_grad, p_grad, u_laplacian, re)</div>
+      <div class="sig">∂u/∂t + (u·∇)u + ∇p − (1/Re)∇²u = 0</div>
+      <div class="desc">Vector residual (..., d). re from Groups.re(). Newtonian flow.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.stokes_flow(p_grad, u_laplacian, re)</div>
+      <div class="sig">∇p − (1/Re)∇²u = 0</div>
+      <div class="desc">Creeping flow, inertia neglected. Re ≪ 1.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.euler_momentum(u_t, u, u_grad, p_grad)</div>
+      <div class="sig">Inviscid: ∂u/∂t + (u·∇)u + ∇p = 0</div>
+      <div class="desc">Vector residual. High-speed aerodynamics.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.viscous_dissipation(u_grad, mu)</div>
+      <div class="sig">Heat source from friction</div>
+      <div class="desc">u_grad (..., d, d), mu [Pa·s]. Returns [W/m³]. High-speed or viscous heating.</div>
+    </div>
+
+    <h2>Heat and mass transport</h2>
+
+    <div class="api-block">
+      <div class="name">Laws.fourier_conduction(T_t, T_laplacian, alpha)</div>
+      <div class="sig">∂T/∂t = α ∇²T</div>
+      <div class="desc">alpha from Models.thermal_diffusivity(). Pure conduction.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.advection_diffusion(phi_t, u, phi_grad, phi_laplacian, pe)</div>
+      <div class="sig">∂φ/∂t + u·∇φ − (1/Pe)∇²φ = 0</div>
+      <div class="desc">pe from Groups.pe(). Temperature or concentration in flow.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.fick_diffusion(phi_t, phi_laplacian, D)</div>
+      <div class="sig">∂φ/∂t − D ∇²φ = 0</div>
+      <div class="desc">D [m²/s]. Mixing, chemical diffusion.</div>
+    </div>
+
+    <h2>Porous media and solid mechanics</h2>
+
+    <div class="api-block">
+      <div class="name">Laws.darcy_flow(u, p_grad, mu, permeability)</div>
+      <div class="sig">u + (K/μ) ∇p = 0</div>
+      <div class="desc">K [m²]. Groundwater, reservoirs.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.brinkman_extension(u, u_laplacian, p_grad, mu, permeability)</div>
+      <div class="sig">−∇p + μ∇²u − (μ/K)u = 0</div>
+      <div class="desc">Viscous shear + Darcy. High-porosity media.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.hookes_law_residual(stress, strain, stiffness_tensor)</div>
+      <div class="sig">σ − C : ε = 0</div>
+      <div class="desc">Linear elasticity. stress, strain (..., d), C (..., d, d). Structural AI.</div>
+    </div>
+
+    <h2>Potential and electromagnetics</h2>
+
+    <div class="api-block">
+      <div class="name">Laws.laplace_equation(phi_laplacian)</div>
+      <div class="sig">∇²φ = 0</div>
+      <div class="desc">Steady potential flow or heat without sources.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.poisson_equation(phi_laplacian, source, epsilon)</div>
+      <div class="sig">∇²φ + source/ε = 0</div>
+      <div class="desc">Electrostatics, gravity, pressure-Poisson in CFD.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.faraday_law(E_curl, B_t)</div>
+      <div class="sig">∇×E + ∂B/∂t = 0</div>
+      <div class="desc">E_curl, B_t shape (..., 3). Induction.</div>
+    </div>
+
+    <h2>Waves and time-second-order</h2>
+
+    <div class="api-block">
+      <div class="name">Laws.wave_equation(phi_tt, phi_laplacian, c)</div>
+      <div class="sig">∂²φ/∂t² − c² ∇²φ = 0</div>
+      <div class="desc">c [m/s]. Acoustics, seismic, strings.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.helmholtz_equation(phi, phi_laplacian, k_wave)</div>
+      <div class="sig">∇²φ + k² φ = 0</div>
+      <div class="desc">Frequency-domain waves, resonance.</div>
+    </div>
+
+    <h2>Other</h2>
+
+    <div class="api-block">
+      <div class="name">Laws.burgers_equation(u_t, u, u_grad, u_laplacian, nu)</div>
+      <div class="sig">∂u/∂t + (u·∇)u − ν ∇²u = 0</div>
+      <div class="desc">nu [m²/s]. Simplified turbulence, shocks.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.schrodinger_steady(psi_laplacian, V, E, psi, m, h_bar=1.054571817e-34)</div>
+      <div class="sig">−(ℏ²/2m)∇²ψ + (V − E)ψ = 0</div>
+      <div class="desc">V, E [J], m [kg]. Quantum states, electron density.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Laws.laplace_beltrami(phi_laplacian_g)</div>
+      <div class="sig">Laplacian on manifold (metric g)</div>
+      <div class="desc">Diffusion on curved surfaces, geometric deep learning.</div>
+    </div>
+
+    <p class="doc-footer">MIT License. Ifimo Lab / Ifimo Analytics.</p>
+  </div>
+</body>
+</html>
