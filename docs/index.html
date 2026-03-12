@@ -25,8 +25,36 @@
       color: var(--text);
       line-height: 1.6;
       min-height: 100vh;
+      position: relative;
     }
-    .wrap { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem; }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background: var(--bg) url("https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=1920") center/cover no-repeat;
+      opacity: 0.14;
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background: linear-gradient(160deg, var(--bg) 0%, transparent 40%, rgba(59, 130, 246, 0.04) 100%);
+      pointer-events: none;
+    }
+    .grid-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 56px 56px;
+      opacity: 0.8;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem; position: relative; z-index: 0; }
     h1 {
       font-size: clamp(1.75rem, 4vw, 2.25rem);
       font-weight: 600;
@@ -65,21 +93,36 @@
     p { margin: 0 0 1rem; color: var(--muted); }
     .modules {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      grid-template-columns: repeat(2, 1fr);
+      grid-auto-rows: 1fr;
+      align-items: stretch;
       gap: 0.75rem;
       margin: 1rem 0 2rem;
     }
+    @media (min-width: 520px) {
+      .modules { grid-template-columns: repeat(4, 1fr); }
+    }
+    .mod-link {
+      text-decoration: none;
+      color: inherit;
+      display: block;
+      min-height: 5.25rem;
+    }
+    .mod-link:hover .mod { border-color: var(--accent); }
     .mod {
       background: var(--accent-soft);
       border: 1px solid rgba(59, 130, 246, 0.25);
       border-radius: 6px;
       padding: 0.75rem 1rem;
       font-size: 0.9rem;
+      min-height: 5.25rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      height: 100%;
     }
     .mod strong { color: var(--text); }
-    .mod span { color: var(--muted); font-size: 0.85em; }
-    .mod-link { text-decoration: none; color: inherit; }
-    .mod-link:hover .mod { border-color: var(--accent); }
+    .mod span { color: var(--muted); font-size: 0.85em; display: block; margin-top: 0.2rem; }
     footer {
       margin-top: 3rem;
       padding-top: 1.5rem;
@@ -90,6 +133,7 @@
   </style>
 </head>
 <body>
+  <div class="grid-overlay" aria-hidden="true"></div>
   <div class="wrap">
     <h1>moju</h1>
     <p class="tagline">Physics you know, in the AI you train.</p>
@@ -108,10 +152,10 @@
     <h2>What's included</h2>
     <p>PiRatio: four modules — scaling groups, physical models, conservation laws, and differential operators. JAX-native, JIT-compiled, differentiable.</p>
     <div class="modules">
-      <a href="doc/groups.html" class="mod-link"><div class="mod"><strong>Groups</strong><br /><span>Re, Pr, Nu, Ma, …</span></div></a>
-      <a href="doc/models.html" class="mod-link"><div class="mod"><strong>Models</strong><br /><span>μ(T), ρ(P,T), k(T)</span></div></a>
-      <a href="doc/laws.html" class="mod-link"><div class="mod"><strong>Laws</strong><br /><span>mass, momentum, energy</span></div></a>
-      <a href="doc/operators.html" class="mod-link"><div class="mod"><strong>Operators</strong><br /><span>∇, ∇², ∇×, ∂/∂t</span></div></a>
+      <a href="doc/groups.html" class="mod-link"><div class="mod"><strong>Groups</strong><span>Re, Pr, Nu, Ma, …</span></div></a>
+      <a href="doc/models.html" class="mod-link"><div class="mod"><strong>Models</strong><span>μ(T), ρ(P,T), k(T)</span></div></a>
+      <a href="doc/laws.html" class="mod-link"><div class="mod"><strong>Laws</strong><span>mass, momentum, energy</span></div></a>
+      <a href="doc/operators.html" class="mod-link"><div class="mod"><strong>Operators</strong><span>∇, ∇², ∇×, ∂/∂t</span></div></a>
     </div>
 
     <footer>
