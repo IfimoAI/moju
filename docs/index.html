@@ -12,8 +12,8 @@
     :root {
       --bg: #0d0f12;
       --surface: #161a1f;
-      --text: #e6e8ec;
-      --muted: #8b919a;
+      --text: #eceef2;
+      --muted: #9ca3ae;
       --accent: #3b82f6;
       --accent-soft: rgba(59, 130, 246, 0.15);
     }
@@ -27,34 +27,35 @@
       min-height: 100vh;
       position: relative;
     }
-    body::before {
-      content: "";
+    .side-bg-left,
+    .side-bg-right {
       position: fixed;
-      inset: 0;
-      z-index: -1;
-      background: var(--bg) url("https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=1920") center/cover no-repeat;
-      opacity: 0.14;
-    }
-    body::after {
-      content: "";
-      position: fixed;
-      inset: 0;
-      z-index: -1;
-      background: linear-gradient(160deg, var(--bg) 0%, transparent 40%, rgba(59, 130, 246, 0.04) 100%);
-      pointer-events: none;
-    }
-    .grid-overlay {
-      position: fixed;
-      inset: 0;
+      top: 0;
+      bottom: 0;
       z-index: -1;
       pointer-events: none;
-      background-image:
-        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
-      background-size: 56px 56px;
-      opacity: 0.8;
+      width: 20%;
+      max-width: 240px;
+      opacity: 0.09;
     }
-    .wrap { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem; position: relative; z-index: 0; }
+    .side-bg-left {
+      left: 0;
+      background: url("https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=800") left center/cover no-repeat;
+    }
+    .side-bg-right {
+      right: 0;
+      background: url("https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=800") right center/cover no-repeat;
+    }
+    .wrap {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+      position: relative;
+      z-index: 0;
+      background: rgba(22, 26, 31, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 12px;
+    }
     h1 {
       font-size: clamp(1.75rem, 4vw, 2.25rem);
       font-weight: 600;
@@ -133,7 +134,8 @@
   </style>
 </head>
 <body>
-  <div class="grid-overlay" aria-hidden="true"></div>
+  <div class="side-bg-left" aria-hidden="true"></div>
+  <div class="side-bg-right" aria-hidden="true"></div>
   <div class="wrap">
     <h1>moju</h1>
     <p class="tagline">Physics you know, in the AI you train.</p>
