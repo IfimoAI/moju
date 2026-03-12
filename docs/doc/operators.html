@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Operators — moju</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <nav class="doc-nav">
+      <a href="../index.html">Home</a>
+      <a href="overview.html">Overview</a>
+      <a href="groups.html">Groups</a>
+      <a href="models.html">Models</a>
+      <a href="laws.html">Laws</a>
+      <span class="here">Operators</span>
+    </nav>
+
+    <h1>Operators</h1>
+    <p>JIT-compatible differential operators for SciML. Optimized for neural-network functions <code>f(params, x)</code> or <code>f(params, t, x)</code>. Single-point (d,) or batched (N, d) inputs; batch via vmap internally.</p>
+
+    <h2>Spatial derivatives</h2>
+
+    <div class="api-block">
+      <div class="name">Operators.gradient(func, params, x)</div>
+      <div class="sig">∇f w.r.t. x</div>
+      <div class="desc">func(params, x) → scalar. x shape (d,) or (N, d). Returns gradient vector same shape as x. Pressure/temperature gradients.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Operators.jacobian(func, params, x)</div>
+      <div class="sig">Jacobian of vector field w.r.t. x</div>
+      <div class="desc">func(params, x) → vector. Returns (out_dim, in_dim) or (N, out_dim, in_dim). Velocity gradient du/dx.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Operators.divergence(func, params, x)</div>
+      <div class="sig">div(f) = trace(Jacobian)</div>
+      <div class="desc">func(params, x) → vector. Returns scalar () or (N,). Mass continuity div u.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Operators.laplacian(func, params, x)</div>
+      <div class="sig">∇²f via JVP (no full Hessian)</div>
+      <div class="desc">func(params, x) → scalar or vector. Returns Laplacian per point. Viscous terms, heat diffusion.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Operators.curl_2d(func, params, x)</div>
+      <div class="sig">Scalar curl in 2D: ∂v/∂x − ∂u/∂y</div>
+      <div class="desc">func(params, x) → [u, v]. x (2,) or (N, 2). Returns vorticity () or (N,).</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Operators.curl_3d(func, params, x)</div>
+      <div class="sig">∇×f in 3D</div>
+      <div class="desc">func(params, x) → [u, v, w]. x (3,) or (N, 3). Returns (3,) or (N, 3). Vorticity; Faraday curl E.</div>
+    </div>
+
+    <h2>Time derivatives</h2>
+
+    <div class="api-block">
+      <div class="name">Operators.time_derivative(func, params, t, x)</div>
+      <div class="sig">∂φ/∂t</div>
+      <div class="desc">func(params, t, x) → scalar or vector. t scalar or (N,) when batched. Unsteady PDEs.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Operators.time_derivative_second(func, params, t, x)</div>
+      <div class="sig">∂²φ/∂t²</div>
+      <div class="desc">Wave equation, acoustics, second-order-in-time dynamics.</div>
+    </div>
+
+    <h2>Derived</h2>
+
+    <div class="api-block">
+      <div class="name">Operators.advection(u, u_grad)</div>
+      <div class="sig">(u·∇)u</div>
+      <div class="desc">u (..., d), u_grad from Operators.jacobian. Momentum equations.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Operators.symmetric_gradient(func, params, x)</div>
+      <div class="sig">Symmetric part of Jacobian (strain tensor)</div>
+      <div class="desc">func(params, x) → displacement. Returns (d, d) or (N, d, d). Hooke, strain from displacement.</div>
+    </div>
+
+    <p class="doc-footer">MIT License. Ifimo Lab / Ifimo Analytics.</p>
+  </div>
+</body>
+</html>

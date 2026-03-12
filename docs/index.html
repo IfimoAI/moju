@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>moju — Physics-AI supervision for engineering-grade simulations</title>
+  <meta name="description" content="Dimensionless scaling, constitutive models, and equation residuals in one JAX library. Physics you know, in the AI you train." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0d0f12;
+      --surface: #161a1f;
+      --text: #e6e8ec;
+      --muted: #8b919a;
+      --accent: #3b82f6;
+      --accent-soft: rgba(59, 130, 246, 0.15);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "DM Sans", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem; }
+    h1 {
+      font-size: clamp(1.75rem, 4vw, 2.25rem);
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.02em;
+    }
+    .tagline {
+      font-size: 1.1rem;
+      color: var(--muted);
+      margin: 0 0 2rem;
+      font-style: italic;
+    }
+    .install {
+      background: var(--surface);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin: 0 0 2rem;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.95rem;
+    }
+    .install code { color: var(--accent); }
+    .links { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
+    .links a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .links a:hover { text-decoration: underline; }
+    h2 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin: 2rem 0 0.75rem;
+      color: var(--text);
+    }
+    p { margin: 0 0 1rem; color: var(--muted); }
+    .modules {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 0.75rem;
+      margin: 1rem 0 2rem;
+    }
+    .mod {
+      background: var(--accent-soft);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      font-size: 0.9rem;
+    }
+    .mod strong { color: var(--text); }
+    .mod span { color: var(--muted); font-size: 0.85em; }
+    .mod-link { text-decoration: none; color: inherit; }
+    .mod-link:hover .mod { border-color: var(--accent); }
+    footer {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>moju</h1>
+    <p class="tagline">Physics you know, in the AI you train.</p>
+    <p>Dimensionless scaling, constitutive models, and equation residuals in one JAX library. For flow, heat transfer, and physics-informed ML.</p>
+
+    <div class="install">
+      <code>pip install moju</code>
+    </div>
+
+    <div class="links">
+      <a href="doc/overview.html">Documentation</a>
+      <a href="https://github.com/IfimoAI/moju">GitHub</a>
+      <a href="https://pypi.org/project/moju/">PyPI</a>
+    </div>
+
+    <h2>What's included</h2>
+    <p>PiRatio: four modules — scaling groups, physical models, conservation laws, and differential operators. JAX-native, JIT-compiled, differentiable.</p>
+    <div class="modules">
+      <a href="doc/groups.html" class="mod-link"><div class="mod"><strong>Groups</strong><br /><span>Re, Pr, Nu, Ma, …</span></div></a>
+      <a href="doc/models.html" class="mod-link"><div class="mod"><strong>Models</strong><br /><span>μ(T), ρ(P,T), k(T)</span></div></a>
+      <a href="doc/laws.html" class="mod-link"><div class="mod"><strong>Laws</strong><br /><span>mass, momentum, energy</span></div></a>
+      <a href="doc/operators.html" class="mod-link"><div class="mod"><strong>Operators</strong><br /><span>∇, ∇², ∇×, ∂/∂t</span></div></a>
+    </div>
+
+    <footer>
+      MIT License. Developed by Ifimo Lab, a division of Ifimo Analytics.
+    </footer>
+  </div>
+</body>
+</html>
