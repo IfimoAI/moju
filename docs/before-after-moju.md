@@ -1,8 +1,4 @@
-# Before / After Moju — Corrected code snippets
-
-Reference for the "Hardwiring reality into every iteration" graphic. All syntax errors and typos fixed with minimal format changes; APIs match the moju codebase.
-
----
+# Before / After Moju — Example
 
 ## BEFORE MOJU: Pure JAX (PINN)
 
@@ -26,6 +22,7 @@ def momentum_residual(u, me):
     return residual
 ```
 
+Pain Points:
 - Manual autodiff complexity.
 - Hard-coded properties (μ, ρ).
 - Non-standard residual handling.
@@ -50,5 +47,3 @@ residual = Laws.momentum_navier_stokes(u_t, u, u_grad, p_grad, u_laplacian, re)
 - **Operators.laplacian**: signature `(func, params, x)`; here `u_net` is the network callable.
 - **Models.sutherland_mu**: signature `(T, mu0, T0, S)`.
 - **Laws.momentum_navier_stokes**: signature `(u_t, u, u_grad, p_grad, u_laplacian, re)`.
-
-Use this file when redrawing the graphic or copying snippets.
