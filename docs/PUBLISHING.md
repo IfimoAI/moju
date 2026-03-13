@@ -12,7 +12,7 @@ pip install build
 python -m build
 ```
 
-This produces `dist/moju-0.1.0.tar.gz` and `dist/moju-0.1.0-py3-none-any.whl`.
+This produces `dist/moju-<version>.tar.gz` and `dist/moju-<version>-py3-none-any.whl` (e.g. `moju-0.1.2`).
 
 ## Upload
 
@@ -37,4 +37,5 @@ After a successful upload, anyone can run `pip install moju`.
 ## Version bump for future releases
 
 1. Update `version` in [pyproject.toml](../pyproject.toml).
-2. Re-run `python -m build` and `twine upload dist/*`.
+2. Set the same value for `__version__` in [moju/__init__.py](../moju/__init__.py) so the package and runtime version stay in sync.
+3. Re-run `python -m build` and upload (e.g. `twine upload dist/moju-<version>*` or use the GitHub Actions workflow).
