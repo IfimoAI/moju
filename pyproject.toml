@@ -33,6 +33,7 @@ dependencies = [
 [project.optional-dependencies]
 units = ["pint>=0.20"]
 dev = ["pytest", "black", "ruff"]
+torch = ["torch>=2.0.0", "jax2torch>=0.0.7"]
 
 [tool.setuptools.packages.find]
 where = ["."]
