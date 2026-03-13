@@ -119,4 +119,4 @@ moju is JAX-native, JIT-compiled, and fully differentiable. It supports a broad 
 
 ## License
 
-MIT License. Open for the community. Developed by Abiodun Olaoye, PhD.
+MIT License. Open for the community. Developed by Ifimo Lab, a division of Ifimo Analytics.
