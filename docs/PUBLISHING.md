@@ -39,3 +39,5 @@ After a successful upload, anyone can run `pip install moju`.
 1. Update `version` in [pyproject.toml](../pyproject.toml).
 2. Set the same value for `__version__` in [moju/__init__.py](../moju/__init__.py) so the package and runtime version stay in sync.
 3. Re-run `python -m build` and upload (e.g. `twine upload dist/moju-<version>*` or use the GitHub Actions workflow).
+
+The GitHub Actions workflow (on release or manual run) skips the PyPI upload if the built version is already published, so retroactive or duplicate releases do not fail.

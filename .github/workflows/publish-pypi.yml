@@ -28,8 +28,21 @@ jobs:
       - name: Build package
         run: python -m build
 
+      - name: Check if version already on PyPI
+        id: pypi_check
+        run: |
+          VERSION=$(python -c "import os; f=[x for x in os.listdir('dist') if x.endswith('.whl')][0]; print(f.split('-')[1])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          EXISTS=$(curl -sS https://pypi.org/pypi/moju/json | python -c "import sys,json; d=json.load(sys.stdin); v=sys.argv[1]; print('true' if v in d.get('releases',{}) else 'false')" "$VERSION")
+          echo "already_published=$EXISTS" >> $GITHUB_OUTPUT
+
       - name: Publish to PyPI
+        if: steps.pypi_check.outputs.already_published != 'true'
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: twine upload dist/*
+
+      - name: Skip upload (version already on PyPI)
+        if: steps.pypi_check.outputs.already_published == 'true'
+        run: echo "Version ${{ steps.pypi_check.outputs.version }} already on PyPI; skipping upload"
