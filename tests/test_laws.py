@@ -45,12 +45,14 @@ class TestLawsLaplaceAndWave:
         assert jnp.allclose(residual, 0.0, rtol=rtol, atol=atol)
 
     def test_wave_equation_residual_zero(self, rtol, atol):
-        """Wave equation: phi_tt - c^2 Laplacian(phi) = 0. Zero when both terms cancel."""
+        """Wave equation: phi_tt - c^2 Laplacian(phi) = 0 with c = omega*L/st_wave. Zero when both terms cancel."""
         phi_tt = 1.0
         phi_laplacian = 1.0
-        c = 1.0
-        residual = Laws.wave_equation(phi_tt, phi_laplacian, c)
-        expected = phi_tt - (c ** 2) * phi_laplacian
+        omega = 1.0
+        L = 1.0
+        st_wave = 1.0  # c = omega*L/st_wave = 1.0
+        residual = Laws.wave_equation(phi_tt, phi_laplacian, st_wave, omega, L)
+        expected = phi_tt - 1.0 * phi_laplacian
         assert jnp.allclose(residual, expected, rtol=rtol, atol=atol)
         assert jnp.allclose(residual, 0.0, rtol=rtol, atol=atol)
 

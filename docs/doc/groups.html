@@ -115,6 +115,29 @@
       <div class="sig">Lewis number: Sc / Pr</div>
       <div class="desc">Thermal to mass diffusivity. Combined heat and mass transfer, combustion.</div>
     </div>
+    <div class="api-block">
+      <div class="name">Groups.fo_mass(D, t, L)</div>
+      <div class="sig">Fourier number for mass: D t / L²</div>
+      <div class="desc">Dimensionless time for mass diffusion. D [m²/s], t [s], L [m]. Fick diffusion, species PINNs.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.pe_mass(re, sc)</div>
+      <div class="sig">Péclet for species: Re × Sc</div>
+      <div class="desc">Advection to mass diffusion. Use with Laws.advection_diffusion for mass transfer.</div>
+    </div>
+
+    <h2>Waves</h2>
+
+    <div class="api-block">
+      <div class="name">Groups.wavenumber(k, L)</div>
+      <div class="sig">Dimensionless wavenumber: k L</div>
+      <div class="desc">k [1/m], L [m]. Helmholtz equation, frequency-domain wave scaling.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Groups.st_wave(omega, L, c)</div>
+      <div class="sig">Wave Strouhal: ω L / c</div>
+      <div class="desc">omega [rad/s], L [m], c [m/s]. Wave equation, acoustics, resonance.</div>
+    </div>
 
     <h2>Porous media and rarefaction</h2>
 
