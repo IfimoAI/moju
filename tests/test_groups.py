@@ -67,3 +67,39 @@ class TestGroupsBatch:
         a = jnp.array([343.0, 343.0, 343.0])
         Ma = Groups.ma(u=u, a=a)
         assert Ma.shape == (3,)
+
+
+class TestGroupsNew:
+    """New dimensionless groups: Fo_mass, wavenumber, pe_mass, st_wave."""
+
+    def test_fo_mass_formula(self, rtol, atol):
+        """Fo_mass = D * t / L^2."""
+        D = 1e-9
+        t = 1.0
+        L = 0.01
+        Fo_mass = Groups.fo_mass(D=D, t=t, L=L)
+        expected = (D * t) / (L**2)
+        assert jnp.allclose(Fo_mass, expected, rtol=rtol, atol=atol)
+
+    def test_wavenumber_formula(self, rtol, atol):
+        """wavenumber = k * L."""
+        k = 2.0
+        L = 0.5
+        kL = Groups.wavenumber(k=k, L=L)
+        assert jnp.allclose(kL, 1.0, rtol=rtol, atol=atol)
+
+    def test_pe_mass_formula(self, rtol, atol):
+        """pe_mass = Re * Sc."""
+        re = 100.0
+        sc = 0.7
+        Pe_mass = Groups.pe_mass(re=re, sc=sc)
+        assert jnp.allclose(Pe_mass, 70.0, rtol=rtol, atol=atol)
+
+    def test_st_wave_formula(self, rtol, atol):
+        """st_wave = omega * L / c."""
+        omega = 2.0
+        L = 1.0
+        c = 343.0
+        St_wave = Groups.st_wave(omega=omega, L=L, c=c)
+        expected = (omega * L) / c
+        assert jnp.allclose(St_wave, expected, rtol=rtol, atol=atol)

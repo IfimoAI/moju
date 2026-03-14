@@ -79,14 +79,15 @@ class Laws:
 
     @staticmethod
     @jax.jit
-    def euler_momentum(u_t, u, u_grad, p_grad):
+    def euler_momentum(u_t, u, u_grad, p_grad, eu):
         """
-        Euler equations (inviscid momentum residual).
+        Euler equations (inviscid momentum residual) using Euler number.
 
         :param u_t: Time derivative of velocity [m/s^2]. Shape (..., d).
         :param u: Velocity vector [m/s]. Shape (..., d).
         :param u_grad: Velocity gradient tensor [1/s]. Shape (..., d, d).
-        :param p_grad: Pressure gradient vector [Pa/m]. Shape (..., d).
+        :param p_grad: Dimensionless pressure gradient (scale p by rho*U^2 via Groups.eu()). Shape (..., d).
+        :param eu: Euler number from Groups.eu(dp, rho, u).
         :return: Vector residual. Shape (..., d).
 
         Use case: High-speed aerodynamics where viscosity is ignored.
@@ -97,17 +98,22 @@ class Laws:
 
     @staticmethod
     @jax.jit
-    def fourier_conduction(T_t, T_laplacian, alpha):
+    def fourier_conduction(T_t, T_laplacian, fo, t, L):
         """
-        Heat diffusion (Fourier's law): dT/dt = alpha laplacian(T).
+        Heat diffusion (Fourier's law) using Fourier number: Fo·T_t - T_laplacian (scaled) = 0.
+
+        Uses Groups.fo(alpha, t, L); alpha = fo*L^2/t so residual is T_t - alpha*laplacian(T).
 
         :param T_t: Time derivative of temperature [K/s].
         :param T_laplacian: Laplacian of temperature [K/m^2].
-        :param alpha: Thermal diffusivity from Models.thermal_diffusivity() [m^2/s].
+        :param fo: Fourier number from Groups.fo(alpha, t, L).
+        :param t: Elapsed time [s].
+        :param L: Characteristic length [m].
         :return: Scalar residual.
 
         Use case: Pure heat conduction in solids or static fluids.
         """
+        alpha = fo * (L**2) / t
         return T_t - alpha * T_laplacian
 
     @staticmethod
@@ -129,18 +135,24 @@ class Laws:
 
     @staticmethod
     @jax.jit
-    def viscous_dissipation(u_grad, mu):
+    def viscous_dissipation(u_grad, re, ec, U, L):
         """
-        Viscous dissipation source (heat generation from friction).
+        Viscous dissipation source (dimensionless) using Re and Ec.
+
+        Dimensionless source = (Ec/Re) * 2 * sum(strain_star^2); strain_star = strain_rate * L/U.
 
         :param u_grad: Velocity gradient tensor [1/s]. Shape (..., d, d).
-        :param mu: Dynamic viscosity [Pa*s].
-        :return: Scalar heat source term [W/m^3].
+        :param re: Reynolds number from Groups.re().
+        :param ec: Eckert number from Groups.ec().
+        :param U: Characteristic velocity [m/s].
+        :param L: Characteristic length [m].
+        :return: Dimensionless heat source (scale by rho*U^3/L for dimensional).
 
         Use case: High-speed or very viscous flows where flow friction heats the fluid.
         """
         strain_rate = 0.5 * (u_grad + jnp.swapaxes(u_grad, -2, -1))
-        return 2.0 * mu * jnp.sum(strain_rate**2, axis=(-2, -1))
+        strain_star = strain_rate * (L / U)
+        return (ec / re) * 2.0 * jnp.sum(strain_star**2, axis=(-2, -1))
 
     # --- SOLID MECHANICS & POROUS MEDIA ---
 
@@ -161,37 +173,40 @@ class Laws:
 
     @staticmethod
     @jax.jit
-    def darcy_flow(u, p_grad, mu, permeability):
+    def darcy_flow(u, p_grad, da, L, mu):
         """
-        Darcy's law for porous media: u + (K/mu) grad(p) = 0.
+        Darcy's law for porous media using Darcy number: u + (Da*L^2/mu) grad(p) = 0.
 
         :param u: Superficial velocity vector [m/s]. Shape (..., d).
         :param p_grad: Pressure gradient [Pa/m]. Shape (..., d).
+        :param da: Darcy number from Groups.da(K, L).
+        :param L: Characteristic length [m].
         :param mu: Fluid viscosity [Pa*s].
-        :param permeability: Material permeability K [m^2].
         :return: Vector residual. Shape (..., d).
 
         Use case: Ground water flow or oil reservoir modeling.
         """
-        return u + (permeability / mu) * p_grad
+        return u + (da * (L**2) / mu) * p_grad
 
     @staticmethod
     @jax.jit
-    def brinkman_extension(u, u_laplacian, p_grad, mu, permeability):
+    def brinkman_extension(u, u_laplacian, p_grad, re, da, mu, L):
         """
-        Brinkman equations: viscous shear and Darcy resistance.
+        Brinkman equations using Re and Da: -p_grad + (mu/Re) laplacian(u) - (mu/(Da*L^2)) u = 0.
 
         :param u: Velocity vector [m/s]. Shape (..., d).
-        :param u_laplacian: Laplacian of velocity (viscous shear). Shape (..., d).
+        :param u_laplacian: Laplacian of velocity. Shape (..., d).
         :param p_grad: Pressure gradient [Pa/m]. Shape (..., d).
+        :param re: Reynolds number from Groups.re().
+        :param da: Darcy number from Groups.da(K, L).
         :param mu: Dynamic viscosity [Pa*s].
-        :param permeability: Material permeability [m^2].
+        :param L: Characteristic length [m].
         :return: Vector residual. Shape (..., d).
 
         Use case: Flow in high-porosity media where viscous shear near walls matters.
         """
-        shear_term = mu * u_laplacian
-        darcy_term = (mu / permeability) * u
+        shear_term = (mu / re) * u_laplacian
+        darcy_term = (mu / (da * L**2)) * u
         return -p_grad + shear_term - darcy_term
 
     # --- ELECTROMAGNETICS ---
@@ -229,66 +244,79 @@ class Laws:
 
     @staticmethod
     @jax.jit
-    def wave_equation(phi_tt, phi_laplacian, c):
+    def wave_equation(phi_tt, phi_laplacian, st_wave, omega, L):
         """
-        Classical wave equation: d^2(phi)/dt^2 - c^2 laplacian(phi) = 0.
+        Classical wave equation using wave Strouhal: phi_tt - c^2 laplacian(phi) = 0 with c = omega*L/st_wave.
 
         :param phi_tt: Second time derivative of field.
         :param phi_laplacian: Spatial Laplacian of field.
-        :param c: Wave speed [m/s].
+        :param st_wave: Wave Strouhal from Groups.st_wave(omega, L, c).
+        :param omega: Angular frequency [rad/s].
+        :param L: Characteristic length [m].
         :return: Scalar residual.
 
         Use case: Acoustics, seismic waves, or string vibrations.
         """
+        c = (omega * L) / st_wave
         return phi_tt - (c**2) * phi_laplacian
 
     @staticmethod
     @jax.jit
-    def helmholtz_equation(phi, phi_laplacian, k_wave):
+    def helmholtz_equation(phi, phi_laplacian, kL, L):
         """
-        Helmholtz equation: laplacian(phi) + k^2 phi = 0.
+        Helmholtz equation using dimensionless wavenumber: laplacian(phi) + (kL/L)^2 phi = 0.
 
         :param phi: Field amplitude.
         :param phi_laplacian: Laplacian of field.
-        :param k_wave: Wavenumber.
+        :param kL: Dimensionless wavenumber from Groups.wavenumber(k, L).
+        :param L: Characteristic length [m].
         :return: Scalar residual.
 
         Use case: Steady-state frequency-domain wave problems (e.g., resonance).
         """
-        return phi_laplacian + (k_wave**2) * phi
+        k_sq = (kL / L) ** 2
+        return phi_laplacian + k_sq * phi
 
     # --- CHEMICAL & KINETIC ---
 
     @staticmethod
     @jax.jit
-    def fick_diffusion(phi_t, phi_laplacian, D):
+    def fick_diffusion(phi_t, phi_laplacian, fo_mass, t, L):
         """
-        Fick's second law of diffusion: d(phi)/dt - D laplacian(phi) = 0.
+        Fick's second law of diffusion using Fourier number for mass: d(phi)/dt - D laplacian(phi) = 0.
+
+        Uses Groups.fo_mass(D, t, L); D = fo_mass*L^2/t so residual is phi_t - D*laplacian(phi).
 
         :param phi_t: Rate of change of concentration.
         :param phi_laplacian: Laplacian of concentration.
-        :param D: Diffusion coefficient [m^2/s].
+        :param fo_mass: Fourier number for mass from Groups.fo_mass(D, t, L).
+        :param t: Elapsed time [s].
+        :param L: Characteristic length [m].
         :return: Scalar residual.
 
         Use case: Mixing of chemicals or heat diffusion in a static medium.
         """
+        D = fo_mass * (L**2) / t
         return phi_t - D * phi_laplacian
 
     @staticmethod
     @jax.jit
-    def burgers_equation(u_t, u, u_grad, u_laplacian, nu):
+    def burgers_equation(u_t, u, u_grad, u_laplacian, re, U, L):
         """
-        Viscous Burgers equation: u_t + (u·grad)u - nu laplacian(u) = 0.
+        Viscous Burgers equation using Reynolds number: u_t + (u·grad)u - nu laplacian(u) = 0 with nu = U*L/Re.
 
         :param u_t: Time derivative of velocity [m/s^2]. Shape (..., d).
         :param u: Velocity vector [m/s]. Shape (..., d).
         :param u_grad: Velocity gradient tensor [1/s]. Shape (..., d, d).
         :param u_laplacian: Laplacian of velocity. Shape (..., d).
-        :param nu: Kinematic viscosity (diffusion coefficient) [m^2/s].
+        :param re: Reynolds number from Groups.re().
+        :param U: Characteristic velocity [m/s].
+        :param L: Characteristic length [m].
         :return: Vector residual. Shape (..., d).
 
         Use case: Simplified turbulence modeling or shockwave propagation.
         """
+        nu = (U * L) / re
         return u_t + jnp.einsum("...ij,...j->...i", u_grad, u) - nu * u_laplacian
 
     @staticmethod
