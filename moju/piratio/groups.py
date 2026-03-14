@@ -284,3 +284,65 @@ class Groups:
         SciML: Controls the strength of the viscous dissipation term in the energy equation.
         """
         return u**2 / (cp * dT)
+
+    @staticmethod
+    @jax.jit
+    def fo_mass(D, t, L):
+        """
+        Fourier Number for mass diffusion (Fo_mass): Dimensionless time D·t/L^2.
+
+        :param D: Mass diffusivity [m^2/s].
+        :param t: Elapsed time [s].
+        :param L: Characteristic length [m].
+        :return: Dimensionless Fourier number for mass.
+
+        Use case: Fick diffusion; unsteady mass transfer.
+        SciML: Normalized time-scale for species/concentration PINNs.
+        """
+        return (D * t) / L**2
+
+    @staticmethod
+    @jax.jit
+    def wavenumber(k, L):
+        """
+        Dimensionless wavenumber (kL): k·L for Helmholtz/wave problems.
+
+        :param k: Wavenumber [1/m].
+        :param L: Characteristic length [m].
+        :return: Dimensionless wavenumber.
+
+        Use case: Helmholtz equation; frequency-domain wave scaling.
+        SciML: Scales the k^2·phi term in Helmholtz residuals.
+        """
+        return k * L
+
+    @staticmethod
+    @jax.jit
+    def pe_mass(re, sc):
+        """
+        Peclet Number for species (Pe_mass): Re·Sc = advection / mass diffusion.
+
+        :param re: Reynolds number (dimensionless).
+        :param sc: Schmidt number (dimensionless).
+        :return: Dimensionless Peclet number for mass transfer.
+
+        Use case: Species advection-diffusion; use with Laws.advection_diffusion for mass.
+        SciML: Symmetry with Groups.pe(re, pr) for heat.
+        """
+        return re * sc
+
+    @staticmethod
+    @jax.jit
+    def st_wave(omega, L, c):
+        """
+        Wave Strouhal (St_wave): omega·L/c for frequency-domain wave scaling.
+
+        :param omega: Angular frequency [rad/s].
+        :param L: Characteristic length [m].
+        :param c: Wave speed [m/s].
+        :return: Dimensionless wave Strouhal number.
+
+        Use case: Wave equation; acoustics; resonance.
+        SciML: Normalized frequency in wave-equation residuals.
+        """
+        return (omega * L) / c

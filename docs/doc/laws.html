@@ -46,22 +46,22 @@
       <div class="desc">Creeping flow, inertia neglected. Re ≪ 1.</div>
     </div>
     <div class="api-block">
-      <div class="name">Laws.euler_momentum(u_t, u, u_grad, p_grad)</div>
+      <div class="name">Laws.euler_momentum(u_t, u, u_grad, p_grad, eu)</div>
       <div class="sig">Inviscid: ∂u/∂t + (u·∇)u + ∇p = 0</div>
-      <div class="desc">Vector residual. High-speed aerodynamics.</div>
+      <div class="desc">Vector residual. eu from Groups.eu(). p_grad dimensionless (scale by ρU²). High-speed aerodynamics.</div>
     </div>
     <div class="api-block">
-      <div class="name">Laws.viscous_dissipation(u_grad, mu)</div>
-      <div class="sig">Heat source from friction</div>
-      <div class="desc">u_grad (..., d, d), mu [Pa·s]. Returns [W/m³]. High-speed or viscous heating.</div>
+      <div class="name">Laws.viscous_dissipation(u_grad, re, ec, U, L)</div>
+      <div class="sig">Dimensionless heat source (Ec/Re)·2|S*|²</div>
+      <div class="desc">re, ec from Groups. U, L scale. High-speed or viscous heating.</div>
     </div>
 
     <h2>Heat and mass transport</h2>
 
     <div class="api-block">
-      <div class="name">Laws.fourier_conduction(T_t, T_laplacian, alpha)</div>
-      <div class="sig">∂T/∂t = α ∇²T</div>
-      <div class="desc">alpha from Models.thermal_diffusivity(). Pure conduction.</div>
+      <div class="name">Laws.fourier_conduction(T_t, T_laplacian, fo, t, L)</div>
+      <div class="sig">∂T/∂t = α ∇²T, α = fo·L²/t</div>
+      <div class="desc">fo from Groups.fo(alpha, t, L). Pure conduction.</div>
     </div>
     <div class="api-block">
       <div class="name">Laws.advection_diffusion(phi_t, u, phi_grad, phi_laplacian, pe)</div>
@@ -69,22 +69,22 @@
       <div class="desc">pe from Groups.pe(). Temperature or concentration in flow.</div>
     </div>
     <div class="api-block">
-      <div class="name">Laws.fick_diffusion(phi_t, phi_laplacian, D)</div>
-      <div class="sig">∂φ/∂t − D ∇²φ = 0</div>
-      <div class="desc">D [m²/s]. Mixing, chemical diffusion.</div>
+      <div class="name">Laws.fick_diffusion(phi_t, phi_laplacian, fo_mass, t, L)</div>
+      <div class="sig">∂φ/∂t − D ∇²φ = 0, D = fo_mass·L²/t</div>
+      <div class="desc">fo_mass from Groups.fo_mass(D, t, L). Mixing, chemical diffusion.</div>
     </div>
 
     <h2>Porous media and solid mechanics</h2>
 
     <div class="api-block">
-      <div class="name">Laws.darcy_flow(u, p_grad, mu, permeability)</div>
-      <div class="sig">u + (K/μ) ∇p = 0</div>
-      <div class="desc">K [m²]. Groundwater, reservoirs.</div>
+      <div class="name">Laws.darcy_flow(u, p_grad, da, L, mu)</div>
+      <div class="sig">u + (Da·L²/μ) ∇p = 0</div>
+      <div class="desc">da from Groups.da(K, L). Groundwater, reservoirs.</div>
     </div>
     <div class="api-block">
-      <div class="name">Laws.brinkman_extension(u, u_laplacian, p_grad, mu, permeability)</div>
-      <div class="sig">−∇p + μ∇²u − (μ/K)u = 0</div>
-      <div class="desc">Viscous shear + Darcy. High-porosity media.</div>
+      <div class="name">Laws.brinkman_extension(u, u_laplacian, p_grad, re, da, mu, L)</div>
+      <div class="sig">−∇p + (μ/Re)∇²u − (μ/(Da·L²))u = 0</div>
+      <div class="desc">re, da from Groups. Viscous shear + Darcy. High-porosity media.</div>
     </div>
     <div class="api-block">
       <div class="name">Laws.hookes_law_residual(stress, strain, stiffness_tensor)</div>
@@ -113,22 +113,22 @@
     <h2>Waves and time-second-order</h2>
 
     <div class="api-block">
-      <div class="name">Laws.wave_equation(phi_tt, phi_laplacian, c)</div>
-      <div class="sig">∂²φ/∂t² − c² ∇²φ = 0</div>
-      <div class="desc">c [m/s]. Acoustics, seismic, strings.</div>
+      <div class="name">Laws.wave_equation(phi_tt, phi_laplacian, st_wave, omega, L)</div>
+      <div class="sig">∂²φ/∂t² − c² ∇²φ = 0, c = ωL/st_wave</div>
+      <div class="desc">st_wave from Groups.st_wave(omega, L, c). Acoustics, seismic, strings.</div>
     </div>
     <div class="api-block">
-      <div class="name">Laws.helmholtz_equation(phi, phi_laplacian, k_wave)</div>
-      <div class="sig">∇²φ + k² φ = 0</div>
-      <div class="desc">Frequency-domain waves, resonance.</div>
+      <div class="name">Laws.helmholtz_equation(phi, phi_laplacian, kL, L)</div>
+      <div class="sig">∇²φ + (kL/L)² φ = 0</div>
+      <div class="desc">kL from Groups.wavenumber(k, L). Frequency-domain waves, resonance.</div>
     </div>
 
     <h2>Other</h2>
 
     <div class="api-block">
-      <div class="name">Laws.burgers_equation(u_t, u, u_grad, u_laplacian, nu)</div>
-      <div class="sig">∂u/∂t + (u·∇)u − ν ∇²u = 0</div>
-      <div class="desc">nu [m²/s]. Simplified turbulence, shocks.</div>
+      <div class="name">Laws.burgers_equation(u_t, u, u_grad, u_laplacian, re, U, L)</div>
+      <div class="sig">∂u/∂t + (u·∇)u − ν ∇²u = 0, ν = U·L/Re</div>
+      <div class="desc">re from Groups.re(). U, L scale. Simplified turbulence, shocks.</div>
     </div>
     <div class="api-block">
       <div class="name">Laws.schrodinger_steady(psi_laplacian, V, E, psi, m, h_bar=1.054571817e-34)</div>
