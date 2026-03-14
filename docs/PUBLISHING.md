@@ -12,7 +12,7 @@ pip install build
 python -m build
 ```
 
-This produces `dist/moju-<version>.tar.gz` and `dist/moju-<version>-py3-none-any.whl` (e.g. `moju-0.1.2`).
+This produces `dist/moju-<version>.tar.gz` and `dist/moju-<version>-py3-none-any.whl` (e.g. `moju-0.1.3`).
 
 ## Upload
 
@@ -41,3 +41,11 @@ After a successful upload, anyone can run `pip install moju`.
 3. Re-run `python -m build` and upload (e.g. `twine upload dist/moju-<version>*` or use the GitHub Actions workflow).
 
 The GitHub Actions workflow (on release or manual run) skips the PyPI upload if the built version is already published, so retroactive or duplicate releases do not fail.
+
+## GitHub release and tags
+
+After merging the release branch into `main` and pushing:
+
+1. Create an annotated tag for the version: `git tag -a v0.1.3 -m "Release 0.1.3"` (on the commit that has the version bump).
+2. Push the tag: `git push origin v0.1.3`.
+3. Create a GitHub Release from the tag (Releases → Draft a new release → choose tag `v0.1.3`, set as latest, publish). This triggers the Publish to PyPI workflow if the version is not already on PyPI.
