@@ -40,7 +40,7 @@ The current release centers on **PiRatio**, with four modules:
 | --------- | --------------------- | --------------------- |
 | Operators | Differential Calculus | ∇u, ∇²T, ∇×u          |
 | Models    | Physical Properties   | μ(T), ρ(P,T), k(T)    |
-| Groups    | Dimensional Scaling   | Re, Pr, Pe, Ma        |
+| Groups    | Dimensionless Scaling | Re, Pr, Pe, Ma        |
 | Laws      | Conservation Logic    | R_momentum, R_energy  |
 
 **Groups.** Scale your problem with the numbers you already use: Reynolds, Prandtl, Nusselt, Mach, and more (Re, Pr, Nu, Ma, …). JIT-compiled and differentiable; single values or batched.
