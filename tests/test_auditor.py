@@ -1,17 +1,17 @@
-"""Tests for MojuCore, build_loss, audit, and visualize."""
+"""Tests for ResidualEngine, build_loss, audit, and visualize."""
 
 import pytest
 import jax
 import jax.numpy as jnp
-from moju.piratio import MojuCore, build_loss, audit, visualize
+from moju.monitor import ResidualEngine, build_loss, audit, visualize
 
 
-class TestMojuCoreResidualDict:
+class TestResidualEngineResidualDict:
     """compute_residuals returns correct residual dict structure."""
 
     def test_laws_only_when_no_ref(self, rtol, atol):
         """When state_ref and key_ref are None, only law residuals are computed."""
-        core = MojuCore(
+        core = ResidualEngine(
             constants={"L": 0.1},
             laws=[{"name": "mass_incompressible", "state_map": {"u_grad": "u_grad"}}],
             groups=[],
@@ -28,7 +28,7 @@ class TestMojuCoreResidualDict:
 
     def test_log_appends_rms_per_key(self):
         """Log gets one entry per compute_residuals with rms per key."""
-        core = MojuCore(
+        core = ResidualEngine(
             constants={},
             laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
             groups=[],
@@ -45,7 +45,7 @@ class TestMojuCoreResidualDict:
 
     def test_key_ref_adds_groups_and_models_residuals(self, rtol, atol):
         """When key_ref is provided, group and model residuals are computed vs key_ref."""
-        core = MojuCore(
+        core = ResidualEngine(
             constants={"mu0": 1.8e-5, "T0": 273.0, "S": 110.4},
             laws=[],
             groups=[{"name": "re", "state_map": {"u": "u", "L": "L", "rho": "rho", "mu": "mu"}, "output_key": "re"}],
@@ -62,7 +62,7 @@ class TestMojuCoreResidualDict:
 
     def test_state_ref_adds_data_residual(self, rtol, atol):
         """When state_ref is provided, data residual is computed over common keys."""
-        core = MojuCore(
+        core = ResidualEngine(
             constants={},
             laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
             groups=[],
@@ -190,12 +190,12 @@ class TestVisualize:
         assert fig is None or hasattr(fig, "savefig")
 
 
-class TestMojuCoreStateBuilder:
+class TestResidualEngineStateBuilder:
     """State builder runs models then groups."""
 
     def test_state_builder_adds_model_output(self, rtol, atol):
         """Model output is written to state under output_key."""
-        core = MojuCore(
+        core = ResidualEngine(
             constants={"mu0": 1.8e-5, "T0": 273.0, "S": 110.4},
             laws=[],
             groups=[],
@@ -209,7 +209,7 @@ class TestMojuCoreStateBuilder:
 
     def test_state_builder_adds_group_output(self, rtol, atol):
         """Group output is written to state under output_key."""
-        core = MojuCore(
+        core = ResidualEngine(
             constants={"L": 0.1},
             laws=[],
             groups=[{"name": "re", "state_map": {"u": "u", "L": "L", "rho": "rho", "mu": "mu"}, "output_key": "re"}],

@@ -1,5 +1,5 @@
 """
-MojuCore: single place for residuals, physics loss, and monitoring.
+ResidualEngine: single place for residuals, physics loss, and monitoring.
 
 You configure laws, groups, and models; then one class computes residuals,
 builds a physics-only loss (build_loss), and keeps a log for audit and visualize.
@@ -238,7 +238,7 @@ def visualize(
     return fig
 
 
-class MojuCore:
+class ResidualEngine:
     """
     Single place for residuals, physics loss, and monitoring.
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moju"
-version = "0.1.3"
+version = "0.2.0"
 description = "Supervised Physics scaling and modeling for SciML."
 readme = "README.md"
 authors = [{ name = "Ifimo Lab", email = "lab@ifimoanalytics.com" }]
