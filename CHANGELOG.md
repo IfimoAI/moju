@@ -21,7 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`moju.monitor`** — New package for residuals, physics loss, and monitoring:
   - **ResidualEngine** — Single entry point: configure laws, groups, models, and constants; call `compute_residuals(state_pred, state_ref=None, key_ref=None)` to get a residual dict and log per-key RMS.
   - **build_loss** — Physics-only loss (cascaded over laws); user adds data loss in JAX or PyTorch.
-  - **audit** — Computes R_norm, S, and overall physics score from the log; writes metrics back into the same log.
+  - **audit** — Computes R_norm, admissibility score, and overall admissibility score from the log; writes metrics back into the same log.
   - **visualize** — Plots RMS and metrics per key (optional matplotlib).
 - Documentation: high-level architecture diagram (Mermaid) in docs; Training and monitoring (ResidualEngine) section in overview.
 

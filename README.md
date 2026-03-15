@@ -53,7 +53,7 @@ The package provides two namespaces: **moju.piratio** (Groups, Models, Laws, Ope
 
 **Operators.** Derivatives for fields defined by a neural network: gradient, divergence, Laplacian, curl, time derivatives. Pass your network and collocation points; moju returns the derivatives via JAX autodiff. Single points or batched.
 
-**moju.monitor** — **ResidualEngine**, build_loss, audit, visualize. Single place for residuals, physics loss, and monitoring: `compute_residuals(state_pred, state_ref=None, key_ref=None)` returns a residual dict; **build_loss** gives a physics-only loss (cascaded over laws); **audit** computes R_norm, S, and overall score from the log and writes them back; **visualize** plots RMS and metrics per key. Import: `from moju.monitor import ResidualEngine, build_loss, audit, visualize`. `state_ref` and `key_ref` are optional; `key_ref` is for groups/models only; data residual is computed only when `state_ref` is provided.
+**moju.monitor** — **ResidualEngine**, build_loss, audit, visualize. Single place for residuals, physics loss, and monitoring: `compute_residuals(state_pred, state_ref=None, key_ref=None)` returns a residual dict; **build_loss** gives a physics-only loss (cascaded over laws); **audit** computes R_norm, admissibility score, and overall admissibility score from the log and writes them back; **visualize** plots RMS and admissibility score per key. Import: `from moju.monitor import ResidualEngine, build_loss, audit, visualize`. `state_ref` and `key_ref` are optional; `key_ref` is for groups/models only; data residual is computed only when `state_ref` is provided.
 
 ## Examples
 
