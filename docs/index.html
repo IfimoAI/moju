@@ -10,12 +10,12 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0d0f12;
-      --surface: #161a1f;
-      --text: #eceef2;
-      --muted: #9ca3ae;
-      --accent: #3b82f6;
-      --accent-soft: rgba(59, 130, 246, 0.15);
+      --bg: #f8f9fa;
+      --surface: #e9ecef;
+      --text: #1a1d21;
+      --muted: #495057;
+      --accent: #0d6efd;
+      --accent-soft: rgba(13, 110, 253, 0.12);
     }
     * { box-sizing: border-box; }
     body {
@@ -45,7 +45,7 @@
     }
     .install {
       background: var(--surface);
-      border: 1px solid rgba(255,255,255,0.06);
+      border: 1px solid #dee2e6;
       border-radius: 8px;
       padding: 1rem 1.25rem;
       margin: 0 0 2rem;
@@ -87,7 +87,7 @@
     .mod-link:hover .mod { border-color: var(--accent); }
     .mod {
       background: var(--accent-soft);
-      border: 1px solid rgba(59, 130, 246, 0.25);
+      border: 1px solid rgba(13, 110, 253, 0.25);
       border-radius: 6px;
       padding: 0.75rem 1rem;
       font-size: 0.9rem;
@@ -102,7 +102,7 @@
     footer {
       margin-top: 3rem;
       padding-top: 1.5rem;
-      border-top: 1px solid rgba(255,255,255,0.06);
+      border-top: 1px solid rgba(0,0,0,0.08);
       font-size: 0.9rem;
       color: var(--muted);
     }
@@ -125,7 +125,7 @@
     </div>
 
     <h2>What's included</h2>
-    <p>PiRatio: four modules — scaling groups, physical models, conservation laws, and differential operators — plus <strong>ResidualEngine</strong> (<code>moju.monitor</code>) for residuals, physics loss, audit, and plots. JAX-native, JIT-compiled, differentiable.</p>
+    <p><strong>moju.piratio</strong>: Groups, Models, Laws, Operators (dimensionless scaling, physical models, conservation laws, differential operators). <strong>moju.monitor</strong>: ResidualEngine, build_loss, audit, visualize (residuals, physics loss, and monitoring). JAX-native, JIT-compiled, differentiable.</p>
     <div class="modules">
       <a href="doc/groups.html" class="mod-link"><div class="mod"><strong>Groups</strong><span>Re, Pr, Nu, Ma, …</span></div></a>
       <a href="doc/models.html" class="mod-link"><div class="mod"><strong>Models</strong><span>μ(T), ρ(P,T), k(T)</span></div></a>
