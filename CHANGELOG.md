@@ -4,7 +4,17 @@ All notable changes to moju are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.2.0] - Unreleased
+## [0.2.1] - 2025-03-09
+
+### Changed
+
+- Single README: removed high-level architecture section from README (diagram remains in docs only) so PyPI and repo display cleanly.
+- Package info: "What's included" now explicitly lists **moju.piratio** and **moju.monitor** in README and docs.
+- GitHub Pages docs: light theme and readable colors (style.css, index.html); Mermaid diagram theme set to default in overview.
+
+---
+
+## [0.2.0] - 2025-03-08
 
 ### Added
 
@@ -13,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - **build_loss** — Physics-only loss (cascaded over laws); user adds data loss in JAX or PyTorch.
   - **audit** — Computes R_norm, S, and overall physics score from the log; writes metrics back into the same log.
   - **visualize** — Plots RMS and metrics per key (optional matplotlib).
-- Documentation: high-level architecture diagram (Mermaid) in README and docs; Training and monitoring (ResidualEngine) section in overview.
+- Documentation: high-level architecture diagram (Mermaid) in docs; Training and monitoring (ResidualEngine) section in overview.
 
 ### Changed
 
