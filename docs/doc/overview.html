@@ -21,7 +21,7 @@
     </nav>
 
     <h1>Overview</h1>
-    <p>moju is a JAX-native library for physics-informed and physics-supervised SciML. It provides dimensionless scaling (Groups), physical property models (Models), conservation-law residuals (Laws), and differential operators (Operators) so you can train or constrain models with the equations you trust.</p>
+    <p>moju is a JAX-native library for physics-informed and physics-supervised SciML. The package provides <strong>moju.piratio</strong> (Groups, Models, Laws, Operators) and <strong>moju.monitor</strong> (ResidualEngine, build_loss, audit, visualize) so you can train or constrain models with the equations you trust.</p>
 
     <h2>Installation</h2>
     <pre><code>pip install moju</code></pre>
@@ -105,7 +105,7 @@ flowchart TB
   <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
   <script>
     document.addEventListener("DOMContentLoaded", function () {
-      mermaid.initialize({ startOnLoad: false, theme: "dark" });
+      mermaid.initialize({ startOnLoad: false, theme: "default" });
       mermaid.run({ querySelector: ".mermaid", suppressErrors: true });
     });
   </script>

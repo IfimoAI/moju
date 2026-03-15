@@ -1,11 +1,11 @@
-/* Shared documentation pages */
+/* Shared documentation pages — light theme */
 :root {
-  --bg: #0d0f12;
-  --surface: #161a1f;
-  --text: #e6e8ec;
-  --muted: #8b919a;
-  --accent: #3b82f6;
-  --accent-soft: rgba(59, 130, 246, 0.15);
+  --bg: #f8f9fa;
+  --surface: #e9ecef;
+  --text: #1a1d21;
+  --muted: #495057;
+  --accent: #0d6efd;
+  --accent-soft: rgba(13, 110, 253, 0.12);
 }
 * { box-sizing: border-box; }
 body {
@@ -23,7 +23,7 @@ body {
   gap: 0.5rem 1rem;
   margin-bottom: 2rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  border-bottom: 1px solid rgba(0,0,0,0.08);
   font-size: 0.9rem;
 }
 .doc-nav a {
@@ -54,7 +54,7 @@ h3 {
 p { margin: 0 0 1rem; color: var(--muted); }
 .api-block {
   background: var(--surface);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid #dee2e6;
   border-radius: 8px;
   padding: 1rem 1.25rem;
   margin: 0 0 1.25rem;
@@ -83,7 +83,7 @@ code, .code {
 }
 pre {
   background: var(--surface);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid #dee2e6;
   border-radius: 8px;
   padding: 1rem;
   overflow-x: auto;
@@ -96,7 +96,7 @@ ul { color: var(--muted); margin: 0 0 1rem; padding-left: 1.25rem; }
 .doc-footer {
   margin-top: 3rem;
   padding-top: 1.5rem;
-  border-top: 1px solid rgba(255,255,255,0.06);
+  border-top: 1px solid rgba(0,0,0,0.08);
   font-size: 0.9rem;
   color: var(--muted);
 }
@@ -107,7 +107,7 @@ ul { color: var(--muted); margin: 0 0 1rem; padding-left: 1.25rem; }
   overflow-x: auto;
   margin: 1rem 0 1.5rem;
   background: var(--surface);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid #dee2e6;
   border-radius: 8px;
   padding: 1rem;
 }
