@@ -100,3 +100,18 @@ ul { color: var(--muted); margin: 0 0 1rem; padding-left: 1.25rem; }
   font-size: 0.9rem;
   color: var(--muted);
 }
+
+/* Mermaid diagram container */
+.mermaid {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 1rem 0 1.5rem;
+  background: var(--surface);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
