@@ -51,7 +51,9 @@ The current release centers on **PiRatio**, with four modules:
 
 **Operators.** Derivatives for fields defined by a neural network: gradient, divergence, Laplacian, curl, time derivatives. Pass your network and collocation points; moju returns the derivatives via JAX autodiff. Single points or batched.
 
-**Roadmap:** loading OpenFOAM data into JAX, and an Auditor to continuously validate AI predictions against the governing equations.
+**MojuCore (coming soon).** Single place for residuals, physics loss, and monitoring: `compute_residuals(state_pred, state_ref=None, key_ref=None)` returns a residual dict; **build_loss** gives a physics-only loss (cascaded over laws); **audit** computes R_norm, S, and overall score from the log and writes them back; **visualize** plots RMS and metrics per key. `state_ref` and `key_ref` are optional; `key_ref` is for groups/models only; data residual is computed only when `state_ref` is provided.
+
+**Roadmap:** loading OpenFOAM data into JAX, and **MojuCore** to compute residuals, build a physics loss (**build_loss**), run **audit** for metrics (R_norm, S), and **visualize** learning curves — one place for training and monitoring.
 
 ## Examples
 
@@ -111,6 +113,49 @@ print("Gradient of sum(x²) at [1, 2]:", grad)
 
 lap = Operators.laplacian(scalar_field, params, x)
 print("Laplacian at [1, 2]:", lap)
+```
+
+## Architecture
+
+User-defined config (Laws, Groups, Models, Constants) and inputs (`state_pred`, optional `state_ref` and `key_ref`) feed into **MojuCore**, which computes residuals and optionally logs per-key RMS. The residual dict drives **build_loss** (physics-only) for training; the same log is used by **audit** and **visualize** for monitoring.
+
+```mermaid
+flowchart TB
+  subgraph config [User config]
+    Laws[Laws]
+    Groups[Groups]
+    Models[Models]
+    Constants[Constants]
+  end
+
+  subgraph inputs [Inputs]
+    StatePred[state_pred]
+    StateRef[state_ref optional]
+    KeyRef[key_ref optional]
+  end
+
+  subgraph core [MojuCore]
+    StateBuilder[State builder]
+    ComputeResidual[compute_residuals]
+  end
+
+  config --> StateBuilder
+  StatePred --> StateBuilder
+  StateRef --> StateBuilder
+  KeyRef --> ComputeResidual
+  StateBuilder --> ComputeResidual
+
+  ComputeResidual --> ResidualDict[Residual dict]
+  ResidualDict --> BuildLoss[build_loss]
+  BuildLoss --> PhysicsLoss[Physics loss scalar only]
+  PhysicsLoss -->|"user adds data loss in JAX or torch"| TotalLoss[total_loss for optimizer]
+
+  ResidualDict --> RmsPerKey[Per-key RMS]
+  RmsPerKey --> Log[Log object]
+  Log --> Audit[audit]
+  Audit -->|"logs metrics to same object"| Log
+  Log --> Visualize[visualize]
+  Visualize --> Plots[Plots RMS and metrics per key]
 ```
 
 ## Going further

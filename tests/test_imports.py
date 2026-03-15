@@ -12,19 +12,24 @@ def test_import_moju():
 
 
 def test_import_piratio_all():
-    """moju.piratio exports Groups, Models, Laws, Operators."""
-    from moju.piratio import Groups, Models, Laws, Operators
+    """moju.piratio exports Groups, Models, Laws, Operators, MojuCore, build_loss, audit, visualize."""
+    from moju.piratio import Groups, Models, Laws, Operators, MojuCore, build_loss, audit, visualize
     assert Groups is not None
     assert Models is not None
     assert Laws is not None
     assert Operators is not None
+    assert MojuCore is not None
+    assert callable(build_loss)
+    assert callable(audit)
+    assert callable(visualize)
 
 
 def test_piratio_module_has_all():
     """piratio __all__ matches public API."""
     import moju.piratio as piratio
     assert hasattr(piratio, "__all__")
-    assert set(piratio.__all__) == {"Groups", "Models", "Laws", "Operators"}
+    expected = {"Groups", "Models", "Laws", "Operators", "MojuCore", "build_loss", "audit", "visualize"}
+    assert set(piratio.__all__) == expected
 
 
 def test_groups_has_re_and_pr():
