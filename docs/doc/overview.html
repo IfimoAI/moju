@@ -41,13 +41,13 @@ rho = Models.ideal_gas_rho(P=101325.0, R=287.0, T=300.0)</code></pre>
       <li><strong><a href="models.html">Models</a></strong> — Viscosity (Sutherland, VFT, power-law), density (ideal gas, Boussinesq), heat (Stefan-Boltzmann, Fourier), friction (Darcy-Weisbach, Colebrook), and more.</li>
       <li><strong><a href="laws.html">Laws</a></strong> — Residuals for mass, momentum (Navier-Stokes, Stokes, Euler), heat/diffusion, Darcy/Brinkman, Poisson, wave, Burgers, Schrödinger, etc.</li>
       <li><strong><a href="operators.html">Operators</a></strong> — gradient, jacobian, divergence, laplacian, curl (2D/3D), time_derivative, time_derivative_second, advection, symmetric_gradient.</li>
-      <li><strong><a href="#training-and-monitoring-mojucore">MojuCore</a></strong> — compute_residuals, build_loss, audit, visualize; single log for RMS and metrics.</li>
+      <li><strong><a href="#training-and-monitoring-residual-engine">ResidualEngine</a></strong> (<code>moju.monitor</code>) — compute_residuals, build_loss, audit, visualize; single log for RMS and metrics.</li>
     </ul>
 
     <p>All functions are JIT-compiled and support single-point or batched inputs (leading batch dimension). Use them inside loss functions and training loops with full JAX autodiff.</p>
 
     <h2>High-level architecture</h2>
-    <p>User-defined config (Laws, Groups, Models, Constants) and inputs (<code>state_pred</code>, optional <code>state_ref</code> and <code>key_ref</code>) feed into <strong>MojuCore</strong>, which computes residuals and optionally logs per-key RMS. The residual dict drives <strong>build_loss</strong> (physics-only) for training; the same log is used by <strong>audit</strong> and <strong>visualize</strong> for monitoring.</p>
+    <p>User-defined config (Laws, Groups, Models, Constants) and inputs (<code>state_pred</code>, optional <code>state_ref</code> and <code>key_ref</code>) feed into <strong>ResidualEngine</strong>, which computes residuals and optionally logs per-key RMS. The residual dict drives <strong>build_loss</strong> (physics-only) for training; the same log is used by <strong>audit</strong> and <strong>visualize</strong> for monitoring.</p>
     <div class="mermaid">
 flowchart TB
   subgraph config [User config]
@@ -63,7 +63,7 @@ flowchart TB
     KeyRef[key_ref optional]
   end
 
-  subgraph core [MojuCore]
+  subgraph core [ResidualEngine]
     StateBuilder[State builder]
     ComputeResidual[compute_residuals]
   end
@@ -87,8 +87,8 @@ flowchart TB
   Visualize --> Plots[Plots RMS and metrics per key]
     </div>
 
-    <h2 id="training-and-monitoring-mojucore">Training and monitoring (MojuCore)</h2>
-    <p><strong>MojuCore</strong> is the single entry point for residuals, physics loss, and monitoring. You configure laws, groups, and models; then one class computes residuals, builds a physics-only loss, and keeps a log for audit and visualization.</p>
+    <h2 id="training-and-monitoring-residual-engine">Training and monitoring (ResidualEngine)</h2>
+    <p><strong>ResidualEngine</strong> is the single entry point for residuals, physics loss, and monitoring. Import from <code>moju.monitor</code>: <code>from moju.monitor import ResidualEngine, build_loss, audit, visualize</code>. You configure laws, groups, and models; then one class computes residuals, builds a physics-only loss, and keeps a log for audit and visualization.</p>
     <ul>
       <li><strong>compute_residuals(state_pred, state_ref=None, key_ref=None)</strong> — Returns a residual dict: laws always; groups and models when <code>key_ref</code> or <code>state_ref</code> is provided; data residual only when <code>state_ref</code> is provided. Logs per-key RMS to a single log object.</li>
       <li><strong>build_loss</strong> — Physics-only (cascaded over laws). No data residual or loss passed in; you add data loss in JAX or PyTorch to the returned scalar.</li>
