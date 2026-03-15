@@ -3,7 +3,22 @@
 import pytest
 import jax
 import jax.numpy as jnp
-from moju.monitor import ResidualEngine, build_loss, audit, visualize
+from moju.monitor import ResidualEngine, admissibility_level, build_loss, audit, visualize
+
+
+class TestAdmissibilityLevel:
+    """admissibility_level maps score to one of four levels."""
+
+    def test_four_levels(self):
+        """0.00-<0.40 Non-Admissible; 0.40-<0.70 Low Admissibility; 0.70-<0.90 Moderate; 0.90-1.00 High."""
+        assert admissibility_level(0.0) == "Non-Admissible"
+        assert admissibility_level(0.39) == "Non-Admissible"
+        assert admissibility_level(0.40) == "Low Admissibility"
+        assert admissibility_level(0.69) == "Low Admissibility"
+        assert admissibility_level(0.70) == "Moderate Admissibility"
+        assert admissibility_level(0.89) == "Moderate Admissibility"
+        assert admissibility_level(0.90) == "High Admissibility"
+        assert admissibility_level(1.0) == "High Admissibility"
 
 
 class TestResidualEngineResidualDict:
@@ -138,22 +153,26 @@ class TestBuildLossBatch:
 
 
 class TestAudit:
-    """audit computes R_norm, S, writes back to log."""
+    """audit computes R_norm, admissibility score, writes back to log."""
 
     def test_audit_writes_back_to_log(self):
-        """audit adds r_norm, S, overall_physics_score to each log entry."""
+        """audit adds r_norm, admissibility_score, overall_admissibility_score to each log entry."""
         log = [
             {"index": 0, "rms": {"laws/a": 2.0, "laws/b": 1.0}},
             {"index": 1, "rms": {"laws/a": 1.0, "laws/b": 0.5}},
         ]
         report = audit(log)
         assert "per_key" in report
-        assert "overall_physics_score" in report
+        assert "overall_admissibility_score" in report
+        assert "overall_admissibility_level" in report
         assert "r_norm" in log[0]
-        assert "S" in log[0]
-        assert "overall_physics_score" in log[0]
+        assert "admissibility_score" in log[0]
+        assert "overall_admissibility_score" in log[0]
         assert "r_norm" in log[1]
-        assert "S" in log[1]
+        assert "admissibility_score" in log[1]
+        # per_key entries include admissibility_level
+        for k, v in report["per_key"].items():
+            assert "admissibility_level" in v
 
     def test_audit_r_ref_from_first_entry(self):
         """When r_ref is None, first entry's rms is used as reference."""
@@ -163,7 +182,26 @@ class TestAudit:
         ]
         audit(log)
         assert log[1]["r_norm"]["k"] == 0.5
-        assert log[1]["S"]["k"] == 1.0 / (1.0 + 0.5)
+        assert log[1]["admissibility_score"]["k"] == 1.0 / (1.0 + 0.5)
+
+    def test_audit_export_dir_creates_session_folder_and_zip(self, tmp_path):
+        """When export_dir is set, audit creates session folder with report.pdf and a zip."""
+        pytest.importorskip("reportlab")
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0}},
+            {"index": 1, "rms": {"laws/a": 0.5}},
+        ]
+        report = audit(log, export_dir=str(tmp_path))
+        assert "per_key" in report
+        # Session dir: audit_YYYYMMDD_HHMM
+        dirs = [d for d in tmp_path.iterdir() if d.is_dir() and d.name.startswith("audit_")]
+        assert len(dirs) == 1
+        session_dir = dirs[0]
+        assert (session_dir / "report.pdf").exists()
+        # Zip with same base name
+        zips = list(tmp_path.glob("audit_*.zip"))
+        assert len(zips) == 1
+        assert zips[0].name == session_dir.name + ".zip"
 
 
 class TestVisualize:

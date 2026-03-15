@@ -92,8 +92,8 @@ flowchart TB
     <ul>
       <li><strong>compute_residuals(state_pred, state_ref=None, key_ref=None)</strong> — Returns a residual dict: laws always; groups and models when <code>key_ref</code> or <code>state_ref</code> is provided; data residual only when <code>state_ref</code> is provided. Logs per-key RMS to a single log object.</li>
       <li><strong>build_loss</strong> — Physics-only (cascaded over laws). No data residual or loss passed in; you add data loss in JAX or PyTorch to the returned scalar.</li>
-      <li><strong>audit</strong> — Reads the logged RMS, computes R_norm, S, and overall physics score; writes these back into the same log. Includes data residual metrics only when <code>state_ref</code> was provided.</li>
-      <li><strong>visualize</strong> — Plots RMS per key and metrics per key as training proceeds and/or at the end.</li>
+      <li><strong>audit</strong> — Reads the logged RMS, computes R_norm, admissibility score, and overall admissibility score; assigns one of four levels per key and overall: 0.00–&lt;0.40 Non-Admissible, 0.40–&lt;0.70 Low Admissibility, 0.70–&lt;0.90 Moderate Admissibility, 0.90–1.00 High Admissibility. Writes these back into the same log. Includes data residual metrics only when <code>state_ref</code> was provided. Use <code>admissibility_level(score)</code> for the same mapping. Optional PDF export: pass <code>export_dir</code> (and optionally <code>save_residuals=True</code>, <code>last_residual_dict=...</code>) to write a Physics Admissibility Report PDF and a zipped results folder; requires <code>pip install moju[report]</code>.</li>
+      <li><strong>visualize</strong> — Plots RMS per key and admissibility score per key as training proceeds and/or at the end.</li>
     </ul>
     <p><code>key_ref</code> is for Groups and Models only (reference values for group/model outputs). Data residual is computed and logged only when <code>state_ref</code> is provided.</p>
 
