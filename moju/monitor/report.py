@@ -1,4 +1,4 @@
-"""PDF export for Physics Admissibility Report. Requires reportlab (pip install moju[report])."""
+"""PDF export for Physical Admissibility Report. Requires reportlab (pip install moju[report])."""
 
 from __future__ import annotations
 
@@ -78,6 +78,22 @@ def write_residuals_json(residual_dict: Dict[str, Any], path: str) -> None:
         json.dump(data, f, indent=2)
 
 
+_FOOTER_LEFT = "Moju is developed by Ifimo Lab at Ifimo Analytics"
+_FOOTER_RIGHT = "This report is a heuristic and not a certification."
+
+
+def _footer_canvas(canvas: Any, doc: Any) -> None:
+    """Draw footer on each page: credit (left), disclaimer (right)."""
+    canvas.saveState()
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor("#555555"))
+    y = 0.5 * inch
+    canvas.drawString(doc.leftMargin, y, _FOOTER_LEFT)
+    x_right = doc.pagesize[0] - doc.rightMargin
+    canvas.drawRightString(x_right, y, _FOOTER_RIGHT)
+    canvas.restoreState()
+
+
 def write_audit_pdf(
     report: Dict[str, Any],
     path: str,
@@ -85,7 +101,7 @@ def write_audit_pdf(
     model_id: Optional[str] = None,
 ) -> None:
     """
-    Write a Physics Admissibility Report PDF to the given path.
+    Write a Physical Admissibility Report PDF to the given path.
 
     :param report: Dict from audit() with per_key, overall_admissibility_score, overall_admissibility_level.
     :param path: Output file path (e.g. .pdf).
@@ -128,7 +144,7 @@ def write_audit_pdf(
     story: List[Any] = []
 
     # Title
-    story.append(Paragraph("Physics Admissibility Report", title_style))
+    story.append(Paragraph("Physical Admissibility Report", title_style))
     story.append(Spacer(1, 6))
 
     # Optional model name, ID, date
@@ -175,4 +191,8 @@ def write_audit_pdf(
         story.append(t)
         story.append(Spacer(1, 8))
 
-    doc.build(story)
+    doc.build(
+        story,
+        onFirstPage=_footer_canvas,
+        onLaterPages=_footer_canvas,
+    )
