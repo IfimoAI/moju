@@ -100,12 +100,25 @@ def admissibility_level(score: float) -> str:
     return "Non-Admissible"
 
 
-def _rms_per_key(residuals_flat: Dict[str, jnp.ndarray]) -> Dict[str, float]:
-    """Compute one RMS per key across all batches; return host-side dict."""
-    out = {}
+def _rms_per_key(
+    residuals_flat: Dict[str, jnp.ndarray],
+    *,
+    to_python: bool = True,
+) -> Dict[str, Any]:
+    """
+    Compute one RMS per key across all batches.
+
+    When to_python is True (default), values are converted to Python floats on the host
+    for human-readable logging and reporting. When False, values are left as JAX arrays,
+    which is safer inside JAX transforms (jit/grad) but less convenient for JSON/printing.
+    """
+    out: Dict[str, Any] = {}
     for key, arr in residuals_flat.items():
         r = _rms_scalar(arr)
-        out[key] = float(jax.device_get(r))
+        if to_python:
+            out[key] = float(jax.device_get(r))
+        else:
+            out[key] = r
     return out
 
 
@@ -366,6 +379,8 @@ class ResidualEngine:
         state_pred: Dict[str, Any],
         state_ref: Optional[Dict[str, Any]] = None,
         key_ref: Optional[Dict[str, float]] = None,
+        *,
+        log_to_python: bool = True,
     ) -> Dict[str, Any]:
         """
         Compute residual dict and append per-key RMS to the internal log.
@@ -377,6 +392,9 @@ class ResidualEngine:
         :param state_pred: Predicted state (required). Dict of array-like.
         :param state_ref: Optional reference state; when provided, data residual is computed and logged.
         :param key_ref: Optional reference values for group/model outputs (key -> value). For Groups/Models only.
+        :param log_to_python: If True (default), per-key RMS values stored in self.log are
+          converted to Python floats. If False, RMS values are kept as JAX arrays, which avoids
+          host conversion and is safer inside jit/grad, but less convenient for JSON/printing.
         :return: Residual dict with keys "laws", optionally "groups", "models", "data". All JAX arrays; differentiable.
         """
         residuals: Dict[str, Any] = {"laws": {}}
@@ -431,7 +449,7 @@ class ResidualEngine:
             }
 
         flat = _flatten_residual_dict(residuals)
-        rms_per_key = _rms_per_key(flat)
+        rms_per_key = _rms_per_key(flat, to_python=log_to_python)
         self._log.append({"index": self._index, "rms": rms_per_key})
         self._index += 1
         return residuals
