@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Generate a sample Physics Admissibility Report PDF for review.
+Generate a sample Physical Admissibility Report PDF for review.
 
 Run from repo root after: pip install moju[report] or pip install reportlab
   python scripts/generate_sample_audit_pdf.py
 
-Output: sample_physics_admissibility_report.pdf (in repo root)
+Output: examples/sample_physical_admissibility_report.pdf
 """
 
 import os
@@ -84,7 +84,9 @@ def _sample_report() -> dict:
 
 
 def main() -> None:
-    out_path = os.path.join(_repo_root, "sample_physics_admissibility_report.pdf")
+    examples_dir = os.path.join(_repo_root, "examples")
+    os.makedirs(examples_dir, exist_ok=True)
+    out_path = os.path.join(examples_dir, "sample_physical_admissibility_report.pdf")
     report = _sample_report()
     write_audit_pdf(
         report,
