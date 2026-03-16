@@ -55,6 +55,8 @@ The package provides two namespaces: **moju.piratio** (Groups, Models, Laws, Ope
 
 **moju.monitor** — **ResidualEngine**, build_loss, audit, visualize. Single place for residuals, physics loss, and monitoring: `compute_residuals(state_pred, state_ref=None, key_ref=None)` returns a residual dict; **build_loss** gives a physics-only loss (cascaded over laws); **audit** computes R_norm, admissibility score, and overall admissibility score from the log and writes them back; **visualize** plots RMS and admissibility score per key. Import: `from moju.monitor import ResidualEngine, build_loss, audit, visualize`. `state_ref` and `key_ref` are optional; `key_ref` is for groups/models only; data residual is computed only when `state_ref` is provided.
 
+**Custom Models, Groups, and Laws.** You can plug in your own JAX-differentiable functions. In any law, group, or model spec, add an optional `"fn": your_callable`. The engine calls your function with keyword arguments from `state_map` (same as for built-in names). Use `jax.numpy` inside your function so it stays differentiable. For **laws**: your function returns the residual (e.g. R = 0 when the law is satisfied); it is used in `build_loss` and the log. For **groups** and **models**: your function’s return value is written to `output_key` in the state and, when `key_ref` is provided, used for the group/model residual. Example: `laws=[{"name": "my_law", "state_map": {"x": "x"}, "fn": lambda x: x - 1.0}]` uses a custom residual; omit `"fn"` to use the built-in law named by `"name"`. See the [Overview](https://ifimoai.github.io/moju/doc/overview.html#custom-physics-fn) for a full example.
+
 ## Examples
 
 ### First example

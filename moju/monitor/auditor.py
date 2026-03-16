@@ -42,6 +42,13 @@ def _kwargs_from_state(
     return out
 
 
+def _get_fn(spec: Dict[str, Any], builtin_class: Any) -> Any:
+    """Resolve callable from spec: use spec['fn'] if present, else getattr(builtin_class, spec['name'])."""
+    if "fn" in spec:
+        return spec["fn"]
+    return getattr(builtin_class, spec["name"])
+
+
 def _build_state(
     state_pred: Dict[str, Any],
     constants: Dict[str, Any],
@@ -53,20 +60,18 @@ def _build_state(
     merged = {**state, **constants}
 
     for spec in models_spec:
-        name = spec["name"]
         state_map = spec["state_map"]
         output_key = spec["output_key"]
         kwargs = _kwargs_from_state(merged, constants, state_map)
-        fn = getattr(Models, name)
+        fn = _get_fn(spec, Models)
         state[output_key] = fn(**kwargs)
         merged[output_key] = state[output_key]
 
     for spec in groups_spec:
-        name = spec["name"]
         state_map = spec["state_map"]
         output_key = spec["output_key"]
         kwargs = _kwargs_from_state(merged, constants, state_map)
-        fn = getattr(Groups, name)
+        fn = _get_fn(spec, Groups)
         state[output_key] = fn(**kwargs)
         merged[output_key] = state[output_key]
 
@@ -313,6 +318,10 @@ class ResidualEngine:
 
     state_pred is required. state_ref and key_ref are optional.
     key_ref is for Groups and Models only. Data residual is computed only when state_ref is provided.
+
+    Custom physics: in any law/group/model spec you can pass an optional "fn": callable.
+    If present, that JAX-differentiable function is used instead of the built-in (Laws/Groups/Models).name.
+    Kwargs are built from state_map; use jax.numpy inside your fn. See docs for examples.
     """
 
     def __init__(
@@ -325,8 +334,12 @@ class ResidualEngine:
         """
         :param constants: Dict of constant name -> value (e.g. L, mu0, T0).
         :param laws: List of specs, each {"name": str, "state_map": {arg_name: state_key}}.
+          Optional "fn": callable — if provided, use this JAX-differentiable function instead of
+          the built-in Laws.name; kwargs come from state_map. Use for custom physics laws.
         :param groups: List of specs, each {"name": str, "state_map": {...}, "output_key": str}.
+          Optional "fn": callable — if provided, use instead of built-in Groups.name.
         :param models: List of specs, each {"name": str, "state_map": {...}, "output_key": str}.
+          Optional "fn": callable — if provided, use instead of built-in Models.name.
         """
         self.constants = dict(constants or {})
         self.laws_spec = list(laws or [])
@@ -374,18 +387,17 @@ class ResidualEngine:
             name = spec["name"]
             state_map = spec["state_map"]
             kwargs = _kwargs_from_state(merged, self.constants, state_map)
-            fn = getattr(Laws, name)
+            fn = _get_fn(spec, Laws)
             residuals["laws"][name] = fn(**kwargs)
 
         if key_ref is not None:
             residuals["groups"] = {}
             residuals["models"] = {}
             for spec in self.groups_spec:
-                name = spec["name"]
                 output_key = spec["output_key"]
                 state_map = spec["state_map"]
                 kwargs = _kwargs_from_state(merged, self.constants, state_map)
-                fn = getattr(Groups, name)
+                fn = _get_fn(spec, Groups)
                 out = fn(**kwargs)
                 ref_val = key_ref.get(output_key)
                 if ref_val is not None:
@@ -396,11 +408,10 @@ class ResidualEngine:
                 else:
                     residuals["groups"][output_key] = out
             for spec in self.models_spec:
-                name = spec["name"]
                 output_key = spec["output_key"]
                 state_map = spec["state_map"]
                 kwargs = _kwargs_from_state(merged, self.constants, state_map)
-                fn = getattr(Models, name)
+                fn = _get_fn(spec, Models)
                 out = fn(**kwargs)
                 ref_val = key_ref.get(output_key)
                 if ref_val is not None:

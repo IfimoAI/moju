@@ -257,3 +257,67 @@ class TestResidualEngineStateBuilder:
         state = core._state_builder(state_pred)
         assert "re" in state
         assert jnp.allclose(state["re"], 100.0, rtol=rtol, atol=atol)
+
+
+class TestCustomFn:
+    """User-defined custom laws, groups, and models via spec['fn']."""
+
+    def test_custom_law_fn(self, rtol, atol):
+        """Custom law callable in spec is used; residual is correct and appears in log/build_loss."""
+        def my_residual(x):
+            return x - 1.0
+
+        core = ResidualEngine(
+            constants={},
+            laws=[{"name": "my_law", "state_map": {"x": "x"}, "fn": my_residual}],
+            groups=[],
+            models=[],
+        )
+        state_pred = {"x": jnp.array(2.0)}
+        residuals = core.compute_residuals(state_pred)
+        assert "laws" in residuals
+        assert "my_law" in residuals["laws"]
+        assert jnp.allclose(residuals["laws"]["my_law"], 1.0, rtol=rtol, atol=atol)
+        assert "laws/my_law" in core.log[-1]["rms"]
+        loss_val = build_loss(residuals)
+        assert jnp.allclose(loss_val, 1.0, rtol=rtol, atol=atol)
+
+    def test_custom_model_fn(self, rtol, atol):
+        """Custom model fn is used in state builder and in residuals when key_ref is provided."""
+        def my_mu(T, scale):
+            return scale * T
+
+        core = ResidualEngine(
+            constants={"scale": 0.01},
+            laws=[],
+            groups=[],
+            models=[{"name": "my_mu", "state_map": {"T": "T", "scale": "scale"}, "output_key": "mu", "fn": my_mu}],
+        )
+        state_pred = {"T": 300.0}
+        state = core._state_builder(state_pred)
+        assert "mu" in state
+        assert jnp.allclose(state["mu"], 3.0, rtol=rtol, atol=atol)
+        residuals = core.compute_residuals(state_pred, key_ref={"mu": 2.0})
+        assert "models" in residuals
+        assert "mu" in residuals["models"]
+        assert jnp.allclose(residuals["models"]["mu"], 1.0, rtol=rtol, atol=atol)
+
+    def test_custom_group_fn(self, rtol, atol):
+        """Custom group fn is used and appears in residuals with key_ref."""
+        def my_group(a, b):
+            return a * b
+
+        core = ResidualEngine(
+            constants={},
+            laws=[],
+            groups=[{"name": "my_ab", "state_map": {"a": "a", "b": "b"}, "output_key": "ab", "fn": my_group}],
+            models=[],
+        )
+        state_pred = {"a": jnp.array(3.0), "b": jnp.array(4.0)}
+        state = core._state_builder(state_pred)
+        assert "ab" in state
+        assert jnp.allclose(state["ab"], 12.0, rtol=rtol, atol=atol)
+        residuals = core.compute_residuals(state_pred, key_ref={"ab": 10.0})
+        assert "groups" in residuals
+        assert "ab" in residuals["groups"]
+        assert jnp.allclose(residuals["groups"]["ab"], 2.0, rtol=rtol, atol=atol)

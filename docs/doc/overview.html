@@ -97,6 +97,27 @@ flowchart TB
     </ul>
     <p><code>key_ref</code> is for Groups and Models only (reference values for group/model outputs). Data residual is computed and logged only when <code>state_ref</code> is provided.</p>
 
+    <h3 id="custom-physics-fn">Custom physics (optional <code>fn</code>)</h3>
+    <p>You can use your own JAX-differentiable functions as laws, groups, or models instead of (or alongside) the built-in ones. In any spec, add an optional <code>"fn": your_callable</code>. The engine will call your function with keyword arguments derived from <code>state_map</code> (same as for built-in names). Your function must accept those kwargs and return JAX arrays so the pipeline stays differentiable.</p>
+    <p><strong>Laws.</strong> Spec: <code>{"name": "my_law", "state_map": {"x": "state_key"}, "fn": my_residual_fn}</code>. <code>my_residual_fn(x=...)</code> should return the residual (e.g. R = 0 when satisfied). The residual is used in <code>build_loss</code> and in the log.</p>
+    <p><strong>Groups and models.</strong> Spec: <code>{"name": "my_group", "state_map": {"a": "a", "b": "b"}, "output_key": "ab", "fn": my_fn}</code>. Your function is called with kwargs from <code>state_map</code>; its return value is written to <code>output_key</code> in the state and (when <code>key_ref</code> is provided) used for the group/model residual.</p>
+    <p>Use JAX/NumPy (<code>jax.numpy</code>) inside your <code>fn</code> so it remains differentiable. Example: custom law</p>
+    <pre><code>import jax.numpy as jnp
+from moju.monitor import ResidualEngine, build_loss
+
+def my_residual(x):
+    return x - 1.0  # residual = 0 when x == 1
+
+engine = ResidualEngine(
+    constants={},
+    laws=[{"name": "my_law", "state_map": {"x": "x"}, "fn": my_residual}],
+    groups=[], models=[],
+)
+state = {"x": jnp.array(2.0)}
+residuals = engine.compute_residuals(state)
+# residuals["laws"]["my_law"] == 1.0
+loss = build_loss(residuals)  # physics loss from your custom law</code></pre>
+
     <h2>Before / After Moju</h2>
     <p>Corrected code snippets for the &ldquo;Hardwiring reality into every iteration&rdquo; comparison (pure JAX PINN vs physics-native moju): <a href="../before-after-moju.md">Before / After Moju (corrected)</a>.</p>
 
