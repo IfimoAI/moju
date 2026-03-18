@@ -4,6 +4,24 @@ All notable changes to moju are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.0] - 2026-03-09
+
+### Breaking
+
+- **ResidualEngine** no longer accepts `models` or `key_ref`. Group/model “distance to reference scalar” residuals are removed. Put predicted constitutive fields in `state_pred`; use **constitutive_audit** / **scaling_audit** (and optional **constitutive_custom** / **scaling_custom**) for closure-based consistency checks (e.g. `thermal_diffusivity`, `pe_identity`). **build_loss** is unchanged (laws only).
+
+### Added
+
+- **constitutive_closures** and **scaling_closures** registries; `list_constitutive_models()`, `list_scaling_closure_ids()` on `moju.monitor`.
+- PDF/report categories for **constitutive** and **scaling**; disclaimer clarifies metrics are heuristic indicators, not certification.
+
+### Changed
+
+- **examples/slab_cooling_demo.py** updated for the new API (no engine `models`, no `key_ref`).
+- README, overview (Mermaid), and landing copy describe closure-based audit.
+
+---
+
 ## [0.2.2] - 2026-03-16
 
 ### Added
@@ -33,7 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 - **`moju.monitor`** — New package for residuals, physics loss, and monitoring:
-  - **ResidualEngine** — Single entry point: configure laws, groups, models, and constants; call `compute_residuals(state_pred, state_ref=None, key_ref=None)` to get a residual dict and log per-key RMS.
+  - **ResidualEngine** — Single entry point: laws, groups, models, constants; `compute_residuals` with optional `state_ref`. *(Superseded in 0.3.0: no engine `models` or `key_ref`; use constitutive/scaling closure audits.)*
   - **build_loss** — Physics-only loss (cascaded over laws); user adds data loss in JAX or PyTorch.
   - **audit** — Computes R_norm, admissibility score, and overall admissibility score from the log; writes metrics back into the same log.
   - **visualize** — Plots RMS and metrics per key (optional matplotlib).
