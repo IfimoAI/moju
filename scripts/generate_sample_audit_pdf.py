@@ -37,31 +37,31 @@ def _sample_report() -> dict:
                 "admissibility_score": 0.88,
                 "admissibility_level": "Moderate Admissibility",
             },
-            "groups/Re": {
+            "scaling/re_definition": {
                 "rms": 0.01,
                 "r_norm": 0.05,
                 "admissibility_score": 0.95,
                 "admissibility_level": "High Admissibility",
             },
-            "groups/Nu": {
+            "scaling/pe_identity": {
                 "rms": 0.12,
                 "r_norm": 0.43,
                 "admissibility_score": 0.70,
                 "admissibility_level": "Moderate Admissibility",
             },
-            "groups/Pr": {
+            "scaling/pr_definition": {
                 "rms": 0.25,
                 "r_norm": 0.83,
                 "admissibility_score": 0.55,
                 "admissibility_level": "Low Admissibility",
             },
-            "models/sutherland_mu": {
+            "constitutive/sutherland_mu/direct_mu": {
                 "rms": 0.02,
                 "r_norm": 0.09,
                 "admissibility_score": 0.92,
                 "admissibility_level": "High Admissibility",
             },
-            "models/ideal_gas_rho": {
+            "constitutive/ideal_gas_rho/direct_rho": {
                 "rms": 0.01,
                 "r_norm": 0.02,
                 "admissibility_score": 0.98,

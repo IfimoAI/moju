@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moju"
-version = "0.2.2"
+version = "0.3.0"
 description = "Supervised Physics scaling and modeling for SciML."
 readme = "README.md"
 authors = [{ name = "Ifimo Lab", email = "lab@ifimoanalytics.com" }]
@@ -34,7 +34,7 @@ dependencies = [
 units = ["pint>=0.20"]
 dev = ["pytest", "black", "ruff"]
 torch = ["torch>=2.0.0", "jax2torch>=0.0.7"]
-report = ["reportlab>=4.0"]
+report = ["reportlab>=4.0", "optax>=0.2.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]

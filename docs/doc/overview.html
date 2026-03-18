@@ -47,76 +47,81 @@ rho = Models.ideal_gas_rho(P=101325.0, R=287.0, T=300.0)</code></pre>
     <p>All functions are JIT-compiled and support single-point or batched inputs (leading batch dimension). Use them inside loss functions and training loops with full JAX autodiff.</p>
 
     <h2>High-level architecture</h2>
-    <p>User-defined config (Laws, Groups, Models, Constants) and inputs (<code>state_pred</code>, optional <code>state_ref</code> and <code>key_ref</code>) feed into <strong>ResidualEngine</strong>, which computes residuals and optionally logs per-key RMS. The residual dict drives <strong>build_loss</strong> (physics-only) for training; the same log is used by <strong>audit</strong> and <strong>visualize</strong> for monitoring.</p>
+    <p>User config (Laws, Groups, optional <code>constitutive_audit</code> / <code>scaling_audit</code>, Constants) and inputs (<code>state_pred</code> with predicted fields, optional <code>state_ref</code> for data residual) feed into <strong>ResidualEngine</strong>. Merged state = <code>state_pred</code> + constants + group outputs (<code>output_key</code>). Residuals: <strong>laws</strong>, <strong>constitutive</strong> and <strong>scaling</strong> closure checks, and <strong>data</strong> when <code>state_ref</code> is set. <strong>build_loss</strong> uses laws only; <strong>audit</strong> / <strong>visualize</strong> use the full log.</p>
     <div class="mermaid">
 flowchart TB
   subgraph config [User config]
-    Laws[Laws]
-    Groups[Groups]
-    Models[Models]
+    Laws[Laws specs]
+    Groups[Groups materialize Fo Bi etc]
+    ConstAudit[constitutive_audit]
+    ScaleAudit[scaling_audit]
     Constants[Constants]
   end
 
   subgraph inputs [Inputs]
-    StatePred[state_pred]
+    StatePred[state_pred fields]
     StateRef[state_ref optional]
-    KeyRef[key_ref optional]
   end
 
   subgraph core [ResidualEngine]
-    StateBuilder[State builder]
-    ComputeResidual[compute_residuals]
+    Merge[Merge + run groups]
+    LawsR[Laws residuals]
+    ConstR[Constitutive closures]
+    ScaleR[Scaling closures]
+    DataR[data residual if state_ref]
   end
 
-  config --> StateBuilder
-  StatePred --> StateBuilder
-  StateRef --> StateBuilder
-  KeyRef --> ComputeResidual
-  StateBuilder --> ComputeResidual
+  StatePred --> Merge
+  Constants --> Merge
+  Groups --> Merge
+  Merge --> LawsR
+  Merge --> ConstR
+  Merge --> ScaleR
+  StateRef --> DataR
+  config --> LawsR
+  ConstAudit --> ConstR
+  ScaleAudit --> ScaleR
 
-  ComputeResidual --> ResidualDict[Residual dict]
-  ResidualDict --> BuildLoss[build_loss]
-  BuildLoss --> PhysicsLoss[Physics loss scalar only]
-  PhysicsLoss -->|"user adds data loss in JAX or torch"| TotalLoss[total_loss for optimizer]
+  LawsR --> ResidualDict[Flat RMS keys laws constitutive scaling data]
+  ConstR --> ResidualDict
+  ScaleR --> ResidualDict
+  DataR --> ResidualDict
 
-  ResidualDict --> RmsPerKey[Per-key RMS]
-  RmsPerKey --> Log[Log object]
+  ResidualDict --> BuildLoss[build_loss laws only]
+  BuildLoss --> PhysicsLoss[Physics loss scalar]
+  PhysicsLoss -->|"user adds data loss"| TotalLoss[total_loss]
+
+  ResidualDict --> Log[Log object]
   Log --> Audit[audit]
-  Audit -->|"logs metrics to same object"| Log
   Log --> Visualize[visualize]
-  Visualize --> Plots[Plots RMS and metrics per key]
     </div>
 
     <h2 id="training-and-monitoring-residual-engine">Training and monitoring (ResidualEngine)</h2>
-    <p><strong>ResidualEngine</strong> is the single entry point for residuals, physics loss, and monitoring. Import from <code>moju.monitor</code>: <code>from moju.monitor import ResidualEngine, build_loss, audit, visualize</code>. You configure laws, groups, and models; then one class computes residuals, builds a physics-only loss, and keeps a log for audit and visualization.</p>
+    <p><strong>ResidualEngine</strong>: <code>from moju.monitor import ResidualEngine, build_loss, audit, visualize, list_constitutive_models, list_scaling_closure_ids</code>. Configure <strong>laws</strong>, <strong>groups</strong> (to write dimensionless numbers into merged state), optional <strong>constitutive_audit</strong> (e.g. <code>["thermal_diffusivity", "sutherland_mu"]</code>), <strong>scaling_audit</strong> (e.g. <code>["pe_identity", "fo_definition"]</code>), and optional <strong>constitutive_custom</strong> / <strong>scaling_custom</strong> as lists of <code>{"name": "...", "fn": (state, constants) -&gt; array}</code>. Implementations live in <code>moju.monitor.constitutive_closures</code> and <code>moju.monitor.scaling_closures</code>.</p>
     <ul>
-      <li><strong>compute_residuals(state_pred, state_ref=None, key_ref=None, *, log_to_python=True)</strong> — Returns a residual dict: laws always; groups and models when <code>key_ref</code> or <code>state_ref</code> is provided; data residual only when <code>state_ref</code> is provided. Logs per-key RMS to a single log object. Set <code>log_to_python=False</code> when calling inside <code>jax.jit</code> / <code>jax.grad</code> to keep RMS values as JAX arrays instead of Python floats.</li>
-      <li><strong>build_loss</strong> — Physics-only (cascaded over laws). No data residual or loss passed in; you add data loss in JAX or PyTorch to the returned scalar.</li>
-      <li><strong>audit</strong> — Reads the logged RMS, computes R_norm, admissibility score, and overall admissibility score; assigns one of four levels per key and overall: 0.00–&lt;0.40 Non-Admissible, 0.40–&lt;0.70 Low Admissibility, 0.70–&lt;0.90 Moderate Admissibility, 0.90–1.00 High Admissibility. Writes these back into the same log. Includes data residual metrics only when <code>state_ref</code> was provided. Use <code>admissibility_level(score)</code> for the same mapping. Optional PDF export: pass <code>export_dir</code> (and optionally <code>save_residuals=True</code>, <code>last_residual_dict=...</code>) to write a Physical Admissibility Report PDF and a zipped results folder; requires <code>pip install moju[report]</code>.</li>
-      <li><strong>visualize</strong> — Plots RMS per key and admissibility score per key as training proceeds and/or at the end.</li>
+      <li><strong>compute_residuals(state_pred, state_ref=None, *, log_to_python=True)</strong> — Always runs laws and any listed constitutive/scaling closures (closures with missing state keys are skipped). Data residual when <code>state_ref</code> is provided. Logs per-key RMS. Use <code>log_to_python=False</code> inside <code>jax.jit</code> / <code>jax.grad</code>.</li>
+      <li><strong>build_loss</strong> — Cascaded over <strong>laws</strong> only.</li>
+      <li><strong>audit</strong> — R_norm, admissibility levels, optional PDF (<code>pip install moju[report]</code>). Report groups metrics under Governing laws, Constitutive relations, Scaling and similarity, and Data when applicable.</li>
+      <li><strong>visualize</strong> — RMS and admissibility per logged key.</li>
     </ul>
-    <p><code>key_ref</code> is for Groups and Models only (reference values for group/model outputs). Data residual is computed and logged only when <code>state_ref</code> is provided.</p>
 
     <h3 id="custom-physics-fn">Custom physics (optional <code>fn</code>)</h3>
-    <p>You can use your own JAX-differentiable functions as laws, groups, or models instead of (or alongside) the built-in ones. In any spec, add an optional <code>"fn": your_callable</code>. The engine will call your function with keyword arguments derived from <code>state_map</code> (same as for built-in names). Your function must accept those kwargs and return JAX arrays so the pipeline stays differentiable.</p>
-    <p><strong>Laws.</strong> Spec: <code>{"name": "my_law", "state_map": {"x": "state_key"}, "fn": my_residual_fn}</code>. <code>my_residual_fn(x=...)</code> should return the residual (e.g. R = 0 when satisfied). The residual is used in <code>build_loss</code> and in the log.</p>
-    <p><strong>Groups and models.</strong> Spec: <code>{"name": "my_group", "state_map": {"a": "a", "b": "b"}, "output_key": "ab", "fn": my_fn}</code>. Your function is called with kwargs from <code>state_map</code>; its return value is written to <code>output_key</code> in the state and (when <code>key_ref</code> is provided) used for the group/model residual.</p>
-    <p>Use JAX/NumPy (<code>jax.numpy</code>) inside your <code>fn</code> so it remains differentiable. Example: custom law</p>
+    <p>In law or group specs, add <code>"fn": your_callable</code>; kwargs from <code>state_map</code>. <strong>Laws</strong> return the PDE residual. <strong>Groups</strong> return a value stored at <code>output_key</code> in merged state.</p>
+    <p>For extra closure residuals, use <code>constitutive_custom</code> / <code>scaling_custom</code> or register-style lists on the engine.</p>
     <pre><code>import jax.numpy as jnp
 from moju.monitor import ResidualEngine, build_loss
 
 def my_residual(x):
-    return x - 1.0  # residual = 0 when x == 1
+    return x - 1.0
 
 engine = ResidualEngine(
     constants={},
     laws=[{"name": "my_law", "state_map": {"x": "x"}, "fn": my_residual}],
-    groups=[], models=[],
+    groups=[],
 )
 state = {"x": jnp.array(2.0)}
 residuals = engine.compute_residuals(state)
-# residuals["laws"]["my_law"] == 1.0
-loss = build_loss(residuals)  # physics loss from your custom law</code></pre>
+loss = build_loss(residuals)</code></pre>
 
     <h2>Before / After Moju</h2>
     <p>Corrected code snippets for the &ldquo;Hardwiring reality into every iteration&rdquo; comparison (pure JAX PINN vs physics-native moju): <a href="../before-after-moju.md">Before / After Moju (corrected)</a>.</p>

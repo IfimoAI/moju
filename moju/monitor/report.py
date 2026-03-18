@@ -17,30 +17,35 @@ try:
 except ImportError:
     _REPORTLAB_AVAILABLE = False
 
-# Section headers for key prefixes
+# Section headers for first path segment of log keys (laws/..., constitutive/..., scaling/..., data/...)
 _CATEGORY_HEADERS: Dict[str, str] = {
     "laws": "Governing Laws",
-    "groups": "Scaling & Similarity",
-    "models": "Constitutive Relations",
+    "constitutive": "Constitutive relations",
+    "scaling": "Scaling and similarity",
     "data": "Data",
+    "groups": "Scaling and similarity (legacy key)",
+    "models": "Constitutive (legacy key)",
 }
 
 
 def _group_keys_by_category(per_key: Dict[str, Any]) -> List[Tuple[str, List[Tuple[str, Any]]]]:
-    """Group per_key by prefix (laws/, groups/, models/, data/) and return (section_header, [(key, data), ...])."""
     buckets: Dict[str, List[Tuple[str, Any]]] = {
         "laws": [],
+        "constitutive": [],
+        "scaling": [],
+        "data": [],
         "groups": [],
         "models": [],
-        "data": [],
     }
     for key, data in per_key.items():
         if "/" in key:
             prefix, rest = key.split("/", 1)
             if prefix in buckets:
-                buckets[prefix].append((rest.replace("_", " ").title(), data))
+                label = rest.replace("_", " ").replace("/", " — ").title()
+                buckets[prefix].append((label, data))
+    order = ("laws", "constitutive", "scaling", "data", "groups", "models")
     result: List[Tuple[str, List[Tuple[str, Any]]]] = []
-    for cat in ("laws", "groups", "models", "data"):
+    for cat in order:
         if buckets[cat]:
             result.append((_CATEGORY_HEADERS[cat], buckets[cat]))
     return result
@@ -157,6 +162,16 @@ def write_audit_pdf(
     if meta_parts:
         story.append(Paragraph(" &nbsp; &nbsp; ".join(meta_parts), body_style))
         story.append(Spacer(1, 12))
+
+    story.append(
+        Paragraph(
+            "<i>These metrics are consistency indicators for declared laws, constitutive closures, "
+            "and scaling identities on the evaluated sample. They are not a certification of "
+            "physical correctness.</i>",
+            body_style,
+        )
+    )
+    story.append(Spacer(1, 12))
 
     # Overall score and level
     story.append(Paragraph("Overall", heading_style))

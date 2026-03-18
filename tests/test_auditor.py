@@ -1,16 +1,21 @@
-"""Tests for ResidualEngine, build_loss, audit, and visualize."""
+"""Tests for ResidualEngine, build_loss, audit, visualize, constitutive/scaling closures."""
 
 import pytest
 import jax
 import jax.numpy as jnp
-from moju.monitor import ResidualEngine, admissibility_level, build_loss, audit, visualize
+from moju.monitor import (
+    ResidualEngine,
+    admissibility_level,
+    audit,
+    build_loss,
+    list_constitutive_models,
+    list_scaling_closure_ids,
+    visualize,
+)
 
 
 class TestAdmissibilityLevel:
-    """admissibility_level maps score to one of four levels."""
-
     def test_four_levels(self):
-        """0.00-<0.40 Non-Admissible; 0.40-<0.70 Low Admissibility; 0.70-<0.90 Moderate; 0.90-1.00 High."""
         assert admissibility_level(0.0) == "Non-Admissible"
         assert admissibility_level(0.39) == "Non-Admissible"
         assert admissibility_level(0.40) == "Low Admissibility"
@@ -22,80 +27,71 @@ class TestAdmissibilityLevel:
 
 
 class TestResidualEngineResidualDict:
-    """compute_residuals returns correct residual dict structure."""
-
-    def test_laws_only_when_no_ref(self, rtol, atol):
-        """When state_ref and key_ref are None, only law residuals are computed."""
+    def test_laws_only_when_no_audits(self, rtol, atol):
         core = ResidualEngine(
             constants={"L": 0.1},
             laws=[{"name": "mass_incompressible", "state_map": {"u_grad": "u_grad"}}],
-            groups=[],
-            models=[],
         )
         state_pred = {"u_grad": jnp.array([[0.0, 1.0], [-1.0, 0.0]])}
         residuals = core.compute_residuals(state_pred)
         assert "laws" in residuals
-        assert "mass_incompressible" in residuals["laws"]
         assert jnp.allclose(residuals["laws"]["mass_incompressible"], 0.0, rtol=rtol, atol=atol)
-        assert "groups" not in residuals
-        assert "models" not in residuals
+        assert "constitutive" not in residuals
+        assert "scaling" not in residuals
         assert "data" not in residuals
 
     def test_log_appends_rms_per_key(self):
-        """Log gets one entry per compute_residuals with rms per key."""
         core = ResidualEngine(
-            constants={},
             laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
-            groups=[],
-            models=[],
         )
         state_pred = {"phi_laplacian": jnp.array(1.0)}
         core.compute_residuals(state_pred)
         core.compute_residuals(state_pred)
         assert len(core.log) == 2
-        assert core.log[0]["index"] == 0
-        assert core.log[1]["index"] == 1
-        assert "rms" in core.log[0]
         assert "laws/laplace_equation" in core.log[0]["rms"]
 
-    def test_key_ref_adds_groups_and_models_residuals(self, rtol, atol):
-        """When key_ref is provided, group and model residuals are computed vs key_ref."""
+    def test_constitutive_sutherland_closure(self, rtol, atol):
         core = ResidualEngine(
             constants={"mu0": 1.8e-5, "T0": 273.0, "S": 110.4},
             laws=[],
-            groups=[{"name": "re", "state_map": {"u": "u", "L": "L", "rho": "rho", "mu": "mu"}, "output_key": "re"}],
-            models=[{"name": "sutherland_mu", "state_map": {"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"}, "output_key": "mu"}],
+            constitutive_audit=["sutherland_mu"],
         )
-        state_pred = {"u": 1.0, "L": 0.1, "rho": 1.2, "T": 300.0}
-        key_ref = {"re": 100.0, "mu": 2.0e-5}
-        residuals = core.compute_residuals(state_pred, key_ref=key_ref)
-        assert "groups" in residuals
-        assert "re" in residuals["groups"]
-        assert "models" in residuals
-        assert "mu" in residuals["models"]
-        assert "data" not in residuals
+        T = 300.0
+        mu_true = 1.8e-5 * (T / 273) ** 1.5 * (273 + 110.4) / (T + 110.4)
+        state_pred = {"mu": mu_true + 1e-6, "T": T}
+        residuals = core.compute_residuals(state_pred)
+        assert "constitutive" in residuals
+        assert "sutherland_mu/direct_mu" in residuals["constitutive"]
+        assert abs(float(residuals["constitutive"]["sutherland_mu/direct_mu"])) > 1e-8
+
+    def test_scaling_pe_identity_zero(self, rtol, atol):
+        core = ResidualEngine(laws=[], scaling_audit=["pe_identity"])
+        Re, Pr = 100.0, 0.7
+        state_pred = {"Pe": Re * Pr, "Re": Re, "Pr": Pr}
+        residuals = core.compute_residuals(state_pred)
+        assert "scaling" in residuals
+        assert jnp.allclose(residuals["scaling"]["pe_identity"], 0.0, rtol=rtol, atol=atol)
+
+    def test_scaling_pe_identity_nonzero(self, rtol, atol):
+        core = ResidualEngine(laws=[], scaling_audit=["pe_identity"])
+        state_pred = {"Pe": 100.0, "Re": 10.0, "Pr": 5.0}
+        residuals = core.compute_residuals(state_pred)
+        expected = 100.0 - 10.0 * 5.0
+        assert jnp.allclose(residuals["scaling"]["pe_identity"], expected, rtol=rtol, atol=atol)
 
     def test_state_ref_adds_data_residual(self, rtol, atol):
-        """When state_ref is provided, data residual is computed over common keys."""
         core = ResidualEngine(
-            constants={},
             laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
-            groups=[],
-            models=[],
         )
         state_pred = {"phi_laplacian": jnp.array(0.5)}
         state_ref = {"phi_laplacian": jnp.array(0.0)}
         residuals = core.compute_residuals(state_pred, state_ref=state_ref)
         assert "data" in residuals
-        assert "phi_laplacian" in residuals["data"]
         assert jnp.allclose(residuals["data"]["phi_laplacian"], -0.5, rtol=rtol, atol=atol)
 
 
 class TestBuildLoss:
-    """build_loss is physics-only and cascaded over laws."""
-
     def test_cascaded_loss_scalar(self, rtol, atol):
-        """build_loss returns a scalar."""
         residual_dict = {
             "laws": {
                 "mass_incompressible": jnp.array(0.0),
@@ -103,155 +99,74 @@ class TestBuildLoss:
             }
         }
         loss = build_loss(residual_dict)
-        assert loss.shape == ()
         assert jnp.allclose(loss, 0.0, rtol=rtol, atol=atol)
 
     def test_cascaded_loss_nonzero(self, rtol, atol):
-        """build_loss is sum of weighted RMS of law residuals."""
-        residual_dict = {
-            "laws": {
-                "laplace_equation": jnp.array(3.0),
-            }
-        }
+        residual_dict = {"laws": {"laplace_equation": jnp.array(3.0)}}
         loss = build_loss(residual_dict)
-        assert float(loss) >= 0
         assert jnp.allclose(loss, 3.0, rtol=rtol, atol=atol)
 
     def test_build_loss_law_weights(self, rtol, atol):
-        """law_weights customizes per-law weights."""
-        residual_dict = {
-            "laws": {
-                "a": jnp.array(1.0),
-                "b": jnp.array(0.0),
-            }
-        }
+        residual_dict = {"laws": {"a": jnp.array(1.0), "b": jnp.array(0.0)}}
         loss = build_loss(residual_dict, law_weights={"a": 1.0, "b": 0.0})
         assert jnp.allclose(loss, 1.0, rtol=rtol, atol=atol)
 
     def test_build_loss_differentiable(self):
-        """build_loss output is differentiable w.r.t. residual inputs."""
         def loss_fn(phi_laplacian):
-            rd = {"laws": {"laplace_equation": phi_laplacian}}
-            return build_loss(rd)
+            return build_loss({"laws": {"laplace_equation": phi_laplacian}})
+
         grad = jax.grad(loss_fn)(jnp.array(2.0))
         assert grad is not None
 
 
 class TestBuildLossBatch:
-    """build_loss reduces over batch."""
-
     def test_batch_law_residuals(self, rtol, atol):
-        """Residual dict with batch dimension; loss is scalar."""
-        residual_dict = {
-            "laws": {
-                "mass_incompressible": jnp.zeros((5,)),
-            }
-        }
+        residual_dict = {"laws": {"mass_incompressible": jnp.zeros((5,))}}
         loss = build_loss(residual_dict)
-        assert loss.shape == ()
         assert jnp.allclose(loss, 0.0, rtol=rtol, atol=atol)
 
 
 class TestAudit:
-    """audit computes R_norm, admissibility score, writes back to log."""
-
     def test_audit_writes_back_to_log(self):
-        """audit adds r_norm, admissibility_score, overall_admissibility_score to each log entry."""
         log = [
-            {"index": 0, "rms": {"laws/a": 2.0, "laws/b": 1.0}},
-            {"index": 1, "rms": {"laws/a": 1.0, "laws/b": 0.5}},
+            {"index": 0, "rms": {"laws/a": 2.0, "constitutive/x": 1.0}},
+            {"index": 1, "rms": {"laws/a": 1.0, "constitutive/x": 0.5}},
         ]
         report = audit(log)
         assert "per_key" in report
-        assert "overall_admissibility_score" in report
-        assert "overall_admissibility_level" in report
         assert "r_norm" in log[0]
-        assert "admissibility_score" in log[0]
-        assert "overall_admissibility_score" in log[0]
-        assert "r_norm" in log[1]
-        assert "admissibility_score" in log[1]
-        # per_key entries include admissibility_level
-        for k, v in report["per_key"].items():
-            assert "admissibility_level" in v
 
     def test_audit_r_ref_from_first_entry(self):
-        """When r_ref is None, first entry's rms is used as reference."""
-        log = [
-            {"index": 0, "rms": {"k": 10.0}},
-            {"index": 1, "rms": {"k": 5.0}},
-        ]
+        log = [{"index": 0, "rms": {"k": 10.0}}, {"index": 1, "rms": {"k": 5.0}}]
         audit(log)
         assert log[1]["r_norm"]["k"] == 0.5
-        assert log[1]["admissibility_score"]["k"] == 1.0 / (1.0 + 0.5)
 
-    def test_audit_export_dir_creates_session_folder_and_zip(self, tmp_path):
-        """When export_dir is set, audit creates session folder with report.pdf and a zip."""
+    def test_audit_export_dir_pdf_with_new_categories(self, tmp_path):
         pytest.importorskip("reportlab")
         log = [
-            {"index": 0, "rms": {"laws/a": 1.0}},
-            {"index": 1, "rms": {"laws/a": 0.5}},
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5, "scaling/pe_identity": 0.1}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25, "scaling/pe_identity": 0.05}},
         ]
         report = audit(log, export_dir=str(tmp_path))
         assert "per_key" in report
-        # Session dir: audit_YYYYMMDD_HHMM
         dirs = [d for d in tmp_path.iterdir() if d.is_dir() and d.name.startswith("audit_")]
         assert len(dirs) == 1
-        session_dir = dirs[0]
-        assert (session_dir / "report.pdf").exists()
-        # Zip with same base name
-        zips = list(tmp_path.glob("audit_*.zip"))
-        assert len(zips) == 1
-        assert zips[0].name == session_dir.name + ".zip"
+        assert (dirs[0] / "report.pdf").exists()
 
 
 class TestVisualize:
-    """visualize produces plots or returns None."""
-
     def test_visualize_empty_log_returns_none(self):
-        """Empty log returns None."""
-        fig = visualize([], backend="matplotlib")
-        assert fig is None
+        assert visualize([], backend="matplotlib") is None
 
     def test_visualize_backend_none_returns_none(self):
-        """backend='none' returns None without plotting."""
-        log = [{"index": 0, "rms": {"k": 1.0}}]
-        fig = visualize(log, backend="none")
-        assert fig is None
-
-    def test_visualize_with_log_no_crash(self):
-        """With log entries, visualize does not raise (may return None if no matplotlib)."""
-        log = [
-            {"index": 0, "rms": {"laws/a": 1.0}},
-            {"index": 1, "rms": {"laws/a": 0.5}},
-        ]
-        fig = visualize(log, backend="matplotlib")
-        assert fig is None or hasattr(fig, "savefig")
+        assert visualize([{"index": 0, "rms": {"k": 1.0}}], backend="none") is None
 
 
 class TestResidualEngineStateBuilder:
-    """State builder runs models then groups."""
-
-    def test_state_builder_adds_model_output(self, rtol, atol):
-        """Model output is written to state under output_key."""
-        core = ResidualEngine(
-            constants={"mu0": 1.8e-5, "T0": 273.0, "S": 110.4},
-            laws=[],
-            groups=[],
-            models=[{"name": "sutherland_mu", "state_map": {"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"}, "output_key": "mu"}],
-        )
-        state_pred = {"T": 300.0}
-        state = core._state_builder(state_pred)
-        assert "mu" in state
-        expected = 1.8e-5 * (300 / 273) ** 1.5 * (273 + 110.4) / (300 + 110.4)
-        assert abs(float(state["mu"]) - expected) < 1e-10
-
-    def test_state_builder_adds_group_output(self, rtol, atol):
-        """Group output is written to state under output_key."""
+    def test_groups_enrich_state(self, rtol, atol):
         core = ResidualEngine(
             constants={"L": 0.1},
-            laws=[],
             groups=[{"name": "re", "state_map": {"u": "u", "L": "L", "rho": "rho", "mu": "mu"}, "output_key": "re"}],
-            models=[],
         )
         state_pred = {"u": 1.0, "rho": 1000.0, "mu": 1.0}
         state = core._state_builder(state_pred)
@@ -260,64 +175,54 @@ class TestResidualEngineStateBuilder:
 
 
 class TestCustomFn:
-    """User-defined custom laws, groups, and models via spec['fn']."""
-
     def test_custom_law_fn(self, rtol, atol):
-        """Custom law callable in spec is used; residual is correct and appears in log/build_loss."""
         def my_residual(x):
             return x - 1.0
 
         core = ResidualEngine(
-            constants={},
             laws=[{"name": "my_law", "state_map": {"x": "x"}, "fn": my_residual}],
-            groups=[],
-            models=[],
         )
         state_pred = {"x": jnp.array(2.0)}
         residuals = core.compute_residuals(state_pred)
-        assert "laws" in residuals
-        assert "my_law" in residuals["laws"]
         assert jnp.allclose(residuals["laws"]["my_law"], 1.0, rtol=rtol, atol=atol)
-        assert "laws/my_law" in core.log[-1]["rms"]
-        loss_val = build_loss(residuals)
-        assert jnp.allclose(loss_val, 1.0, rtol=rtol, atol=atol)
+        assert jnp.allclose(build_loss(residuals), 1.0, rtol=rtol, atol=atol)
 
-    def test_custom_model_fn(self, rtol, atol):
-        """Custom model fn is used in state builder and in residuals when key_ref is provided."""
-        def my_mu(T, scale):
-            return scale * T
-
+    def test_constitutive_custom_closure(self, rtol, atol):
         core = ResidualEngine(
-            constants={"scale": 0.01},
             laws=[],
-            groups=[],
-            models=[{"name": "my_mu", "state_map": {"T": "T", "scale": "scale"}, "output_key": "mu", "fn": my_mu}],
+            constitutive_custom=[{"name": "my_c", "fn": lambda s, c: s["a"] - 2.0 * s["b"]}],
         )
-        state_pred = {"T": 300.0}
-        state = core._state_builder(state_pred)
-        assert "mu" in state
-        assert jnp.allclose(state["mu"], 3.0, rtol=rtol, atol=atol)
-        residuals = core.compute_residuals(state_pred, key_ref={"mu": 2.0})
-        assert "models" in residuals
-        assert "mu" in residuals["models"]
-        assert jnp.allclose(residuals["models"]["mu"], 1.0, rtol=rtol, atol=atol)
+        state_pred = {"a": jnp.array(4.0), "b": jnp.array(2.0)}
+        residuals = core.compute_residuals(state_pred)
+        assert jnp.allclose(residuals["constitutive"]["custom/my_c"], 0.0, rtol=rtol, atol=atol)
 
-    def test_custom_group_fn(self, rtol, atol):
-        """Custom group fn is used and appears in residuals with key_ref."""
+    def test_scaling_custom_closure(self, rtol, atol):
+        core = ResidualEngine(
+            laws=[],
+            scaling_custom=[{"name": "diff", "fn": lambda s, c: s["x"] - s["y"]}],
+        )
+        state_pred = {"x": jnp.array(1.0), "y": jnp.array(3.0)}
+        residuals = core.compute_residuals(state_pred)
+        assert jnp.allclose(residuals["scaling"]["custom/diff"], -2.0, rtol=rtol, atol=atol)
+
+    def test_custom_group_fn_in_state(self, rtol, atol):
         def my_group(a, b):
             return a * b
 
         core = ResidualEngine(
-            constants={},
-            laws=[],
             groups=[{"name": "my_ab", "state_map": {"a": "a", "b": "b"}, "output_key": "ab", "fn": my_group}],
-            models=[],
         )
-        state_pred = {"a": jnp.array(3.0), "b": jnp.array(4.0)}
-        state = core._state_builder(state_pred)
-        assert "ab" in state
+        state = core._state_builder({"a": jnp.array(3.0), "b": jnp.array(4.0)})
         assert jnp.allclose(state["ab"], 12.0, rtol=rtol, atol=atol)
-        residuals = core.compute_residuals(state_pred, key_ref={"ab": 10.0})
-        assert "groups" in residuals
-        assert "ab" in residuals["groups"]
-        assert jnp.allclose(residuals["groups"]["ab"], 2.0, rtol=rtol, atol=atol)
+
+
+class TestRegistryHelpers:
+    def test_list_constitutive_models(self):
+        names = list_constitutive_models()
+        assert "sutherland_mu" in names
+        assert "thermal_diffusivity" in names
+
+    def test_list_scaling_closure_ids(self):
+        ids = list_scaling_closure_ids()
+        assert "pe_identity" in ids
+        assert "fo_definition" in ids

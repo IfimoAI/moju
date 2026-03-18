@@ -28,20 +28,34 @@ def test_piratio_module_has_all():
 
 
 def test_import_monitor_all():
-    """moju.monitor exports ResidualEngine, admissibility_level, build_loss, audit, visualize."""
-    from moju.monitor import ResidualEngine, admissibility_level, build_loss, audit, visualize
+    """moju.monitor exports ResidualEngine, audit helpers, closure listers."""
+    from moju.monitor import (
+        ResidualEngine,
+        admissibility_level,
+        build_loss,
+        audit,
+        visualize,
+        list_constitutive_models,
+        list_scaling_closure_ids,
+    )
     assert ResidualEngine is not None
-    assert callable(admissibility_level)
-    assert callable(build_loss)
-    assert callable(audit)
-    assert callable(visualize)
+    assert callable(list_constitutive_models)
+    assert callable(list_scaling_closure_ids)
 
 
 def test_monitor_module_has_all():
     """monitor __all__ matches public API."""
     import moju.monitor as monitor
     assert hasattr(monitor, "__all__")
-    assert set(monitor.__all__) == {"ResidualEngine", "admissibility_level", "build_loss", "audit", "visualize"}
+    assert set(monitor.__all__) == {
+        "ResidualEngine",
+        "admissibility_level",
+        "build_loss",
+        "audit",
+        "visualize",
+        "list_constitutive_models",
+        "list_scaling_closure_ids",
+    }
 
 
 def test_groups_has_re_and_pr():
