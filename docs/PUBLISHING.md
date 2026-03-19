@@ -12,7 +12,7 @@ pip install build
 python -m build
 ```
 
-This produces `dist/moju-<version>.tar.gz` and `dist/moju-<version>-py3-none-any.whl` (e.g. `moju-0.2.0`).
+This produces `dist/moju-<version>.tar.gz` and `dist/moju-<version>-py3-none-any.whl` (e.g. `moju-0.4.0`).
 
 ## Upload
 
@@ -36,9 +36,9 @@ After a successful upload, anyone can run `pip install moju`.
 
 ## Version bump for future releases
 
-1. Update `version` in [pyproject.toml](../pyproject.toml).
-2. Set the same value for `__version__` in [moju/__init__.py](../moju/__init__.py) so the package and runtime version stay in sync.
-3. Re-run `python -m build` and upload (e.g. `twine upload dist/moju-<version>*` or use the GitHub Actions workflow).
+1. Update **both** to the same version string (e.g. `0.5.0`): `version` in [pyproject.toml](../pyproject.toml) and `__version__` in [moju/__init__.py](../moju/__init__.py) so the package and runtime version stay in sync.
+2. Add or update the release section in [CHANGELOG.md](../CHANGELOG.md) (e.g. `## [0.5.0] - YYYY-MM-DD`).
+3. Re-run `python -m build` and upload (e.g. `twine upload dist/moju-<version>*` or use the GitHub Actions workflow). Use tag `v` + version (e.g. `v0.5.0`) when creating the Git tag and GitHub Release.
 
 The GitHub Actions workflow (on release or manual run) skips the PyPI upload if the built version is already published, so retroactive or duplicate releases do not fail.
 
@@ -46,6 +46,6 @@ The GitHub Actions workflow (on release or manual run) skips the PyPI upload if 
 
 After merging the release branch into `main` and pushing:
 
-1. Create an annotated tag for the version: `git tag -a v0.2.0 -m "Release 0.2.0"` (on the commit that has the version bump).
-2. Push the tag: `git push origin v0.2.0`.
-3. Create a GitHub Release from the tag (Releases → Draft a new release → choose tag `v0.2.0`, set as latest, publish). This triggers the Publish to PyPI workflow if the version is not already on PyPI.
+1. Create an annotated tag for the version: `git tag -a v0.4.0 -m "Release 0.4.0"` (on the commit that has the version bump).
+2. Push the tag: `git push origin v0.4.0`.
+3. Create a GitHub Release from the tag (Releases → Draft a new release → choose tag `v0.4.0`, set as latest, publish). This triggers the Publish to PyPI workflow if the version is not already on PyPI.

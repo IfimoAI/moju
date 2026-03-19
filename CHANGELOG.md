@@ -4,6 +4,22 @@ All notable changes to moju are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.0] - 2026-03-15
+
+### Added
+
+- **Scale-based R_norm**: R_norm(k) = RMS(r_k)/scale_k; scale is state-derived by default (from merged state/specs per key). Optional `r_ref` in `audit(log, r_ref=...)` overrides scale for given keys. Each log entry stores `entry["scale"]`; fallback to first-entry RMS when `scale` is missing (backward compatibility).
+- **state_ref loaders**: `from_vtk`, `from_vtu`, `from_openfoam`, `from_hdf5` in `moju.monitor.state_ref`; optional extras `ref_vtk`, `ref_foam`, `ref_hdf5`, `ref_all`. Examples: `monitor_state_ref_from_vtu_demo.py`, `monitor_state_ref_from_openfoam_demo.py`, `monitor_state_ref_from_hdf5_demo.py`. Tests: `test_state_ref_meshio.py`, `test_state_ref_hdf5.py`. CI jobs for ref_vtk, ref_hdf5, ref_foam.
+
+### Changed
+
+- **audit()**: Uses scale_k from `r_ref` or `entry["scale"]` or fallback; R_norm(k) = RMS(r_k)/scale_k; admissibility unchanged.
+- **ResidualEngine.compute_residuals**: Computes state-derived scale per key and stores in log entry.
+- README and docs overview document R_norm = RMS/scale, state-derived scale, and r_ref override.
+- `scripts/generate_sample_audit_pdf.py`: comment that r_norm is RMS/scale.
+
+---
+
 ## [0.3.0] - 2026-03-09
 
 ### Breaking
@@ -22,7 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.2.2] - 2026-03-16
+## [0.2.2] - 2025-03-16
 
 ### Added
 
