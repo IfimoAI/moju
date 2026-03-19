@@ -124,6 +124,26 @@ class TestResidualEngineResidualDict:
         assert "data" in residuals
         assert jnp.allclose(residuals["data"]["phi_laplacian"], -0.5, rtol=rtol, atol=atol)
 
+    def test_inferred_predicted_spatial_logged(self):
+        core = ResidualEngine(
+            constants={"mu0": 1.8e-5, "T0": 273.0, "S": 110.4},
+            laws=[],
+            constitutive_audit=[
+                {
+                    "name": "sutherland_mu",
+                    "output_key": "mu",
+                    "state_map": {"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
+                    # predicted_spatial intentionally omitted to trigger inference
+                }
+            ],
+        )
+        T = 300.0
+        mu_true = 1.8e-5 * (T / 273) ** 1.5 * (273 + 110.4) / (T + 110.4)
+        state_pred = {"mu": mu_true, "T": T, "d_T_dx": jnp.array(1.0), "d_mu_dx": jnp.array(0.0)}
+        core.compute_residuals(state_pred, collocation={"x": jnp.array([0.0])})
+        assert "inferred" in core.log[-1]
+        assert any("constitutive:sutherland_mu inferred predicted_spatial=['T']" in s for s in core.log[-1]["inferred"])
+
 
 class TestBuildLoss:
     def test_cascaded_loss_scalar(self, rtol, atol):
