@@ -53,9 +53,30 @@ The package provides two namespaces: **moju.piratio** (Groups, Models, Laws, Ope
 
 **Operators.** Derivatives for fields defined by a neural network: gradient, divergence, Laplacian, curl, time derivatives. Pass your network and collocation points; moju returns the derivatives via JAX autodiff. Single points or batched.
 
-**moju.monitor** — **ResidualEngine**, build_loss, audit, visualize. Configure **laws**, **groups** (to materialize dimensionless numbers into merged state), optional **constitutive_audit** / **scaling_audit** (registered closure residuals), and optional **constitutive_custom** / **scaling_custom** hooks. Put predicted fields (e.g. `T`, `kappa`, `alpha`) in `state_pred` before calling the engine. `compute_residuals(state_pred, state_ref=None, *, log_to_python=True)` returns residuals under `laws/`, `constitutive/…`, `scaling/…`, and `data/` when `state_ref` is set. **build_loss** uses **laws only** (cascaded physics loss). **audit** / **visualize** use the full logged RMS tree. Use `log_to_python=False` inside `jax.jit` / `jax.grad`. Helpers: `list_constitutive_models()`, `list_scaling_closure_ids()`. See the [Overview](https://ifimoai.github.io/moju/doc/overview.html#training-and-monitoring-residual-engine).
+**moju.monitor** — **ResidualEngine**, build_loss, audit, visualize.
 
-**Custom laws and groups.** In law or group specs, add optional `"fn": your_callable`; kwargs come from `state_map`. **Laws**: return the PDE residual (used in `build_loss`). **Groups**: return value is written to `output_key` in merged state (e.g. for Fo, Bi). Constitutive/scaling audit closures are separate registries (`moju.monitor.constitutive_closures`, `scaling_closures`) or custom lists on the engine.
+- **Residuals**: `compute_residuals(...)` returns residuals under `laws/…`, optional `constitutive/…`, `scaling/…`, and `data/…` (when `state_ref` is provided).
+- **Two entry paths**:
+  - **Path A (recommended)**: provide `(model, params, collocation)` and a `state_builder` so moju can build `state_pred` (and derivative keys) consistently.
+  - **Path B (advanced)**: provide `state_pred` directly (including derivative keys like `d_T_dx`, `d_mu_dt` when chain closures apply).
+- **Constitutive and scaling/similarity audits** are tied to **Models.* and Groups.* functions** via audit specs, with three closure types:
+  - `ref_delta` (requires `state_ref`)
+  - `chain_dx` (spatial chain rule; requires spatially varying inputs + derivative keys)
+  - `chain_dt` (temporal chain rule; requires time-varying inputs + derivative keys)
+  Items with **no spatial and no temporal variation** are omitted from the report.
+- **Physics loss**: **build_loss** uses **laws only**.
+- **Audit**: category scores for Governing laws / Constitutive / Scaling-similarity; overall score is a **geometric mean** across present categories (empty categories excluded).
+
+**Custom laws and groups.** In law or group specs, add optional `"fn": your_callable`; kwargs come from `state_map`. **Laws**: return the PDE residual (used in `build_loss`). **Groups**: return value is written to `output_key` in merged state (e.g. for Fo, Bi).
+
+### Monitor in minutes
+
+Run the minimal chain demos:
+
+```bash
+python examples/monitor_chain_spatial_demo.py
+python examples/monitor_chain_temporal_demo.py
+```
 
 ## Examples
 
