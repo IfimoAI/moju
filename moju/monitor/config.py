@@ -20,6 +20,13 @@ class AuditSpec:
     state_map: Dict[str, str]
     predicted_spatial: List[str] = field(default_factory=list)
     predicted_temporal: List[str] = field(default_factory=list)
+    # Closure evaluation mode for chain_dx/chain_dt.
+    # - pointwise: return pointwise residual array (current behavior)
+    # - weak: return weighted integrated RMS (noise-robust)
+    closure_mode: str = "pointwise"
+    # Weak-form hook: canonical axis -> state key holding quadrature weights.
+    # Examples: {"x": "w_x"} or {"t": "w_t"}.
+    quadrature_weights: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -32,6 +39,8 @@ class AuditSpec:
             state_map=dict(d.get("state_map") or {}),
             predicted_spatial=list(d.get("predicted_spatial") or []),
             predicted_temporal=list(d.get("predicted_temporal") or []),
+            closure_mode=str(d.get("closure_mode") or "pointwise"),
+            quadrature_weights=dict(d.get("quadrature_weights") or {}),
         )
 
 

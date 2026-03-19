@@ -12,7 +12,7 @@ Core `moju` does not depend on xarray; xarray support is optional.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -178,4 +178,111 @@ def from_numpy_grids(
         data_vars[var_name] = (tuple(coords_canon.keys()), np.asarray(arr))
     ds = _xr.Dataset(data_vars=data_vars, coords=coords_canon)
     return from_xarray(ds, var_map=vm, target=target, method=method, strict=strict)
+
+
+def from_meshio(
+    path: str,
+    *,
+    var_map: Mapping[str, str],
+    cell_or_point: str = "point",
+    coords_key: str = "_coords",
+    strict: bool = True,
+) -> Dict[str, Any]:
+    """
+    Load a mesh-based snapshot (VTK/VTU/OpenFOAM via meshio) into a `state_ref` dict.
+
+    Notes
+    - For unstructured meshes, this function does not interpolate to collocation points.
+      It returns arrays as stored in the file, plus point coordinates under `coords_key`.
+    - Use `cell_or_point='point'` for point_data and `'cell'` for cell_data.
+    """
+    try:
+        import meshio  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise ImportError(
+            "meshio is required for this loader. Install with: pip install moju[ref_vtk] "
+            "or pip install moju[ref_foam]"
+        ) from e
+
+    mesh = meshio.read(path)
+    if cell_or_point not in ("point", "cell"):
+        raise ValueError("cell_or_point must be 'point' or 'cell'")
+
+    out: Dict[str, Any] = {}
+    out[coords_key] = np.asarray(getattr(mesh, "points", None)) if getattr(mesh, "points", None) is not None else None
+
+    data = mesh.point_data if cell_or_point == "point" else mesh.cell_data
+    for state_key, field_name in var_map.items():
+        if field_name not in data:
+            if strict:
+                raise KeyError(f"Field {field_name!r} not found in meshio {cell_or_point}_data")
+            continue
+        val = data[field_name]
+        # meshio cell_data can be dict[str, list[np.ndarray]] per cell block; handle common single-block case.
+        if cell_or_point == "cell" and isinstance(val, list):
+            if len(val) == 1:
+                val = val[0]
+        out[state_key] = np.asarray(val)
+    return out
+
+
+def from_vtu(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+    """Thin wrapper around `from_meshio` for VTU files."""
+    return from_meshio(*args, **kwargs)
+
+
+def from_vtk(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+    """Thin wrapper around `from_meshio` for VTK files."""
+    return from_meshio(*args, **kwargs)
+
+
+def from_openfoam(
+    case_path: str,
+    *,
+    var_map: Mapping[str, str],
+    time: Optional[str] = None,
+    cell_or_point: str = "cell",
+    coords_key: str = "_coords",
+    strict: bool = True,
+) -> Dict[str, Any]:
+    """
+    Load an OpenFOAM snapshot into `state_ref` via meshio.
+
+    v1 scope: single time snapshot. Many OpenFOAM exports are best consumed by first
+    converting to VTK/VTU (e.g. via `foamToVTK`) and using `from_vtu`.
+    """
+    path = case_path
+    if time is not None:
+        path = f"{case_path}:{time}"
+    return from_meshio(path, var_map=var_map, cell_or_point=cell_or_point, coords_key=coords_key, strict=strict)
+
+
+def from_hdf5(
+    path: str,
+    *,
+    var_map: Mapping[str, str],
+    strict: bool = True,
+) -> Dict[str, Any]:
+    """
+    Load reference arrays from an HDF5 file into a `state_ref` dict.
+
+    var_map maps moju state keys to dataset paths within the HDF5 file.
+    Example: {"T": "fields/T", "u": "fields/u"}.
+    """
+    try:
+        import h5py  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise ImportError(
+            "h5py is required for this loader. Install with: pip install moju[ref_hdf5]"
+        ) from e
+
+    out: Dict[str, Any] = {}
+    with h5py.File(path, "r") as f:
+        for state_key, ds_path in var_map.items():
+            if ds_path not in f:
+                if strict:
+                    raise KeyError(f"HDF5 dataset path {ds_path!r} not found (for state key {state_key!r})")
+                continue
+            out[state_key] = np.asarray(f[ds_path][...])
+    return out
 

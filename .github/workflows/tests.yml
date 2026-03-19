@@ -28,3 +28,81 @@ jobs:
 
       - name: Run tests
         run: pytest
+
+  test_ref_extras:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies (dev + ref extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,ref]"
+
+      - name: Sanity check ref imports
+        run: |
+          python -c "import xarray as xr; import moju.monitor.state_ref; print('xarray', xr.__version__)"
+
+      - name: Run tests
+        run: pytest
+
+  test_ref_vtk_extras:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies (dev + VTK extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,ref_vtk]"
+
+      - name: Sanity check VTK imports
+        run: |
+          python -c "import meshio; import moju.monitor.state_ref; print('meshio', meshio.__version__)"
+
+      - name: Run tests
+        run: pytest
+
+  test_ref_hdf5_extras:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies (dev + HDF5 extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,ref_hdf5]"
+
+      - name: Sanity check HDF5 imports
+        run: |
+          python -c "import h5py; import moju.monitor.state_ref; print('h5py', h5py.__version__)"
+
+      - name: Run tests
+        run: pytest

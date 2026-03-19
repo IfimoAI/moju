@@ -24,6 +24,7 @@ from moju.monitor.closure_registry import (
     GROUP_FNS,
     MODEL_FNS,
     compute_chain,
+    compute_chain_weak,
     compute_ref_delta,
 )
 
@@ -436,6 +437,10 @@ class ResidualEngine:
                 name = spec["name"]
                 output_key = spec.get("output_key")
                 state_map = spec.get("state_map") or {}
+                closure_mode = str(spec.get("closure_mode") or "pointwise")
+                quadrature_weights = dict(spec.get("quadrature_weights") or {})
+                if closure_mode not in ("pointwise", "weak"):
+                    raise ValueError(f"{category}:{name} closure_mode must be 'pointwise' or 'weak', got {closure_mode!r}")
                 # Sensible defaults (medium effort): when not provided, infer from collocation and common keys
                 if "predicted_spatial" in spec:
                     predicted_spatial = list(spec.get("predicted_spatial") or [])
@@ -485,30 +490,58 @@ class ResidualEngine:
                         out[f"{name}/ref_delta"] = jnp.asarray(arr)
 
                 if predicted_spatial and output_key is not None:
-                    arr = compute_chain(
-                        fn=fn,
-                        arg_names=arg_names,
-                        output_key=output_key,
-                        state_map=state_map,
-                        state_pred=merged,
-                        constants=self.constants,
-                        predicted_varying=predicted_spatial,
-                        deriv="x",
-                    )
+                    if closure_mode == "weak":
+                        arr = compute_chain_weak(
+                            fn=fn,
+                            arg_names=arg_names,
+                            output_key=output_key,
+                            state_map=state_map,
+                            state_pred=merged,
+                            constants=self.constants,
+                            predicted_varying=predicted_spatial,
+                            deriv="x",
+                            weight_key=quadrature_weights.get("x"),
+                        )
+                        _maybe_log_infer(f"{category}:{name} using weak chain_dx")
+                    else:
+                        arr = compute_chain(
+                            fn=fn,
+                            arg_names=arg_names,
+                            output_key=output_key,
+                            state_map=state_map,
+                            state_pred=merged,
+                            constants=self.constants,
+                            predicted_varying=predicted_spatial,
+                            deriv="x",
+                        )
                     if arr is not None:
                         out[f"{name}/chain_dx"] = jnp.asarray(arr)
 
                 if predicted_temporal and output_key is not None:
-                    arr = compute_chain(
-                        fn=fn,
-                        arg_names=arg_names,
-                        output_key=output_key,
-                        state_map=state_map,
-                        state_pred=merged,
-                        constants=self.constants,
-                        predicted_varying=predicted_temporal,
-                        deriv="t",
-                    )
+                    if closure_mode == "weak":
+                        arr = compute_chain_weak(
+                            fn=fn,
+                            arg_names=arg_names,
+                            output_key=output_key,
+                            state_map=state_map,
+                            state_pred=merged,
+                            constants=self.constants,
+                            predicted_varying=predicted_temporal,
+                            deriv="t",
+                            weight_key=quadrature_weights.get("t"),
+                        )
+                        _maybe_log_infer(f"{category}:{name} using weak chain_dt")
+                    else:
+                        arr = compute_chain(
+                            fn=fn,
+                            arg_names=arg_names,
+                            output_key=output_key,
+                            state_map=state_map,
+                            state_pred=merged,
+                            constants=self.constants,
+                            predicted_varying=predicted_temporal,
+                            deriv="t",
+                        )
                     if arr is not None:
                         out[f"{name}/chain_dt"] = jnp.asarray(arr)
 
