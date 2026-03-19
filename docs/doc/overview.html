@@ -25,7 +25,7 @@
 
     <h2>Installation</h2>
     <pre><code>pip install moju</code></pre>
-    <p>Optional: <code>pip install moju[units]</code> for Pint-based units; <code>pip install moju[dev]</code> for pytest, black, ruff; <code>pip install moju[ref]</code> for <code>xarray</code>-based <code>state_ref</code> loaders (CFD snapshots → dict with optional interpolation).</p>
+    <p>Optional: <code>pip install moju[units]</code> for Pint-based units; <code>pip install moju[dev]</code> for pytest, black, ruff; <code>pip install moju[ref]</code> for <code>xarray</code>-based <code>state_ref</code> loaders (CFD snapshots → dict with optional interpolation); <code>pip install moju[ref_vtk]</code> for VTU/VTK loaders; <code>pip install moju[ref_foam]</code> for OpenFOAM loaders; <code>pip install moju[ref_hdf5]</code> for HDF5 loaders.</p>
 
     <h2>Quick start</h2>
     <pre><code>import moju
@@ -105,6 +105,7 @@ flowchart TB
       <li><strong>visualize</strong> — RMS and admissibility per logged key.</li>
     </ul>
     <p><strong>Derivative strategies (Path B / CFD):</strong> for <code>chain_dx</code>/<code>chain_dt</code>, provide derivative keys (e.g. <code>d_T_dx</code>, <code>d_mu_dt</code>) using solver gradients when available; otherwise use coordinate-aware finite differences (and optionally smoothing before differencing). Planned extension point: a weak-form mode that integrates closure residuals over space/time windows via quadrature (API hook: <code>closure_mode="pointwise"|"weak"</code> plus <code>quadrature_weights</code>).</p>
+    <p><strong>CFD snapshot cookbook:</strong> see <code>examples/cfd_snapshot_cookbook_heat_1d.py</code> for an end-to-end reference workflow (xarray snapshot → optional interpolation → finite-difference gradients + smoothing → weak-form audit → interpret RMS/admissibility).</p>
 
     <h3 id="custom-physics-fn">Custom physics (optional <code>fn</code>)</h3>
     <p>In law or group specs, add <code>"fn": your_callable</code>; kwargs from <code>state_map</code>. <strong>Laws</strong> return the PDE residual. <strong>Groups</strong> return a value stored at <code>output_key</code> in merged state.</p>

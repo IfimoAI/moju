@@ -97,6 +97,35 @@ class TestResidualEngineResidualDict:
         assert "scaling" in residuals
         assert jnp.allclose(residuals["scaling"]["pe/chain_dx"], 0.0, rtol=rtol, atol=atol)
 
+    def test_scaling_pe_weak_chain_dx_weighted_rms(self, rtol, atol):
+        core = ResidualEngine(
+            laws=[],
+            scaling_audit=[
+                {
+                    "name": "pe",
+                    "output_key": "Pe",
+                    "state_map": {"re": "Re", "pr": "Pr"},
+                    "predicted_spatial": ["Re"],
+                    "closure_mode": "weak",
+                    "quadrature_weights": {"x": "w_x"},
+                }
+            ],
+        )
+        # Pe = Re * Pr, Pr constant, dRe/dx = 1, but we set dPe/dx = 0 -> residual = -Pr everywhere.
+        Pr = 5.0
+        state_pred = {
+            "Pe": jnp.array([10.0, 11.0, 12.0]),
+            "Re": jnp.array([2.0, 2.0, 2.0]),
+            "Pr": Pr,
+            "d_Re_dx": jnp.ones((3,)),
+            "d_Pe_dx": jnp.zeros((3,)),
+            "w_x": jnp.array([1.0, 2.0, 1.0]),
+        }
+        residuals = core.compute_residuals(state_pred)
+        assert "scaling" in residuals
+        # Weighted RMS of constant residual -Pr is |Pr|.
+        assert jnp.allclose(residuals["scaling"]["pe/chain_dx"], abs(Pr), rtol=rtol, atol=atol)
+
     def test_scaling_pe_identity_nonzero(self, rtol, atol):
         core = ResidualEngine(
             laws=[],

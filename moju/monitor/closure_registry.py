@@ -138,6 +138,97 @@ def compute_chain(
     return jnp.asarray(d_out) - rhs
 
 
+def _broadcast_weights_for_residual(
+    r: jnp.ndarray, *, w: jnp.ndarray, deriv: str
+) -> Optional[jnp.ndarray]:
+    """
+    Best-effort broadcasting for 1D/2D structured arrays.
+
+    Conventions:
+    - deriv='x': integrate along last axis (.., Nx)
+    - deriv='t': integrate along first axis (Nt, ..)
+    """
+    if w.ndim == 0:
+        return jnp.asarray(w)
+    if r.ndim == 0:
+        # scalar residual: any weight is equivalent
+        return jnp.asarray(1.0)
+
+    if deriv == "x":
+        axis = -1
+        n = r.shape[axis]
+        if w.ndim == 1 and w.shape[0] == n:
+            shape = (1,) * (r.ndim - 1) + (n,)
+            return jnp.reshape(w, shape)
+        if w.shape == r.shape:
+            return w
+        return None
+
+    if deriv == "t":
+        axis = 0
+        n = r.shape[axis]
+        if w.ndim == 1 and w.shape[0] == n:
+            shape = (n,) + (1,) * (r.ndim - 1)
+            return jnp.reshape(w, shape)
+        if w.shape == r.shape:
+            return w
+        return None
+
+    raise ValueError(f"Unknown deriv {deriv!r}")
+
+
+def compute_chain_weak(
+    *,
+    fn: Callable[..., Any],
+    arg_names: List[str],
+    output_key: str,
+    state_map: Dict[str, str],
+    state_pred: Dict[str, Any],
+    constants: Dict[str, Any],
+    predicted_varying: List[str],
+    deriv: str,  # "x" or "t"
+    weight_key: Optional[str] = None,
+) -> Optional[jnp.ndarray]:
+    """
+    Weak-form / integrated variant of chain closure.
+
+    Returns a weighted RMS scalar (or reduced array if residual is higher-rank and weights
+    are scalar) to improve robustness to noisy derivatives.
+    """
+    r = compute_chain(
+        fn=fn,
+        arg_names=arg_names,
+        output_key=output_key,
+        state_map=state_map,
+        state_pred=state_pred,
+        constants=constants,
+        predicted_varying=predicted_varying,
+        deriv=deriv,
+    )
+    if r is None:
+        return None
+
+    rr = jnp.asarray(r) ** 2
+    if weight_key:
+        wv = _val(state_pred, constants, weight_key)
+    else:
+        wv = None
+    if wv is None:
+        # uniform weights
+        return jnp.sqrt(jnp.mean(rr))
+
+    w = jnp.asarray(wv)
+    wb = _broadcast_weights_for_residual(jnp.asarray(r), w=w, deriv=deriv)
+    if wb is None:
+        # If weights shape doesn't match our minimal structured conventions, fall back to uniform.
+        return jnp.sqrt(jnp.mean(rr))
+
+    num = jnp.sum(wb * rr)
+    den = jnp.sum(wb)
+    den = jnp.where(den > 0, den, 1.0)
+    return jnp.sqrt(num / den)
+
+
 # Registry: name -> (callable, arg_names)
 MODEL_FNS: Dict[str, Tuple[Callable[..., Any], List[str]]] = {
     name: _fn_and_args(getattr(Models, name))

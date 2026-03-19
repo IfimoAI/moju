@@ -16,7 +16,18 @@ Get your first result in under two minutes.
 
 1. **Install:** run `pip install moju` (or from source: `pip install -e .` in the repo root).
    - Optional (reference data adapters): `pip install moju[ref]` for `xarray`-based `state_ref` loaders.
+   - Optional (VTK/VTU loaders): `pip install moju[ref_vtk]` for `meshio`-based VTU/VTK ingestion.
+   - Optional (OpenFOAM loaders): `pip install moju[ref_foam]` for `meshio`-based OpenFOAM snapshot ingestion (often via VTK/VTU exports).
+   - Optional (HDF5 loaders): `pip install moju[ref_hdf5]` for `h5py`-based HDF5 ingestion.
 2. **Run it:** open Python and paste the block below. It computes a Reynolds number and air density so you can verify the install and see moju in action.
+
+Optional (reproducible conda-forge environment via pixi):
+
+```bash
+# Install pixi: https://pixi.sh/
+pixi run -e dev pytest
+pixi run -e ref python -c "import xarray; import moju.monitor.state_ref; print('ref extras OK')"
+```
 
 ```python
 import moju
@@ -137,6 +148,20 @@ state_ref = from_xarray(
 )
 ```
 
+### Reference loaders (VTK/VTU, OpenFOAM, HDF5)
+
+Additional thin adapters are available via optional extras:
+
+- **VTK/VTU** (`meshio`): `pip install moju[ref_vtk]` then use `from_vtu(...)` / `from_vtk(...)` (unstructured; no automatic interpolation).
+- **OpenFOAM** (`meshio`): `pip install moju[ref_foam]` then use `from_openfoam(...)` (often easiest after exporting to VTK/VTU).
+- **HDF5** (`h5py`): `pip install moju[ref_hdf5]` then use `from_hdf5(...)`.
+
+Templates:
+
+- `examples/monitor_state_ref_from_vtu_demo.py`
+- `examples/monitor_state_ref_from_openfoam_demo.py`
+- `examples/monitor_state_ref_from_hdf5_demo.py`
+
 ### Derivative strategies for Path B / CFD
 
 For `chain_dx` / `chain_dt` closures, Path B workflows must provide derivative keys like `d_T_dx`, `d_mu_dt`, `d_Re_dx`.
@@ -146,6 +171,19 @@ For `chain_dx` / `chain_dt` closures, Path B workflows must provide derivative k
 - **Smoothing before differencing**: denoise fields then differentiate (reduces noise, but can introduce bias/edge artifacts).
 
 Planned extension point: **weak-form / integrated chain closures** can reduce noise sensitivity by integrating closure residuals over space/time windows using quadrature. A future API hook is `closure_mode="pointwise"|"weak"` plus `quadrature_weights`.
+
+### CFD snapshot cookbook (end-to-end)
+
+An end-to-end, copy/paste workflow for CFD snapshots (structured 1D) is provided in:
+
+- `examples/cfd_snapshot_cookbook_heat_1d.py`
+
+It demonstrates:
+- **Load** a snapshot into `xarray.Dataset` (or `xarray.open_dataset(...)` for NetCDF)
+- **Regrid/interpolate** to collocation points via `from_xarray(..., target=...)`
+- **Compute gradients** via coordinate-aware finite differences (with optional smoothing)
+- **Audit** using **weak-form** (`closure_mode="weak"`) with quadrature weights (`w_x`)
+- **Interpret** the resulting RMS + admissibility score
 
 ## Examples
 
