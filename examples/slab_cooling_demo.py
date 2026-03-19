@@ -3,8 +3,9 @@
 Transient cooling of an aluminum slab with convection (1D).
 
   - PDE: rho(T)*cp*T_t = k(T)*T_xx; audit uses Laws.fourier_conduction.
-  - Constitutive closure: thermal_diffusivity (alpha vs k/(rho*cp)).
-  - Scaling closures: fo_definition, bi_definition (Fo, Bi vs Groups.fo / Groups.bi).
+  - Monitor: this demo focuses on governing-law residuals (Laws.fourier_conduction).
+    See `examples/monitor_chain_spatial_demo.py` and `examples/monitor_chain_temporal_demo.py`
+    for the new Model/Group chain-closure audits.
 
 Run: pip install moju[report] && python examples/slab_cooling_demo.py
 """
@@ -72,6 +73,16 @@ def T_xx_batch(params, t, x):
     return jax.vmap(body)(t, x)
 
 
+def T_x_batch(params, t, x):
+    """Spatial derivative dT/dx at (t, x). t (N,), x (N, 1)."""
+
+    def body(ti, xi):
+        grad = Operators.gradient(lambda p, x_in: scalar_field(p, ti, x_in), params, xi)
+        return grad[0] if grad.shape == (1,) else grad
+
+    return jax.vmap(body)(t, x)
+
+
 def k_model(T):
     T_ref = (T_i + T_inf) / 2.0
     return k_solid * (1.0 + 0.001 * (T - T_ref))
@@ -131,23 +142,65 @@ engine = ResidualEngine(
             "fn": Groups.bi,
         },
     ],
-    constitutive_audit=["thermal_diffusivity"],
-    scaling_audit=["fo_definition", "bi_definition"],
+    constitutive_audit=[
+        {
+            "name": "thermal_diffusivity",
+            "output_key": "alpha",
+            "state_map": {"k": "k", "rho": "rho", "cp": "cp"},
+            "predicted_spatial": ["k", "rho"],
+            "predicted_temporal": ["k", "rho"],
+        }
+    ],
+    scaling_audit=[
+        {
+            "name": "fo",
+            "output_key": "Fo",
+            "state_map": {"alpha": "alpha", "t": "t", "L": "L"},
+            "predicted_spatial": ["alpha"],
+            "predicted_temporal": ["alpha", "t"],
+        },
+        {
+            "name": "bi",
+            "output_key": "Bi",
+            "state_map": {"h": "h", "L": "L", "k_solid": "kappa"},
+            "predicted_spatial": ["kappa"],
+            "predicted_temporal": ["kappa"],
+        },
+    ],
 )
 
 
 def build_state_for_engine(params, t, x):
     T = scalar_field(params, t, x)
     T_t = T_t_batch(params, t, x)
+    T_x = T_x_batch(params, t, x)
     T_xx = T_xx_batch(params, t, x)
     kappa = k_model(T)
     rho = rho_model(T)
     alpha = kappa / (rho * cp)
     Lb = jnp.broadcast_to(L, t.shape)
     hb = jnp.broadcast_to(h, t.shape)
+    # Derivatives for Model/Group chain audits.
+    dk_dT = 0.001 * k_solid
+    drho_dT = -0.0001 * rho_ref
+    d_k_dx = dk_dT * T_x
+    d_k_dt = dk_dT * T_t
+    d_rho_dx = drho_dT * T_x
+    d_rho_dt = drho_dT * T_t
+    d_alpha_dx = (1.0 / (rho * cp)) * d_k_dx - (kappa / (rho**2 * cp)) * d_rho_dx
+    d_alpha_dt = (1.0 / (rho * cp)) * d_k_dt - (kappa / (rho**2 * cp)) * d_rho_dt
+    d_t_dt = jnp.ones_like(t)
+    # Fo = alpha*t/L^2, Bi = h*L/kappa
+    Fo = alpha * t / (Lb**2)
+    Bi = hb * Lb / kappa
+    d_Fo_dx = (t / (Lb**2)) * d_alpha_dx
+    d_Fo_dt = (t / (Lb**2)) * d_alpha_dt + (alpha / (Lb**2)) * d_t_dt
+    d_Bi_dx = -(hb * Lb / (kappa**2)) * d_k_dx
+    d_Bi_dt = -(hb * Lb / (kappa**2)) * d_k_dt
     return {
         "T": T,
         "T_t": T_t,
+        "T_x": T_x,
         "T_xx": T_xx,
         "t": t,
         "L": Lb,
@@ -157,6 +210,20 @@ def build_state_for_engine(params, t, x):
         "k": kappa,
         "k_solid": kappa,
         "h": hb,
+        # Derivative convention for chain closures
+        "d_k_dx": d_k_dx,
+        "d_k_dt": d_k_dt,
+        "d_rho_dx": d_rho_dx,
+        "d_rho_dt": d_rho_dt,
+        "d_alpha_dx": d_alpha_dx,
+        "d_alpha_dt": d_alpha_dt,
+        "d_t_dt": d_t_dt,
+        "Fo": Fo,
+        "Bi": Bi,
+        "d_Fo_dx": d_Fo_dx,
+        "d_Fo_dt": d_Fo_dt,
+        "d_Bi_dx": d_Bi_dx,
+        "d_Bi_dt": d_Bi_dt,
     }
 
 

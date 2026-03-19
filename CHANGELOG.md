@@ -8,11 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Breaking
 
-- **ResidualEngine** no longer accepts `models` or `key_ref`. Group/model “distance to reference scalar” residuals are removed. Put predicted constitutive fields in `state_pred`; use **constitutive_audit** / **scaling_audit** (and optional **constitutive_custom** / **scaling_custom**) for closure-based consistency checks (e.g. `thermal_diffusivity`, `pe_identity`). **build_loss** is unchanged (laws only).
+- **ResidualEngine** no longer accepts `models` or `key_ref`. Group/model “distance to reference scalar” residuals are removed. Use **constitutive_audit** / **scaling_audit** tied to `Models.*` / `Groups.*` with `ref_delta`, `chain_dx`, `chain_dt` (and optional **constitutive_custom** / **scaling_custom**). **build_loss** is unchanged (laws only).
 
 ### Added
 
-- **constitutive_closures** and **scaling_closures** registries; `list_constitutive_models()`, `list_scaling_closure_ids()` on `moju.monitor`.
+- **Model/Group audit registry**: audits are tied to `Models.*` and `Groups.*` functions (ref_delta, chain_dx, chain_dt). Helpers: `list_constitutive_models()`, `list_scaling_closure_ids()`.
 - PDF/report categories for **constitutive** and **scaling**; disclaimer clarifies metrics are heuristic indicators, not certification.
 
 ### Changed

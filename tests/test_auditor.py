@@ -54,30 +54,63 @@ class TestResidualEngineResidualDict:
         core = ResidualEngine(
             constants={"mu0": 1.8e-5, "T0": 273.0, "S": 110.4},
             laws=[],
-            constitutive_audit=["sutherland_mu"],
+            constitutive_audit=[
+                {
+                    "name": "sutherland_mu",
+                    "output_key": "mu",
+                    "state_map": {"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
+                    "predicted_spatial": ["T"],
+                }
+            ],
         )
         T = 300.0
         mu_true = 1.8e-5 * (T / 273) ** 1.5 * (273 + 110.4) / (T + 110.4)
-        state_pred = {"mu": mu_true + 1e-6, "T": T}
+        state_pred = {
+            "mu": mu_true,
+            "T": T,
+            "d_T_dx": jnp.array(1.0),
+            "d_mu_dx": jnp.array(0.0),  # inconsistent on purpose
+        }
         residuals = core.compute_residuals(state_pred)
         assert "constitutive" in residuals
-        assert "sutherland_mu/direct_mu" in residuals["constitutive"]
-        assert abs(float(residuals["constitutive"]["sutherland_mu/direct_mu"])) > 1e-8
+        assert "sutherland_mu/chain_dx" in residuals["constitutive"]
+        assert abs(float(residuals["constitutive"]["sutherland_mu/chain_dx"])) > 0.0
 
     def test_scaling_pe_identity_zero(self, rtol, atol):
-        core = ResidualEngine(laws=[], scaling_audit=["pe_identity"])
+        core = ResidualEngine(
+            laws=[],
+            scaling_audit=[
+                {
+                    "name": "pe",
+                    "output_key": "Pe",
+                    "state_map": {"re": "Re", "pr": "Pr"},
+                    "predicted_spatial": ["Re"],
+                }
+            ],
+        )
         Re, Pr = 100.0, 0.7
-        state_pred = {"Pe": Re * Pr, "Re": Re, "Pr": Pr}
+        # Provide d_Pe_dx consistent with chain rule for Pe = Re*Pr and dRe/dx = 1, dPr/dx = 0.
+        state_pred = {"Pe": Re * Pr, "Re": Re, "Pr": Pr, "d_Re_dx": 1.0, "d_Pe_dx": Pr}
         residuals = core.compute_residuals(state_pred)
         assert "scaling" in residuals
-        assert jnp.allclose(residuals["scaling"]["pe_identity"], 0.0, rtol=rtol, atol=atol)
+        assert jnp.allclose(residuals["scaling"]["pe/chain_dx"], 0.0, rtol=rtol, atol=atol)
 
     def test_scaling_pe_identity_nonzero(self, rtol, atol):
-        core = ResidualEngine(laws=[], scaling_audit=["pe_identity"])
-        state_pred = {"Pe": 100.0, "Re": 10.0, "Pr": 5.0}
+        core = ResidualEngine(
+            laws=[],
+            scaling_audit=[
+                {
+                    "name": "pe",
+                    "output_key": "Pe",
+                    "state_map": {"re": "Re", "pr": "Pr"},
+                    "predicted_spatial": ["Re"],
+                }
+            ],
+        )
+        state_pred = {"Pe": 100.0, "Re": 10.0, "Pr": 5.0, "d_Re_dx": 1.0, "d_Pe_dx": 0.0}
         residuals = core.compute_residuals(state_pred)
-        expected = 100.0 - 10.0 * 5.0
-        assert jnp.allclose(residuals["scaling"]["pe_identity"], expected, rtol=rtol, atol=atol)
+        # For Pe = Re*Pr, chain expects dPe/dx = Pr * dRe/dx = 5.
+        assert jnp.allclose(residuals["scaling"]["pe/chain_dx"], -5.0, rtol=rtol, atol=atol)
 
     def test_state_ref_adds_data_residual(self, rtol, atol):
         core = ResidualEngine(
@@ -144,8 +177,8 @@ class TestAudit:
     def test_audit_export_dir_pdf_with_new_categories(self, tmp_path):
         pytest.importorskip("reportlab")
         log = [
-            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5, "scaling/pe_identity": 0.1}},
-            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25, "scaling/pe_identity": 0.05}},
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/chain_dx": 0.5, "scaling/pe/chain_dx": 0.1}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/chain_dx": 0.25, "scaling/pe/chain_dx": 0.05}},
         ]
         report = audit(log, export_dir=str(tmp_path))
         assert "per_key" in report
@@ -224,5 +257,5 @@ class TestRegistryHelpers:
 
     def test_list_scaling_closure_ids(self):
         ids = list_scaling_closure_ids()
-        assert "pe_identity" in ids
-        assert "fo_definition" in ids
+        assert "pe" in ids
+        assert "fo" in ids

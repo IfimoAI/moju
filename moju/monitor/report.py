@@ -119,6 +119,7 @@ def write_audit_pdf(
         )
 
     per_key = report.get("per_key", {})
+    per_category = report.get("per_category", {})
     overall_score = report.get("overall_admissibility_score", 0.0)
     overall_level = report.get("overall_admissibility_level", "Non-Admissible")
 
@@ -178,6 +179,30 @@ def write_audit_pdf(
     score_text = f"Admissibility score: {overall_score:.2f} &nbsp; — &nbsp; {overall_level}"
     story.append(Paragraph(score_text, body_style))
     story.append(Spacer(1, 16))
+
+    if per_category:
+        story.append(Paragraph("Category summary", heading_style))
+        table_data = [["Category", "Score"]]
+        for key, label in (("laws", "Governing laws"), ("constitutive", "Constitutive"), ("scaling", "Scaling/similarity")):
+            if key in per_category:
+                table_data.append([label, f"{float(per_category[key]):.2f}"])
+        t = Table(table_data, colWidths=[3.0 * inch, 1.2 * inch])
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e0e0e0")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 10),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                    ("TOPPADDING", (0, 0), (-1, 0), 8),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ]
+            )
+        )
+        story.append(t)
+        story.append(Spacer(1, 16))
 
     # Per-key metrics by category
     grouped = _group_keys_by_category(per_key)

@@ -37,31 +37,31 @@ def _sample_report() -> dict:
                 "admissibility_score": 0.88,
                 "admissibility_level": "Moderate Admissibility",
             },
-            "scaling/re_definition": {
+            "scaling/re/chain_dx": {
                 "rms": 0.01,
                 "r_norm": 0.05,
                 "admissibility_score": 0.95,
                 "admissibility_level": "High Admissibility",
             },
-            "scaling/pe_identity": {
+            "scaling/pe/chain_dx": {
                 "rms": 0.12,
                 "r_norm": 0.43,
                 "admissibility_score": 0.70,
                 "admissibility_level": "Moderate Admissibility",
             },
-            "scaling/pr_definition": {
+            "scaling/pr/chain_dx": {
                 "rms": 0.25,
                 "r_norm": 0.83,
                 "admissibility_score": 0.55,
                 "admissibility_level": "Low Admissibility",
             },
-            "constitutive/sutherland_mu/direct_mu": {
+            "constitutive/sutherland_mu/chain_dt": {
                 "rms": 0.02,
                 "r_norm": 0.09,
                 "admissibility_score": 0.92,
                 "admissibility_level": "High Admissibility",
             },
-            "constitutive/ideal_gas_rho/direct_rho": {
+            "constitutive/ideal_gas_rho/ref_delta": {
                 "rms": 0.01,
                 "r_norm": 0.02,
                 "admissibility_score": 0.98,
