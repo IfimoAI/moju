@@ -12,7 +12,7 @@ pip install build
 python -m build
 ```
 
-This produces `dist/moju-<version>.tar.gz` and `dist/moju-<version>-py3-none-any.whl` (e.g. `moju-0.4.0`).
+This produces `dist/moju-<version>.tar.gz` and `dist/moju-<version>-py3-none-any.whl` (e.g. `moju-0.4.1`).
 
 ## Upload
 
@@ -46,6 +46,6 @@ The GitHub Actions workflow (on release or manual run) skips the PyPI upload if 
 
 After merging the release branch into `main` and pushing:
 
-1. Create an annotated tag for the version: `git tag -a v0.4.0 -m "Release 0.4.0"` (on the commit that has the version bump).
-2. Push the tag: `git push origin v0.4.0`.
-3. Create a GitHub Release from the tag (Releases → Draft a new release → choose tag `v0.4.0`, set as latest, publish). This triggers the Publish to PyPI workflow if the version is not already on PyPI.
+1. Create an annotated tag for the version: `git tag -a v0.4.1 -m "Release 0.4.1"` (on the commit that has the version bump).
+2. Push the tag: `git push origin v0.4.1`.
+3. Create a GitHub Release from the tag (Releases → Draft a new release → choose tag `v0.4.1`, set as latest, publish). This triggers the Publish to PyPI workflow if the version is not already on PyPI.

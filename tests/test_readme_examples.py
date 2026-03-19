@@ -19,6 +19,26 @@ def test_readme_quick_start_runs():
     assert 1.0 < float(rho) < 2.0  # air at 300 K
 
 
+def test_readme_five_minute_example_runs():
+    """README 5-minute example: ResidualEngine, build_loss, audit with one law."""
+    import jax.numpy as jnp
+    from moju.monitor import ResidualEngine, build_loss, audit, MonitorConfig
+
+    cfg = MonitorConfig(laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}])
+    engine = ResidualEngine(config=cfg)
+    state_pred = {"phi_xx": jnp.array(0.0)}
+    residuals = engine.compute_residuals(state_pred)
+    loss = build_loss(residuals)
+    report = audit(engine.log)
+
+    assert jnp.ndim(loss) == 0
+    assert "overall_admissibility_score" in report
+    assert "overall_admissibility_level" in report
+    assert "per_category" in report
+    assert "per_key" in report
+    assert "laws" in report["per_category"]
+
+
 def test_readme_laws_example_runs():
     """README Laws example: mass_incompressible with zero gradient."""
     import jax.numpy as jnp

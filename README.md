@@ -1,254 +1,152 @@
-# moju: Physics-AI supervision for engineering-grade simulations
+# moju — Physics-AI supervision for engineering-grade simulations
 
 ```bash
 pip install moju
 ```
 
-**moju** helps you use AI for flow, heat, and other physics while keeping the math you trust at the center: Reynolds number, viscosity, conservation of mass and momentum. It is JAX-native and fully differentiable so you can use it in training loops or as a standalone toolkit. Whether you're new to AI or an experienced simulation engineer, you can run the examples in minutes. One library gives you dimensionless scaling, physical models, and differentiable residuals that check whether your fields satisfy the governing equations.
+**Moju makes AI models physically admissible and auditable.** It is a lightweight framework for enforcing physics constraints during training, composing dimensionless groups and constitutive models with governing laws, and auditing how well predictions satisfy physics.
 
 *Physics you know, in the AI you train. Dimensionless scaling, constitutive models, and equation residuals in one JAX library.*
 
-If you work with flow, heat transfer, or similar physics and want to try AI without leaving the math you trust, moju is for you. Beginners can run the examples; experts can plug it into their training loops.
+---
 
-## Quick Start
+## Why moju?
 
-Get your first result in under two minutes.
+Most Physics AI tools focus on adding a physics loss. Moju goes further:
 
-1. **Install:** run `pip install moju` (or from source: `pip install -e .` in the repo root).
-   - Optional (reference data adapters): `pip install moju[ref]` for `xarray`-based `state_ref` loaders.
-   - Optional (VTK/VTU loaders): `pip install moju[ref_vtk]` for `meshio`-based VTU/VTK ingestion.
-   - Optional (OpenFOAM loaders): `pip install moju[ref_foam]` for `meshio`-based OpenFOAM snapshot ingestion (often via VTK/VTU exports).
-   - Optional (HDF5 loaders): `pip install moju[ref_hdf5]` for `h5py`-based HDF5 ingestion.
-2. **Run it:** open Python and paste the block below. It computes a Reynolds number and air density so you can verify the install and see moju in action.
+- **Structured physics** — Models, Groups, and Laws as composable building blocks (Reynolds number, viscosity, conservation equations).
+- **Automatic residual construction** — `ResidualEngine.compute_residuals(...)` builds law, constitutive, and scaling residuals from your state.
+- **Physics admissibility scoring** — `audit(log)` returns per-category and overall scores so you see how well predictions satisfy the physics.
+- **Works with any JAX model** — Differentiable end-to-end; use in training loops or as a standalone audit toolkit.
 
-Optional (reproducible conda-forge environment via pixi):
+---
 
-```bash
-# Install pixi: https://pixi.sh/
-pixi run -e dev pytest
-pixi run -e ref python -c "import xarray; import moju.monitor.state_ref; print('ref extras OK')"
+## The big idea
+
+Moju treats physics as composable building blocks:
+
+```
+Predictions (state_pred)
+        ↓
+Constitutive models (Models.*) + Dimensionless groups (Groups.*)
+        ↓
+Governing laws (Laws.*)
+        ↓
+ResidualEngine.compute_residuals(...)  →  residuals
+        ↓
+loss = build_loss(residuals)     report = audit(engine.log)
 ```
 
-```python
-import moju
-from moju.piratio import Groups, Models
+Instead of hand-wiring `loss = data_loss + physics_loss`, you get residuals from the engine, a physics loss from `build_loss(residuals)`, and an admissibility report from `audit(engine.log)`.
 
-print("moju", moju.__version__)
+---
 
-# Reynolds number for water in a pipe (velocity 1 m/s, diameter 0.1 m)
-Re = Groups.re(u=1.0, L=0.1, rho=1000.0, mu=1e-3)
-print("Reynolds number:", Re)
+## 5-minute example
 
-# Air density at 1 bar, 300 K (ideal gas)
-rho = Models.ideal_gas_rho(P=101325.0, R=287.0, T=300.0)
-print("Air density (kg/m³):", rho)
-```
-
-## What's included
-
-The package provides two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, build_loss, audit, visualize).
-
-**moju.piratio** — four modules:
-
-| Module    | Core Function         | Example Output        |
-| --------- | --------------------- | --------------------- |
-| Operators | Differential Calculus | ∇u, ∇²T, ∇×u          |
-| Models    | Physical Properties   | μ(T), ρ(P,T), k(T)    |
-| Groups    | Dimensionless Scaling | Re, Pr, Pe, Ma        |
-| Laws      | Conservation Logic    | R_momentum, R_energy  |
-
-**Groups.** Scale your problem with the numbers you already use: Reynolds, Prandtl, Nusselt, Mach, and more (Re, Pr, Nu, Ma, …). JIT-compiled and differentiable; single values or batched.
-
-**Models.** Ready-made physical relationships: viscosity (Sutherland, power-law), density (ideal gas, Boussinesq), heat transfer (Stefan-Boltzmann, Fourier), friction (Darcy-Weisbach). All differentiable for use in loss functions and training.
-
-**Laws.** Check if a flow or temperature field satisfies the physics. You pass velocities, pressures, gradients; moju returns a residual. Zero means the conservation law is satisfied. Differentiable residuals for physics-informed loss terms. Covers mass, momentum (Navier-Stokes, Stokes, Euler), heat diffusion, Darcy flow, and more.
-
-**Operators.** Derivatives for fields defined by a neural network: gradient, divergence, Laplacian, curl, time derivatives. Pass your network and collocation points; moju returns the derivatives via JAX autodiff. Single points or batched.
-
-**moju.monitor** — **ResidualEngine**, build_loss, audit, visualize.
-
-- **Residuals**: `compute_residuals(...)` returns residuals under `laws/…`, optional `constitutive/…`, `scaling/…`, and `data/…` (when `state_ref` is provided).
-- **Two entry paths**:
-  - **Path A (recommended)**: provide `(model, params, collocation)` and a `state_builder` so moju can build `state_pred` (and derivative keys) consistently.
-  - **Path B (advanced)**: provide `state_pred` directly (including derivative keys like `d_T_dx`, `d_mu_dt` when chain closures apply).
-- **Constitutive and scaling/similarity audits** are tied to **Models.* and Groups.* functions** via audit specs, with three closure types:
-  - `ref_delta` (requires `state_ref`)
-  - `chain_dx` (spatial chain rule; requires spatially varying inputs + derivative keys)
-  - `chain_dt` (temporal chain rule; requires time-varying inputs + derivative keys)
-  Items with **no spatial and no temporal variation** are omitted from the report.
-- **Physics loss**: **build_loss** uses **laws only**.
-- **Audit**: per-key **R_norm(k) = RMS(r_k) / scale_k** and admissibility(k) = 1/(1 + R_norm(k)). Scale is **state-derived by default** (from merged state and specs for laws/constitutive/scaling/data keys); each log entry stores `entry["scale"]`. Passing **r_ref** to `audit(log, r_ref=...)` overrides scale for those keys (e.g. baseline or training-curve reference). Category scores for Governing laws / Constitutive / Scaling-similarity; overall score is a **geometric mean** across present categories (empty categories excluded).
-- **Typed config**: use `MonitorConfig` and `AuditSpec` to define audits with IDE-friendly autocompletion, and serialize with `to_dict()` / `from_dict()`.
-- **Introspection**: use `engine.required_state_keys()` and `engine.required_derivative_keys()` to see exactly which keys must be present in `state_pred`.
-
-**Custom laws and groups.** In law or group specs, add optional `"fn": your_callable`; kwargs come from `state_map`. **Laws**: return the PDE residual (used in `build_loss`). **Groups**: return value is written to `output_key` in merged state (e.g. for Fo, Bi).
-
-### Monitor in minutes
-
-Minimal typed config:
+Run this after `pip install moju`:
 
 ```python
 import jax.numpy as jnp
-from moju.monitor import AuditSpec, MonitorConfig, ResidualEngine
+from moju.monitor import ResidualEngine, build_loss, audit, MonitorConfig
 
-cfg = MonitorConfig(
-    laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
-    scaling_audit=[
-        AuditSpec(
-            name="pe",
-            output_key="Pe",
-            state_map={"re": "Re", "pr": "Pr"},
-            predicted_spatial=["Re", "Pr"],
-        )
-    ],
-)
+# Configure one governing law (Laplace equation: ∇²φ = 0)
+cfg = MonitorConfig(laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}])
 engine = ResidualEngine(config=cfg)
 
-state_pred = {"phi_xx": jnp.array(0.0), "Re": 10.0, "Pr": 2.0, "Pe": 20.0, "d_Re_dx": 1.0, "d_Pr_dx": 0.0, "d_Pe_dx": 2.0}
+# State: phi_xx is the Laplacian of your field (e.g. from a neural network)
+state_pred = {"phi_xx": jnp.array(0.0)}  # Satisfies Laplace when zero
 residuals = engine.compute_residuals(state_pred)
-print(sorted(engine.required_state_keys()))
-print(sorted(engine.required_derivative_keys()))
+
+# Physics loss (laws only) and admissibility report
+loss = build_loss(residuals)
+report = audit(engine.log)
+
+print("Physics loss:", float(loss))
+print("Overall admissibility:", report["overall_admissibility_score"], report["overall_admissibility_level"])
+print("Per category:", report["per_category"])
 ```
 
-Run the minimal chain demos:
+---
+
+## What you get
+
+Moju gives you physics diagnostics, not just a loss. The audit report looks like this:
+
+| Category              | Score |
+| --------------------- | ----- |
+| Governing laws        | 0.92  |
+| Constitutive         | 0.94  |
+| Scaling and similarity | 0.96 |
+
+**Overall admissibility score** — geometric mean across categories (e.g. 0.94).  
+**Overall admissibility level** — e.g. "High Admissibility".
+
+Report keys: `report["per_category"]` (`laws`, `constitutive`, `scaling`), `report["overall_admissibility_score"]`, `report["overall_admissibility_level"]`. Per-key RMS, R_norm, and admissibility are in `report["per_key"]`.
+
+---
+
+## Use cases
+
+- **Physics-Informed Neural Networks (PINNs)** — Residuals and loss from governing equations; audit score each step.
+- **CFD surrogate models** — Compare to high-fidelity data via `state_ref`; constitutive and scaling audits.
+- **Battery and energy system modeling** — Constitutive relations and dimensionless groups; admissibility over cycles.
+- **Digital twins** — Continuous audit of predictions against physics and data.
+- **Scale-invariant modeling** — Dimensionless groups (Re, Pr, Pe, …) and scaling-similarity audits.
+
+---
+
+## Core concepts
+
+| Concept         | Meaning |
+| --------------- | ------- |
+| **Models**      | Constitutive relationships (e.g. viscosity μ(T), density ρ(P,T)). |
+| **Groups**      | Dimensionless quantities (Re, Pr, Pe, Ma, …). |
+| **Laws**        | Governing equations (mass, momentum, energy, …); residuals go into `build_loss`. |
+| **ResidualEngine** | Builds state from config and optional predictions; runs laws and optional constitutive/scaling audits; produces residuals and a log. |
+| **build_loss**  | Builds a scalar physics loss from residuals (laws only). |
+| **audit**       | Takes the engine log; returns per-key and per-category admissibility and overall score. |
+
+---
+
+## Installation
 
 ```bash
-python examples/monitor_chain_spatial_demo.py
-python examples/monitor_chain_temporal_demo.py
+pip install moju
 ```
 
-Run end-to-end examples (NN → state → engine → PDF):
+Optional extras:
 
-```bash
-python examples/monitor_heat_end_to_end.py
-python examples/monitor_burgers_end_to_end.py
-```
+- `pip install moju[ref]` — xarray-based `state_ref` loaders and interpolation.
+- `pip install moju[ref_vtk]` — VTK/VTU loaders (meshio).
+- `pip install moju[ref_foam]` — OpenFOAM snapshot loaders (meshio).
+- `pip install moju[ref_hdf5]` — HDF5 loaders (h5py).
+- `pip install moju[report]` — PDF Physics Admissibility Report from `audit(..., export_dir=...)`.
 
-### Using high-fidelity CFD as `state_ref` (xarray)
+---
 
-If you have CFD or experimental data on a labeled grid, you can ingest it into a `state_ref` dict and optionally interpolate it onto your collocation grid.
+## Philosophy
 
-```python
-import numpy as np
-import xarray as xr
-from moju.monitor.state_ref import from_xarray
+Moju does not define physics. Moju provides a structured way to **enforce** and **audit** it. You bring your governing equations, constitutive models, and dimensionless groups; moju gives you residuals, a differentiable loss, and an admissibility score. JAX-native and fully differentiable so it fits into training loops and high-stakes workflows.
 
-ds = xr.Dataset(
-    data_vars={
-        "T_cfd": (("t", "x"), np.random.randn(5, 8)),
-    },
-    coords={"t": np.linspace(0.0, 1.0, 5), "x": np.linspace(0.0, 1.0, 8)},
-)
+---
 
-state_ref = from_xarray(
-    ds,
-    var_map={"T": "T_cfd"},
-    target={"t": np.linspace(0.0, 1.0, 11), "x": np.linspace(0.0, 1.0, 21)},
-    method="linear",
-)
-```
+## Learn more
 
-### Reference loaders (VTK/VTU, OpenFOAM, HDF5)
+**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, build_loss, audit, visualize). Use `MonitorConfig` and `AuditSpec` for typed config; `engine.required_state_keys()` and `engine.required_derivative_keys()` for introspection.
 
-Additional thin adapters are available via optional extras:
+**Examples**
 
-- **VTK/VTU** (`meshio`): `pip install moju[ref_vtk]` then use `from_vtu(...)` / `from_vtk(...)` (unstructured; no automatic interpolation).
-- **OpenFOAM** (`meshio`): `pip install moju[ref_foam]` then use `from_openfoam(...)` (often easiest after exporting to VTK/VTU).
-- **HDF5** (`h5py`): `pip install moju[ref_hdf5]` then use `from_hdf5(...)`.
+- Quick scaling and laws: `Groups.re(...)`, `Models.ideal_gas_rho(...)`, `Laws.mass_incompressible(u_grad)` — see snippets in the full docs.
+- Monitor with laws + scaling audit: `python examples/monitor_chain_spatial_demo.py`, `python examples/monitor_chain_temporal_demo.py`.
+- End-to-end NN → residuals → PDF: `python examples/monitor_heat_end_to_end.py`, `python examples/monitor_burgers_end_to_end.py`.
+- CFD snapshot → state_ref → audit: `examples/cfd_snapshot_cookbook_heat_1d.py`; reference loaders: `examples/monitor_state_ref_from_vtu_demo.py`, `from_openfoam`, `from_hdf5`.
 
-Templates:
+**Paths** — Path A: pass `(model, params, collocation)` and a `state_builder` to build `state_pred`. Path B: pass `state_pred` directly (e.g. from CFD or finite differences). Constitutive and scaling audits use specs tied to `Models.*` and `Groups.*` (ref_delta, chain_dx, chain_dt). R_norm is scale-based (state-derived by default; override with `audit(log, r_ref=...)`).
 
-- `examples/monitor_state_ref_from_vtu_demo.py`
-- `examples/monitor_state_ref_from_openfoam_demo.py`
-- `examples/monitor_state_ref_from_hdf5_demo.py`
+**Docs** — [VERSIONING.md](VERSIONING.md). Online docs: overview, Groups, Models, Laws, Operators.
 
-### Derivative strategies for Path B / CFD
-
-For `chain_dx` / `chain_dt` closures, Path B workflows must provide derivative keys like `d_T_dx`, `d_mu_dt`, `d_Re_dx`.
-
-- **Solver gradients (best when available)**: export gradients directly from the CFD solver / adjoint / postprocessing.
-- **Finite differences**: central differences in the interior, one-sided at boundaries; use coordinate-aware spacing on nonuniform grids.
-- **Smoothing before differencing**: denoise fields then differentiate (reduces noise, but can introduce bias/edge artifacts).
-
-Planned extension point: **weak-form / integrated chain closures** can reduce noise sensitivity by integrating closure residuals over space/time windows using quadrature. A future API hook is `closure_mode="pointwise"|"weak"` plus `quadrature_weights`.
-
-### CFD snapshot cookbook (end-to-end)
-
-An end-to-end, copy/paste workflow for CFD snapshots (structured 1D) is provided in:
-
-- `examples/cfd_snapshot_cookbook_heat_1d.py`
-
-It demonstrates:
-- **Load** a snapshot into `xarray.Dataset` (or `xarray.open_dataset(...)` for NetCDF)
-- **Regrid/interpolate** to collocation points via `from_xarray(..., target=...)`
-- **Compute gradients** via coordinate-aware finite differences (with optional smoothing)
-- **Audit** using **weak-form** (`closure_mode="weak"`) with quadrature weights (`w_x`)
-- **Interpret** the resulting RMS + admissibility score
-
-## Examples
-
-### First example
-
-The Quick Start block above is enough to verify the install. Below are further examples.
-
-### More scaling and physical models
-
-```python
-from moju.piratio import Groups, Models
-
-# Dimensionless numbers (single values or arrays)
-Re = Groups.re(u=1.0, L=0.1, rho=1000.0, mu=1e-3)   # Reynolds
-Pr = Groups.pr(mu=1e-3, cp=4186.0, k=0.6)            # Prandtl (water)
-Nu = Groups.nu(h=100.0, L=0.1, k=0.6)                # Nusselt
-Ma = Groups.ma(u=100.0, a=343.0)                     # Mach number
-
-# Physical models
-mu_air = Models.sutherland_mu(T=300.0, mu0=1.8e-5, T0=273.0, S=110.4)  # Air viscosity
-q_rad = Models.stefan_boltzmann_flux(epsilon=0.9, T=400.0)             # Radiative heat flux
-nu = Models.kinematic_viscosity(mu=1e-3, rho=1000.0)                   # Kinematic viscosity
-```
-
-### Checking physics (Laws)
-
-Use **Laws** to check whether a velocity field satisfies incompressible mass conservation (div u = 0). You pass the velocity gradient; moju returns a residual. Zero when the law is satisfied. In a full setup you obtain gradients from **Operators** and feed them into Laws to build physics-informed loss terms.
-
-```python
-import jax.numpy as jnp
-from moju.piratio import Laws
-
-# Velocity gradient for a flow that preserves volume (trace = 0)
-# Example: constant velocity field -> gradient is zero
-u_grad = jnp.array([[0.0, 0.0], [0.0, 0.0]])
-residual = Laws.mass_incompressible(u_grad)
-print("Mass residual (should be 0):", residual)
-```
-
-### Derivatives (Operators)
-
-**Operators** compute derivatives of a function, e.g. a scalar or vector field from a neural network. Here we use a trivial scalar; in practice you pass your network and collocation points.
-
-```python
-import jax.numpy as jnp
-from moju.piratio import Operators
-
-# A simple scalar function of x (in practice this would be your neural network)
-def scalar_field(params, x):
-    return jnp.sum(x**2)
-
-params = {}
-x = jnp.array([1.0, 2.0])
-
-grad = Operators.gradient(scalar_field, params, x)
-print("Gradient of sum(x²) at [1, 2]:", grad)
-
-lap = Operators.laplacian(scalar_field, params, x)
-print("Laplacian at [1, 2]:", lap)
-```
-
-## Going further
-
-moju is JAX-native, JIT-compiled, and fully differentiable. It supports a broad range of physics AI workflows: surrogate modeling, inverse problems, physics-informed training, digital twins, hybrid solvers, and anywhere else physics and machine learning meet. Residuals and operators integrate with JAX autodiff so you can train or constrain models to satisfy the equations. We build on the principle that **physics is the ground truth** and provide the "glass box" transparency needed to deploy AI in high-stakes settings (thermal management, flow simulation, and beyond). Versioning follows [VERSIONING.md](VERSIONING.md).
+---
 
 ## License
 
-MIT License. Open for the community. Developed by Ifimo Lab, a division of Ifimo Analytics.
+MIT License. Developed by Ifimo Lab, a division of Ifimo Analytics.

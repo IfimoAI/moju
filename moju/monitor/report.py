@@ -1,4 +1,4 @@
-"""PDF export for Physical Admissibility Report. Requires reportlab (pip install moju[report])."""
+"""PDF export for Physics Admissibility Report. Requires reportlab (pip install moju[report])."""
 
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ def write_audit_pdf(
     model_id: Optional[str] = None,
 ) -> None:
     """
-    Write a Physical Admissibility Report PDF to the given path.
+    Write a Physics Admissibility Report PDF to the given path.
 
     :param report: Dict from audit() with per_key, overall_admissibility_score, overall_admissibility_level.
     :param path: Output file path (e.g. .pdf).
@@ -150,7 +150,7 @@ def write_audit_pdf(
     story: List[Any] = []
 
     # Title
-    story.append(Paragraph("Physical Admissibility Report", title_style))
+    story.append(Paragraph("Physics Admissibility Report", title_style))
     story.append(Spacer(1, 6))
 
     # Optional model name, ID, date
