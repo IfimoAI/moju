@@ -415,10 +415,15 @@ class ResidualEngine:
             residuals["laws"][name] = fn(**kwargs)
 
         omitted_msgs: List[str] = []
+        inferred_msgs: List[str] = []
 
         def _maybe_log_omit(msg: str) -> None:
             if self.enable_omit_messages:
                 omitted_msgs.append(msg)
+
+        def _maybe_log_infer(msg: str) -> None:
+            if self.enable_omit_messages:
+                inferred_msgs.append(msg)
 
         def _run_specs(
             specs: Sequence[Dict[str, Any]],
@@ -441,6 +446,7 @@ class ResidualEngine:
                             if k in state_map.values():
                                 predicted_spatial = [k]
                                 break
+                    _maybe_log_infer(f"{category}:{name} inferred predicted_spatial={predicted_spatial}")
 
                 if "predicted_temporal" in spec:
                     predicted_temporal = list(spec.get("predicted_temporal") or [])
@@ -451,6 +457,7 @@ class ResidualEngine:
                             if k in state_map.values():
                                 predicted_temporal = [k]
                                 break
+                    _maybe_log_infer(f"{category}:{name} inferred predicted_temporal={predicted_temporal}")
 
                 if not predicted_spatial and not predicted_temporal:
                     _maybe_log_omit(
@@ -542,6 +549,8 @@ class ResidualEngine:
         entry: Dict[str, Any] = {"index": self._index, "rms": rms_per_key}
         if omitted_msgs:
             entry["omitted"] = omitted_msgs
+        if inferred_msgs:
+            entry["inferred"] = inferred_msgs
         self._log.append(entry)
         self._index += 1
         return residuals

@@ -15,6 +15,7 @@ If you work with flow, heat transfer, or similar physics and want to try AI with
 Get your first result in under two minutes.
 
 1. **Install:** run `pip install moju` (or from source: `pip install -e .` in the repo root).
+   - Optional (reference data adapters): `pip install moju[ref]` for `xarray`-based `state_ref` loaders.
 2. **Run it:** open Python and paste the block below. It computes a Reynolds number and air density so you can verify the install and see moju in action.
 
 ```python
@@ -111,6 +112,40 @@ Run end-to-end examples (NN → state → engine → PDF):
 python examples/monitor_heat_end_to_end.py
 python examples/monitor_burgers_end_to_end.py
 ```
+
+### Using high-fidelity CFD as `state_ref` (xarray)
+
+If you have CFD or experimental data on a labeled grid, you can ingest it into a `state_ref` dict and optionally interpolate it onto your collocation grid.
+
+```python
+import numpy as np
+import xarray as xr
+from moju.monitor.state_ref import from_xarray
+
+ds = xr.Dataset(
+    data_vars={
+        "T_cfd": (("t", "x"), np.random.randn(5, 8)),
+    },
+    coords={"t": np.linspace(0.0, 1.0, 5), "x": np.linspace(0.0, 1.0, 8)},
+)
+
+state_ref = from_xarray(
+    ds,
+    var_map={"T": "T_cfd"},
+    target={"t": np.linspace(0.0, 1.0, 11), "x": np.linspace(0.0, 1.0, 21)},
+    method="linear",
+)
+```
+
+### Derivative strategies for Path B / CFD
+
+For `chain_dx` / `chain_dt` closures, Path B workflows must provide derivative keys like `d_T_dx`, `d_mu_dt`, `d_Re_dx`.
+
+- **Solver gradients (best when available)**: export gradients directly from the CFD solver / adjoint / postprocessing.
+- **Finite differences**: central differences in the interior, one-sided at boundaries; use coordinate-aware spacing on nonuniform grids.
+- **Smoothing before differencing**: denoise fields then differentiate (reduces noise, but can introduce bias/edge artifacts).
+
+Planned extension point: **weak-form / integrated chain closures** can reduce noise sensitivity by integrating closure residuals over space/time windows using quadrature. A future API hook is `closure_mode="pointwise"|"weak"` plus `quadrature_weights`.
 
 ## Examples
 
