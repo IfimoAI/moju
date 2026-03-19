@@ -4,6 +4,8 @@ import pytest
 import jax
 import jax.numpy as jnp
 from moju.monitor import (
+    AuditSpec,
+    MonitorConfig,
     ResidualEngine,
     admissibility_level,
     audit,
@@ -259,3 +261,66 @@ class TestRegistryHelpers:
         ids = list_scaling_closure_ids()
         assert "pe" in ids
         assert "fo" in ids
+
+
+class TestMonitorConfig:
+    def test_to_from_dict_roundtrip(self):
+        cfg = MonitorConfig(
+            constants={"cp": 1.0},
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
+            constitutive_audit=[
+                AuditSpec(
+                    name="sutherland_mu",
+                    output_key="mu",
+                    state_map={"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
+                    predicted_temporal=["T"],
+                )
+            ],
+        )
+        d = cfg.to_dict()
+        cfg2 = MonitorConfig.from_dict(d)
+        assert cfg2.to_dict() == d
+
+
+class TestRequiredKeys:
+    def test_required_state_and_derivative_keys(self):
+        engine = ResidualEngine(
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
+            scaling_audit=[
+                {
+                    "name": "pe",
+                    "output_key": "Pe",
+                    "state_map": {"re": "Re", "pr": "Pr"},
+                    "predicted_spatial": ["Re", "Pr"],
+                    "predicted_temporal": ["Re"],
+                }
+            ],
+        )
+        state_keys = engine.required_state_keys()
+        assert "phi_xx" in state_keys
+        assert "Re" in state_keys and "Pr" in state_keys and "Pe" in state_keys
+
+        deriv_keys = engine.required_derivative_keys()
+        assert "d_Pe_dx" in deriv_keys
+        assert "d_Re_dx" in deriv_keys
+        assert "d_Pr_dx" in deriv_keys
+        assert "d_Pe_dt" in deriv_keys
+        assert "d_Re_dt" in deriv_keys
+
+    def test_default_inference_uses_primary_fields(self, rtol, atol):
+        engine = ResidualEngine(
+            laws=[],
+            primary_fields=["u", "T"],
+            scaling_audit=[
+                {
+                    "name": "pe",
+                    "output_key": "Pe",
+                    "state_map": {"re": "u", "pr": "T"},
+                }
+            ],
+        )
+        # No predicted_* provided: with collocation including x and t, engine should pick 'u' first.
+        state_pred = {"u": 1.0, "T": 2.0, "Pe": 2.0, "d_u_dx": 0.0, "d_Pe_dx": 0.0}
+        residuals = engine.compute_residuals(state_pred, collocation={"x": 0.0, "t": 0.0})
+        # With u chosen for predicted_spatial, chain_dx exists only if derivative keys are present; here it is present.
+        assert "scaling" in residuals

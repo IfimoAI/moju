@@ -13,7 +13,7 @@ not certification.
 from __future__ import annotations
 
 import datetime
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
 
 import jax
 import jax.numpy as jnp
@@ -298,6 +298,7 @@ class ResidualEngine:
 
     def __init__(
         self,
+        config: Optional[Any] = None,
         constants: Optional[Dict[str, Any]] = None,
         laws: Optional[List[Dict[str, Any]]] = None,
         groups: Optional[List[Dict[str, Any]]] = None,
@@ -310,7 +311,26 @@ class ResidualEngine:
             Callable[[Any, Any, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
         ] = None,
         enable_omit_messages: bool = True,
+        primary_fields: Optional[List[str]] = None,
     ):
+        # MonitorConfig convenience
+        if config is not None:
+            from moju.monitor.config import MonitorConfig
+
+            if isinstance(config, MonitorConfig):
+                constants = config.constants
+                laws = config.laws
+                groups = config.groups
+                constitutive_audit = [s.to_dict() for s in config.constitutive_audit]
+                scaling_audit = [s.to_dict() for s in config.scaling_audit]
+                constitutive_custom = config.constitutive_custom
+                scaling_custom = config.scaling_custom
+                primary_fields = list(config.primary_fields)
+                if config.state_builder is not None and state_builder is None:
+                    state_builder = config.state_builder
+            else:
+                raise TypeError("config must be a MonitorConfig")
+
         self.constants = dict(constants or {})
         self.laws_spec = list(laws or [])
         self.groups_spec = list(groups or [])
@@ -320,6 +340,7 @@ class ResidualEngine:
         self.scaling_custom = list(scaling_custom or [])
         self.state_builder = state_builder
         self.enable_omit_messages = bool(enable_omit_messages)
+        self.primary_fields = list(primary_fields or ["T", "u", "v", "w", "p", "rho"])
 
         # Config-time validation (low effort)
         def _validate_specs(specs: Sequence[Dict[str, Any]], registry: Dict[str, Any], category: str) -> None:
@@ -415,15 +436,21 @@ class ResidualEngine:
                     predicted_spatial = list(spec.get("predicted_spatial") or [])
                 else:
                     predicted_spatial = []
-                    if collocation is not None and "x" in collocation and "T" in state_map.values():
-                        predicted_spatial = ["T"]
+                    if collocation is not None and "x" in collocation:
+                        for k in self.primary_fields:
+                            if k in state_map.values():
+                                predicted_spatial = [k]
+                                break
 
                 if "predicted_temporal" in spec:
                     predicted_temporal = list(spec.get("predicted_temporal") or [])
                 else:
                     predicted_temporal = []
-                    if collocation is not None and "t" in collocation and "T" in state_map.values():
-                        predicted_temporal = ["T"]
+                    if collocation is not None and "t" in collocation:
+                        for k in self.primary_fields:
+                            if k in state_map.values():
+                                predicted_temporal = [k]
+                                break
 
                 if not predicted_spatial and not predicted_temporal:
                     _maybe_log_omit(
@@ -518,6 +545,49 @@ class ResidualEngine:
         self._log.append(entry)
         self._index += 1
         return residuals
+
+    def required_state_keys(
+        self,
+        *,
+        include_groups: bool = True,
+        include_laws: bool = True,
+        include_audits: bool = True,
+    ) -> Set[str]:
+        keys: Set[str] = set()
+        if include_laws:
+            for spec in self.laws_spec:
+                keys |= set((spec.get("state_map") or {}).values())
+        if include_groups:
+            for spec in self.groups_spec:
+                keys |= set((spec.get("state_map") or {}).values())
+                ok = spec.get("output_key")
+                if ok:
+                    keys.add(ok)
+        if include_audits:
+            for spec in self.constitutive_audit + self.scaling_audit:
+                keys |= set((spec.get("state_map") or {}).values())
+                ok = spec.get("output_key")
+                if ok:
+                    keys.add(ok)
+        return keys
+
+    def required_derivative_keys(self) -> Set[str]:
+        keys: Set[str] = set()
+        for spec in self.constitutive_audit + self.scaling_audit:
+            output_key = spec.get("output_key")
+            if not output_key:
+                continue
+            pred_x = list(spec.get("predicted_spatial") or [])
+            pred_t = list(spec.get("predicted_temporal") or [])
+            if pred_x:
+                keys.add(f"d_{output_key}_dx")
+                for k in pred_x:
+                    keys.add(f"d_{k}_dx")
+            if pred_t:
+                keys.add(f"d_{output_key}_dt")
+                for k in pred_t:
+                    keys.add(f"d_{k}_dt")
+        return keys
 
 
 def list_constitutive_models():

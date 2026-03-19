@@ -66,16 +66,50 @@ The package provides two namespaces: **moju.piratio** (Groups, Models, Laws, Ope
   Items with **no spatial and no temporal variation** are omitted from the report.
 - **Physics loss**: **build_loss** uses **laws only**.
 - **Audit**: category scores for Governing laws / Constitutive / Scaling-similarity; overall score is a **geometric mean** across present categories (empty categories excluded).
+- **Typed config**: use `MonitorConfig` and `AuditSpec` to define audits with IDE-friendly autocompletion, and serialize with `to_dict()` / `from_dict()`.
+- **Introspection**: use `engine.required_state_keys()` and `engine.required_derivative_keys()` to see exactly which keys must be present in `state_pred`.
 
 **Custom laws and groups.** In law or group specs, add optional `"fn": your_callable`; kwargs come from `state_map`. **Laws**: return the PDE residual (used in `build_loss`). **Groups**: return value is written to `output_key` in merged state (e.g. for Fo, Bi).
 
 ### Monitor in minutes
+
+Minimal typed config:
+
+```python
+import jax.numpy as jnp
+from moju.monitor import AuditSpec, MonitorConfig, ResidualEngine
+
+cfg = MonitorConfig(
+    laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
+    scaling_audit=[
+        AuditSpec(
+            name="pe",
+            output_key="Pe",
+            state_map={"re": "Re", "pr": "Pr"},
+            predicted_spatial=["Re", "Pr"],
+        )
+    ],
+)
+engine = ResidualEngine(config=cfg)
+
+state_pred = {"phi_xx": jnp.array(0.0), "Re": 10.0, "Pr": 2.0, "Pe": 20.0, "d_Re_dx": 1.0, "d_Pr_dx": 0.0, "d_Pe_dx": 2.0}
+residuals = engine.compute_residuals(state_pred)
+print(sorted(engine.required_state_keys()))
+print(sorted(engine.required_derivative_keys()))
+```
 
 Run the minimal chain demos:
 
 ```bash
 python examples/monitor_chain_spatial_demo.py
 python examples/monitor_chain_temporal_demo.py
+```
+
+Run end-to-end examples (NN → state → engine → PDF):
+
+```bash
+python examples/monitor_heat_end_to_end.py
+python examples/monitor_burgers_end_to_end.py
 ```
 
 ## Examples

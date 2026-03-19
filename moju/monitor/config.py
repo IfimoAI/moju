@@ -1,0 +1,80 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from typing import Any, Callable, Dict, List, Optional
+
+
+@dataclass(frozen=True)
+class AuditSpec:
+    """
+    Typed config for a Model/Group audit.
+
+    - name: Models.<name> or Groups.<name>
+    - output_key: state key for F output (expects derivative keys d_<output_key>_dx/dt for chain closures)
+    - state_map: function arg name -> state key
+    - predicted_spatial/temporal: state keys (not arg names) that vary in x/t
+    """
+
+    name: str
+    output_key: str
+    state_map: Dict[str, str]
+    predicted_spatial: List[str] = field(default_factory=list)
+    predicted_temporal: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(d: Dict[str, Any]) -> "AuditSpec":
+        return AuditSpec(
+            name=d["name"],
+            output_key=d["output_key"],
+            state_map=dict(d.get("state_map") or {}),
+            predicted_spatial=list(d.get("predicted_spatial") or []),
+            predicted_temporal=list(d.get("predicted_temporal") or []),
+        )
+
+
+@dataclass(frozen=True)
+class MonitorConfig:
+    constants: Dict[str, Any] = field(default_factory=dict)
+    laws: List[Dict[str, Any]] = field(default_factory=list)
+    groups: List[Dict[str, Any]] = field(default_factory=list)
+    constitutive_audit: List[AuditSpec] = field(default_factory=list)
+    scaling_audit: List[AuditSpec] = field(default_factory=list)
+    constitutive_custom: List[Dict[str, Any]] = field(default_factory=list)
+    scaling_custom: List[Dict[str, Any]] = field(default_factory=list)
+
+    # Used for default inference when predicted_* omitted.
+    primary_fields: List[str] = field(
+        default_factory=lambda: ["T", "u", "v", "w", "p", "rho"]
+    )
+
+    # Optional Path A state builder (callable is not JSON-serializable; excluded from to_dict)
+    state_builder: Optional[Callable[..., Dict[str, Any]]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "constants": dict(self.constants),
+            "laws": list(self.laws),
+            "groups": list(self.groups),
+            "constitutive_audit": [s.to_dict() for s in self.constitutive_audit],
+            "scaling_audit": [s.to_dict() for s in self.scaling_audit],
+            "constitutive_custom": list(self.constitutive_custom),
+            "scaling_custom": list(self.scaling_custom),
+            "primary_fields": list(self.primary_fields),
+        }
+
+    @staticmethod
+    def from_dict(d: Dict[str, Any]) -> "MonitorConfig":
+        return MonitorConfig(
+            constants=dict(d.get("constants") or {}),
+            laws=list(d.get("laws") or []),
+            groups=list(d.get("groups") or []),
+            constitutive_audit=[AuditSpec.from_dict(x) for x in (d.get("constitutive_audit") or [])],
+            scaling_audit=[AuditSpec.from_dict(x) for x in (d.get("scaling_audit") or [])],
+            constitutive_custom=list(d.get("constitutive_custom") or []),
+            scaling_custom=list(d.get("scaling_custom") or []),
+            primary_fields=list(d.get("primary_fields") or ["T", "u", "v", "w", "p", "rho"]),
+        )
+
