@@ -55,6 +55,8 @@ def test_monitor_module_has_all():
         "visualize",
         "list_constitutive_models",
         "list_scaling_closure_ids",
+        "AuditSpec",
+        "MonitorConfig",
     }
 
 

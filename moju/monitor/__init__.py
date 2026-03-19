@@ -9,6 +9,7 @@ from moju.monitor.auditor import (
     list_scaling_closure_ids,
     visualize,
 )
+from moju.monitor.config import AuditSpec, MonitorConfig
 
 __all__ = [
     "ResidualEngine",
@@ -18,4 +19,6 @@ __all__ = [
     "visualize",
     "list_constitutive_models",
     "list_scaling_closure_ids",
+    "AuditSpec",
+    "MonitorConfig",
 ]
