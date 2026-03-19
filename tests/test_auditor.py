@@ -225,6 +225,35 @@ class TestAudit:
         audit(log)
         assert log[1]["r_norm"]["k"] == 0.5
 
+    def test_audit_uses_r_ref_as_scale_when_supplied(self):
+        log = [{"index": 0, "rms": {"k": 100.0}}, {"index": 1, "rms": {"k": 4.0}}]
+        audit(log, r_ref={"k": 8.0})
+        assert log[1]["r_norm"]["k"] == 0.5
+        assert log[0]["r_norm"]["k"] == 100.0 / 8.0
+
+    def test_audit_uses_entry_scale_when_present(self):
+        log = [
+            {"index": 0, "rms": {"laws/a": 2.0}, "scale": {"laws/a": 4.0}},
+            {"index": 1, "rms": {"laws/a": 1.0}, "scale": {"laws/a": 4.0}},
+        ]
+        audit(log)
+        assert log[1]["r_norm"]["laws/a"] == 0.25
+        assert log[0]["r_norm"]["laws/a"] == 0.5
+
+    def test_engine_log_has_scale_and_audit_uses_it(self, rtol, atol):
+        core = ResidualEngine(
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
+        )
+        state_pred = {"phi_xx": jnp.array(1.0)}
+        core.compute_residuals(state_pred)
+        assert "scale" in core.log[-1]
+        assert "laws/laplace_equation" in core.log[-1]["scale"]
+        report = audit(core.log)
+        r_norm = core.log[-1]["r_norm"]["laws/laplace_equation"]
+        scale_k = core.log[-1]["scale"]["laws/laplace_equation"]
+        rms = core.log[-1]["rms"]["laws/laplace_equation"]
+        assert abs(r_norm - rms / scale_k) < 1e-6
+
     def test_audit_export_dir_pdf_with_new_categories(self, tmp_path):
         pytest.importorskip("reportlab")
         log = [

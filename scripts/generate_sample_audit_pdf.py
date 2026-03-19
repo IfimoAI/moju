@@ -21,6 +21,7 @@ from moju.monitor.report import write_audit_pdf
 
 def _sample_report() -> dict:
     """Build a sample report dict matching the structure returned by audit()."""
+    # per_key r_norm = RMS(r)/scale with scale state-derived by default or overridden via r_ref
     return {
         "overall_admissibility_score": 0.92,
         "overall_admissibility_level": "High Admissibility",

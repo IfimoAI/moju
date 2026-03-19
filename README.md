@@ -77,7 +77,7 @@ The package provides two namespaces: **moju.piratio** (Groups, Models, Laws, Ope
   - `chain_dt` (temporal chain rule; requires time-varying inputs + derivative keys)
   Items with **no spatial and no temporal variation** are omitted from the report.
 - **Physics loss**: **build_loss** uses **laws only**.
-- **Audit**: category scores for Governing laws / Constitutive / Scaling-similarity; overall score is a **geometric mean** across present categories (empty categories excluded).
+- **Audit**: per-key **R_norm(k) = RMS(r_k) / scale_k** and admissibility(k) = 1/(1 + R_norm(k)). Scale is **state-derived by default** (from merged state and specs for laws/constitutive/scaling/data keys); each log entry stores `entry["scale"]`. Passing **r_ref** to `audit(log, r_ref=...)` overrides scale for those keys (e.g. baseline or training-curve reference). Category scores for Governing laws / Constitutive / Scaling-similarity; overall score is a **geometric mean** across present categories (empty categories excluded).
 - **Typed config**: use `MonitorConfig` and `AuditSpec` to define audits with IDE-friendly autocompletion, and serialize with `to_dict()` / `from_dict()`.
 - **Introspection**: use `engine.required_state_keys()` and `engine.required_derivative_keys()` to see exactly which keys must be present in `state_pred`.
 

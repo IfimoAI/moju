@@ -13,7 +13,7 @@ not certification.
 from __future__ import annotations
 
 import datetime
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Union
 
 import jax
 import jax.numpy as jnp
@@ -111,6 +111,107 @@ def _flatten_residual_dict(residuals: Dict[str, Any]) -> Dict[str, jnp.ndarray]:
     return flat
 
 
+_SCALE_EPS = 1e-12
+
+
+def _state_derived_scale_per_key(
+    flat_keys: Iterable[str],
+    merged: Dict[str, Any],
+    laws_spec: List[Dict[str, Any]],
+    constitutive_audit: List[Dict[str, Any]],
+    scaling_audit: List[Dict[str, Any]],
+    state_ref_built: Optional[Dict[str, Any]] = None,
+    *,
+    to_python: bool = True,
+) -> Dict[str, float]:
+    """
+    State-derived scale per residual key for R_norm = RMS(r_k) / scale_k.
+    Used when r_ref is not supplied; provides a scale relative to solution size.
+    """
+    out: Dict[str, float] = {}
+    ref = state_ref_built if state_ref_built is not None else merged
+
+    for k in flat_keys:
+        if "/" not in k:
+            scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
+            out[k] = float(jax.device_get(scale)) if to_python else float(scale)
+            continue
+        prefix, rest = k.split("/", 1)
+        if prefix == "laws":
+            name = rest
+            spec = next((s for s in laws_spec if s.get("name") == name), None)
+            if spec is None:
+                scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
+            else:
+                state_map = spec.get("state_map") or {}
+                parts = []
+                for sk in state_map.values():
+                    if sk in merged:
+                        v = jnp.asarray(merged[sk])
+                        parts.append(jnp.ravel(v))
+                if parts:
+                    big = jnp.concatenate(parts)
+                    scale = _SCALE_EPS + _rms_scalar(big)
+                else:
+                    scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
+            out[k] = float(jax.device_get(scale)) if to_python else float(scale)
+            continue
+        if prefix == "constitutive":
+            name = rest.split("/")[0]
+            spec = next((s for s in constitutive_audit if s.get("name") == name), None)
+            if spec is None:
+                scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
+            else:
+                state_map = spec.get("state_map") or {}
+                output_key = spec.get("output_key")
+                parts = []
+                for sk in state_map.values():
+                    if sk in merged:
+                        parts.append(jnp.ravel(jnp.asarray(merged[sk])))
+                if output_key and output_key in merged:
+                    parts.append(jnp.ravel(jnp.asarray(merged[output_key])))
+                if parts:
+                    big = jnp.concatenate(parts)
+                    scale = _SCALE_EPS + _rms_scalar(big)
+                else:
+                    scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
+            out[k] = float(jax.device_get(scale)) if to_python else float(scale)
+            continue
+        if prefix == "scaling":
+            name = rest.split("/")[0]
+            spec = next((s for s in scaling_audit if s.get("name") == name), None)
+            if spec is None:
+                scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
+            else:
+                state_map = spec.get("state_map") or {}
+                output_key = spec.get("output_key")
+                parts = []
+                for sk in state_map.values():
+                    if sk in merged:
+                        parts.append(jnp.ravel(jnp.asarray(merged[sk])))
+                if output_key and output_key in merged:
+                    parts.append(jnp.ravel(jnp.asarray(merged[output_key])))
+                if parts:
+                    big = jnp.concatenate(parts)
+                    scale = _SCALE_EPS + _rms_scalar(big)
+                else:
+                    scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
+            out[k] = float(jax.device_get(scale)) if to_python else float(scale)
+            continue
+        if prefix == "data":
+            state_key = rest
+            if state_key in ref:
+                v = jnp.asarray(ref[state_key])
+                scale = _SCALE_EPS + _rms_scalar(jnp.ravel(v))
+            else:
+                scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
+            out[k] = float(jax.device_get(scale)) if to_python else float(scale)
+            continue
+        scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
+        out[k] = float(jax.device_get(scale)) if to_python else float(scale)
+    return out
+
+
 def build_loss(
     residual_dict: Dict[str, Any],
     option: str = "cascaded",
@@ -142,22 +243,26 @@ def audit(
 ) -> Dict[str, Any]:
     if not log:
         return {"per_key": {}, "overall_admissibility_score": 0.0, "overall_admissibility_level": "Non-Admissible"}
-    ref = r_ref if r_ref is not None else log[0].get("rms", {})
-    if not ref:
-        ref = log[0].get("rms", {})
+    first_rms = log[0].get("rms", {})
     last_report_per_key: Dict[str, Any] = {}
     for entry in log:
         rms = entry.get("rms", {})
+        entry_scale = entry.get("scale") or {}
         r_norm = {}
         admissibility = {}
         for k, v in rms.items():
-            r_ref_k = ref.get(k)
-            if r_ref_k is not None and r_ref_k > 0:
-                r_norm[k] = v / r_ref_k
-                admissibility[k] = 1.0 / (1.0 + r_norm[k])
+            if r_ref is not None and k in r_ref and r_ref[k] is not None and r_ref[k] > 0:
+                scale_k = r_ref[k]
+            elif k in entry_scale and entry_scale[k] is not None and entry_scale[k] > 0:
+                scale_k = entry_scale[k]
+            elif k in first_rms and first_rms[k] is not None and first_rms[k] > 0:
+                scale_k = first_rms[k]
             else:
-                r_norm[k] = float("inf") if v != 0 else 0.0
-                admissibility[k] = 0.0
+                scale_k = 1.0
+            if scale_k <= 0:
+                scale_k = 1.0
+            r_norm[k] = v / scale_k
+            admissibility[k] = 1.0 / (1.0 + r_norm[k])
             last_report_per_key[k] = {
                 "rms": v,
                 "r_norm": r_norm[k],
@@ -579,7 +684,19 @@ class ResidualEngine:
 
         flat = _flatten_residual_dict(residuals)
         rms_per_key = _rms_per_key(flat, to_python=log_to_python)
-        entry: Dict[str, Any] = {"index": self._index, "rms": rms_per_key}
+        state_ref_built_for_scale = None
+        if state_ref is not None:
+            state_ref_built_for_scale = self._state_builder(state_ref)
+        scale_per_key = _state_derived_scale_per_key(
+            flat.keys(),
+            merged,
+            self.laws_spec,
+            self.constitutive_audit,
+            self.scaling_audit,
+            state_ref_built_for_scale,
+            to_python=log_to_python,
+        )
+        entry: Dict[str, Any] = {"index": self._index, "rms": rms_per_key, "scale": scale_per_key}
         if omitted_msgs:
             entry["omitted"] = omitted_msgs
         if inferred_msgs:
