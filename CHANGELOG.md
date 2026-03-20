@@ -4,6 +4,12 @@ All notable changes to moju are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.3] - 2026-03-20
+
+### Changed
+
+- **PyPI metadata**: update package description wording to clarify moju as a physics-informed ML framework for enforcing governing equations and auditing physical consistency.
+
 ## [0.4.2] - 2026-03-20
 
 ### Added
