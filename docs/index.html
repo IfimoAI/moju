@@ -2,155 +2,86 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>moju — Physics-AI supervision for engineering-grade simulations</title>
-  <meta name="description" content="Dimensionless scaling, constitutive models, and equation residuals in one JAX library. Physics you know, in the AI you train." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <style>
-    :root {
-      --bg: #f8f9fa;
-      --surface: #e9ecef;
-      --text: #1a1d21;
-      --muted: #495057;
-      --accent: #0d6efd;
-      --accent-soft: rgba(13, 110, 253, 0.12);
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: "DM Sans", system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      min-height: 100vh;
-    }
-    .wrap {
-      max-width: 720px;
-      margin: 0 auto;
-      padding: 2rem 1.5rem;
-    }
-    h1 {
-      font-size: clamp(1.75rem, 4vw, 2.25rem);
-      font-weight: 600;
-      margin: 0 0 0.5rem;
-      letter-spacing: -0.02em;
-    }
-    .tagline {
-      font-size: 1.1rem;
-      color: var(--muted);
-      margin: 0 0 2rem;
-      font-style: italic;
-    }
-    .install {
-      background: var(--surface);
-      border: 1px solid #dee2e6;
-      border-radius: 8px;
-      padding: 1rem 1.25rem;
-      margin: 0 0 2rem;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 0.95rem;
-    }
-    .install code { color: var(--accent); }
-    .links { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
-    .links a {
-      color: var(--accent);
-      text-decoration: none;
-      font-weight: 500;
-    }
-    .links a:hover { text-decoration: underline; }
-    h2 {
-      font-size: 1.15rem;
-      font-weight: 600;
-      margin: 2rem 0 0.75rem;
-      color: var(--text);
-    }
-    p { margin: 0 0 1rem; color: var(--muted); }
-    .modules {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      grid-auto-rows: 1fr;
-      align-items: stretch;
-      gap: 0.75rem;
-      margin: 1rem 0 2rem;
-    }
-    @media (min-width: 520px) {
-      .modules { grid-template-columns: repeat(4, 1fr); }
-    }
-    .mod-link {
-      text-decoration: none;
-      color: inherit;
-      display: block;
-      min-height: 5.25rem;
-    }
-    .mod-link:hover .mod { border-color: var(--accent); }
-    .mod {
-      background: var(--accent-soft);
-      border: 1px solid rgba(13, 110, 253, 0.25);
-      border-radius: 6px;
-      padding: 0.75rem 1rem;
-      font-size: 0.9rem;
-      min-height: 5.25rem;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      height: 100%;
-    }
-    .mod strong { color: var(--text); }
-    .mod span { color: var(--muted); font-size: 0.85em; display: block; margin-top: 0.2rem; }
-    footer {
-      margin-top: 3rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid rgba(0,0,0,0.08);
-      font-size: 0.9rem;
-      color: var(--muted);
-    }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+  <title>Moju — Physics Admissibility for All Models</title>
+
+  <meta name="description" content="Moju is a physics AI framework for enforcing governing equations, dimensionless groups, and constitutive laws in machine learning models with built-in physics admissibility scoring." />
+
+  <meta name="keywords" content="Physics AI, PINNs, scientific machine learning, physics-informed neural networks, CFD surrogate modeling, dimensionless analysis, Buckingham pi theorem, engineering simulation AI" />
+
+  <link rel="stylesheet" href="doc/style.css" />
 </head>
+
 <body>
-  <div class="wrap">
-    <h1>moju</h1>
-    <p class="tagline">Physics you know, in the AI you train.</p>
-    <p>Dimensionless scaling, constitutive models, and equation residuals in one JAX library. For flow, heat transfer, and physics-informed ML.</p>
 
-    <div class="install">
-      <code>pip install moju</code>
-    </div>
+<div class="wrap">
+  <header>
+    <h1>Moju</h1>
+    <p><strong>Make AI models physically admissible and auditable.</strong></p>
+    <a href="https://github.com/IfimoAI/moju" target="_blank" rel="noreferrer noopener">View on GitHub</a>
+  </header>
 
-    <div class="links">
-      <a href="doc/overview.html">Documentation</a>
-      <a href="https://github.com/IfimoAI/moju">GitHub</a>
-      <a href="https://pypi.org/project/moju/">PyPI</a>
-    </div>
+  <section>
+    <h2>What is Moju?</h2>
+    <p>
+      Moju is a lightweight framework for <strong>Physics AI and Scientific Machine Learning</strong> that enables you to:
+    </p>
+    <ul>
+      <li>Enforce governing equations and constitutive relationships</li>
+      <li>Incorporate dimensionless groups (π-groups)</li>
+      <li>Build physics-aware loss functions automatically</li>
+      <li>Audit how well your model respects physics</li>
+    </ul>
+  </section>
 
-    <h2>What's included</h2>
-    <p><strong>moju.piratio</strong>: Groups, Models, Laws, Operators (dimensionless scaling, physical models, conservation laws, differential operators).<br><br><strong>moju.monitor</strong>: ResidualEngine with laws, group-enriched state, and optional constitutive/scaling closure audits; build_loss, audit, visualize. JAX-native, JIT-compiled, differentiable.</p>
-    <div class="modules">
-      <a href="doc/groups.html" class="mod-link"><div class="mod"><strong>Groups</strong><span>Re, Pr, Nu, Ma, …</span></div></a>
-      <a href="doc/models.html" class="mod-link"><div class="mod"><strong>Models</strong><span>μ(T), ρ(P,T), k(T)</span></div></a>
-      <a href="doc/laws.html" class="mod-link"><div class="mod"><strong>Laws</strong><span>mass, momentum, energy</span></div></a>
-      <a href="doc/operators.html" class="mod-link"><div class="mod"><strong>Operators</strong><span>∇, ∇², ∇×, ∂/∂t</span></div></a>
-      <a href="doc/overview.html#training-and-monitoring-residual-engine" class="mod-link"><div class="mod"><strong>ResidualEngine</strong><span>residuals, physics loss, audit, plots</span></div></a>
-    </div>
+  <section>
+    <h2>Why Moju?</h2>
+    <p>Most Physics-Informed models stop at adding physics loss.</p>
 
+    <p><strong>Moju goes further.</strong></p>
+
+    <ul>
+      <li>✔ Structured physics: Models, Groups, and Laws</li>
+      <li>✔ Automatic residual construction</li>
+      <li>✔ Built-in physics auditing (admissibility scores)</li>
+      <li>✔ Works with any JAX-based model</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>The Big Idea</h2>
+    <p>Moju treats physics as composable building blocks:</p>
+
+    <pre>
+Predictions (state_pred)
+        ↓
+Constitutive models
+        ↓
+Dimensionless groups (π)
+        ↓
+Governing laws
+        ↓
+Residuals → build_loss(residuals) → audit(engine.log)
+    </pre>
+
+    <p>
+      Instead of manually wiring physics losses, Moju builds residuals for you and produces admissibility diagnostics.
+    </p>
+  </section>
+
+  <section>
     <h2>5-Minute Example</h2>
-    <p>Compute laws residuals, run one constitutive audit and one scaling audit, and produce an admissibility report.</p>
-    <pre><code>import jax.numpy as jnp
-from moju.monitor import ResidualEngine, build_loss, audit, MonitorConfig, AuditSpec
 
-# A compact, copy/paste example with:
-# - 1 Laws residual
-# - 1 Constitutive audit (Models.sutherland_mu)
-# - 1 Scaling audit (Groups.pe)
+    <pre><code>
+import jax.numpy as jnp
+from moju.monitor import ResidualEngine, build_loss, audit, MonitorConfig, AuditSpec
 from moju.piratio import Models, Groups
 
-# Constants for Models.sutherland_mu(T, mu0, T0, S)
 mu0 = jnp.array(1.8e-5)
 T0 = jnp.array(273.0)
 S = jnp.array(110.4)
 
-# State values used by the audits
 T = jnp.array(300.0)
 mu = Models.sutherland_mu(T=T, mu0=mu0, T0=T0, S=S)
 
@@ -165,7 +96,6 @@ cfg = MonitorConfig(
             name="sutherland_mu",
             output_key="mu",
             state_map={"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
-            # Trigger chain_dx: d_mu_dx - (d sutherland_mu / dT) * d_T_dx
             predicted_spatial=["T"],
         )
     ],
@@ -174,7 +104,6 @@ cfg = MonitorConfig(
             name="pe",
             output_key="Pe",
             state_map={"re": "Re", "pr": "Pr"},
-            # Trigger chain_dx: d_Pe_dx - (d pe / dRe) * d_Re_dx
             predicted_spatial=["Re"],
         )
     ],
@@ -182,8 +111,6 @@ cfg = MonitorConfig(
 
 engine = ResidualEngine(config=cfg)
 
-# Provide required state + derivative keys for the chain closures.
-# Set derivatives to 0.0 to keep residuals at (near) zero for this demo.
 state_pred = {
     "phi_xx": jnp.array(0.0),
     "T": T,
@@ -204,17 +131,66 @@ residuals = engine.compute_residuals(state_pred)
 loss = build_loss(residuals)
 report = audit(engine.log)
 
-print("Physics loss:", float(loss))
-print(
-    "Overall admissibility:",
-    report["overall_admissibility_score"],
-    report["overall_admissibility_level"],
-)
-print("Per category:", report["per_category"])</code></pre>
+print("Overall admissibility:", report["overall_admissibility_score"], report["overall_admissibility_level"])
+print("Categories:", report["per_category"])
+    </code></pre>
 
-    <footer>
-      MIT License. Developed by Ifimo Lab, a division of Ifimo Analytics.
-    </footer>
-  </div>
+    <p><strong>Output (keys you’ll get):</strong></p>
+
+    <pre>
+Physics Admissibility Report
+Overall score:   report["overall_admissibility_score"]
+Overall level:  report["overall_admissibility_level"]
+Category scores: report["per_category"]["laws"|"constitutive"|"scaling"]
+Per-key metrics: report["per_key"]
+    </pre>
+
+  </section>
+
+  <section>
+    <h2>Core Concepts</h2>
+
+    <ul>
+      <li><strong>Models</strong> → Constitutive relationships</li>
+      <li><strong>Groups</strong> → Dimensionless quantities (π-groups)</li>
+      <li><strong>Laws</strong> → Governing equations</li>
+      <li><strong>ResidualEngine</strong> → Builds residuals and audit logs</li>
+      <li><strong>build_loss</strong> → Physics loss from law residuals</li>
+      <li><strong>audit</strong> → Physics admissibility scoring</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Use Cases</h2>
+
+    <ul>
+      <li>Physics-Informed Neural Networks (PINNs)</li>
+      <li>CFD surrogate modeling</li>
+      <li>Digital twins</li>
+      <li>Scale-invariant modeling using π-groups</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Installation</h2>
+
+    <pre><code>pip install moju</code></pre>
+  </section>
+
+  <section>
+    <h2>Philosophy</h2>
+
+    <blockquote>
+      Moju does not define physics.<br>
+      Moju provides a structured way to enforce and audit it.
+    </blockquote>
+
+  </section>
+
+  <footer class="doc-footer">
+    <p>Built for the Physics AI and SciML community.</p>
+  </footer>
+</div>
+
 </body>
 </html>
