@@ -48,19 +48,12 @@ Run this after `pip install moju`:
 ```python
 import jax.numpy as jnp
 from moju.monitor import ResidualEngine, build_loss, audit, MonitorConfig, AuditSpec
-
-# A compact, copy/paste example with:
-# - 1 Laws residual
-# - 1 Constitutive audit (Models.sutherland_mu)
-# - 1 Scaling audit (Groups.pe)
 from moju.piratio import Models, Groups
 
-# Constants for Models.sutherland_mu(T, mu0, T0, S)
 mu0 = jnp.array(1.8e-5)
 T0 = jnp.array(273.0)
 S = jnp.array(110.4)
 
-# State values used by the audits
 T = jnp.array(300.0)
 mu = Models.sutherland_mu(T=T, mu0=mu0, T0=T0, S=S)
 
@@ -75,7 +68,6 @@ cfg = MonitorConfig(
             name="sutherland_mu",
             output_key="mu",
             state_map={"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
-            # Trigger chain_dx: d_mu_dx - (d sutherland_mu / dT) * d_T_dx
             predicted_spatial=["T"],
         )
     ],
@@ -84,7 +76,6 @@ cfg = MonitorConfig(
             name="pe",
             output_key="Pe",
             state_map={"re": "Re", "pr": "Pr"},
-            # Trigger chain_dx: d_Pe_dx - (d pe / dRe) * d_Re_dx
             predicted_spatial=["Re"],
         )
     ],
@@ -92,8 +83,6 @@ cfg = MonitorConfig(
 
 engine = ResidualEngine(config=cfg)
 
-# Provide required state + derivative keys for the chain closures.
-# Set derivatives to 0.0 to keep residuals at (near) zero for this demo.
 state_pred = {
     "phi_xx": jnp.array(0.0),
     "T": T,
@@ -115,11 +104,7 @@ loss = build_loss(residuals)
 report = audit(engine.log)
 
 print("Physics loss:", float(loss))
-print(
-    "Overall admissibility:",
-    report["overall_admissibility_score"],
-    report["overall_admissibility_level"],
-)
+print("Overall admissibility:", report["overall_admissibility_score"], report["overall_admissibility_level"])
 print("Per category:", report["per_category"])
 ```
 
