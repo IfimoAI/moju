@@ -20,13 +20,60 @@ def test_readme_quick_start_runs():
 
 
 def test_readme_five_minute_example_runs():
-    """README 5-minute example: ResidualEngine, build_loss, audit with one law."""
+    """README 5-minute example: Laws + Constitutive + Scaling audits."""
     import jax.numpy as jnp
-    from moju.monitor import ResidualEngine, build_loss, audit, MonitorConfig
+    from moju.monitor import ResidualEngine, build_loss, audit, MonitorConfig, AuditSpec
+    from moju.piratio import Models, Groups
 
-    cfg = MonitorConfig(laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}])
+    mu0 = jnp.array(1.8e-5)
+    T0 = jnp.array(273.0)
+    S = jnp.array(110.4)
+
+    T = jnp.array(300.0)
+    mu = Models.sutherland_mu(T=T, mu0=mu0, T0=T0, S=S)
+
+    Re = jnp.array(10.0)
+    Pr = jnp.array(2.0)
+    Pe = Groups.pe(re=Re, pr=Pr)
+
+    cfg = MonitorConfig(
+        laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
+        constitutive_audit=[
+            AuditSpec(
+                name="sutherland_mu",
+                output_key="mu",
+                state_map={"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
+                predicted_spatial=["T"],
+            )
+        ],
+        scaling_audit=[
+            AuditSpec(
+                name="pe",
+                output_key="Pe",
+                state_map={"re": "Re", "pr": "Pr"},
+                predicted_spatial=["Re"],
+            )
+        ],
+    )
+
     engine = ResidualEngine(config=cfg)
-    state_pred = {"phi_xx": jnp.array(0.0)}
+
+    state_pred = {
+        "phi_xx": jnp.array(0.0),
+        "T": T,
+        "mu0": mu0,
+        "T0": T0,
+        "S": S,
+        "mu": mu,
+        "d_T_dx": jnp.array(0.0),
+        "d_mu_dx": jnp.array(0.0),
+        "Re": Re,
+        "Pr": Pr,
+        "Pe": Pe,
+        "d_Re_dx": jnp.array(0.0),
+        "d_Pe_dx": jnp.array(0.0),
+    }
+
     residuals = engine.compute_residuals(state_pred)
     loss = build_loss(residuals)
     report = audit(engine.log)
@@ -37,6 +84,8 @@ def test_readme_five_minute_example_runs():
     assert "per_category" in report
     assert "per_key" in report
     assert "laws" in report["per_category"]
+    assert "constitutive" in report["per_category"]
+    assert "scaling" in report["per_category"]
 
 
 def test_readme_laws_example_runs():
