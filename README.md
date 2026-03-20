@@ -146,7 +146,6 @@ Report keys: `report["per_category"]` (`laws`, `constitutive`, `scaling`), `repo
 
 - **Physics-Informed Neural Networks (PINNs)** — Residuals and loss from governing equations; audit score each step.
 - **CFD surrogate models** — Compare to high-fidelity data via `state_ref`; constitutive and scaling audits.
-- **Battery and energy system modeling** — Constitutive relations and dimensionless groups; admissibility over cycles.
 - **Digital twins** — Continuous audit of predictions against physics and data.
 - **Scale-invariant modeling** — Dimensionless groups (Re, Pr, Pe, …) and scaling-similarity audits.
 
