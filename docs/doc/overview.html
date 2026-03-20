@@ -104,6 +104,11 @@ flowchart TB
       <li><strong>audit</strong> — R_norm(k) = RMS(r_k)/scale_k; scale is state-derived by default (stored in each log entry as <code>entry["scale"]</code>). Passing <code>r_ref</code> overrides scale for those keys (e.g. baseline or training curves). Admissibility levels, optional PDF (<code>pip install moju[report]</code>). Report groups metrics under Governing laws, Constitutive relations, Scaling and similarity, and Data when applicable.</li>
       <li><strong>visualize</strong> — RMS and admissibility per logged key.</li>
     </ul>
+    <p><strong>Discover valid <code>AuditSpec.name</code> ids:</strong> <code>AuditSpec.name</code> must match the registry function id (e.g. <code>sutherland_mu</code> for <code>Models.*</code>, <code>pe</code> for <code>Groups.*</code>).</p>
+    <pre><code>from moju.monitor import list_constitutive_models, list_scaling_closure_ids
+
+print("Constitutive (Models.*) ids:", list_constitutive_models())
+print("Scaling (Groups.*) ids:", list_scaling_closure_ids())</code></pre>
     <p><strong>Derivative strategies (Path B / CFD):</strong> for <code>chain_dx</code>/<code>chain_dt</code>, provide derivative keys (e.g. <code>d_T_dx</code>, <code>d_mu_dt</code>) using solver gradients when available; otherwise use coordinate-aware finite differences (and optionally smoothing before differencing). Planned extension point: a weak-form mode that integrates closure residuals over space/time windows via quadrature (API hook: <code>closure_mode="pointwise"|"weak"</code> plus <code>quadrature_weights</code>).</p>
     <p><strong>CFD snapshot cookbook:</strong> see <code>examples/cfd_snapshot_cookbook_heat_1d.py</code> for an end-to-end reference workflow (xarray snapshot → optional interpolation → finite-difference gradients + smoothing → weak-form audit → interpret RMS/admissibility).</p>
 
