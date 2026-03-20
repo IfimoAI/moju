@@ -4,6 +4,12 @@ All notable changes to moju are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.2] - 2026-03-20
+
+### Added
+
+- **Docs**: show how to discover valid `AuditSpec.name` ids for `Models.*` and `Groups.*` using the registry listing helpers (`list_constitutive_models()`, `list_scaling_closure_ids()`).
+
 ## [0.4.1] - 2026-03-19
 
 ### Changed
