@@ -17,7 +17,7 @@ Most Physics AI tools focus on adding a physics loss. Moju goes further:
 - **Structured physics** — Models, Groups, and Laws as composable building blocks (Reynolds number, viscosity, conservation equations).
 - **Automatic residual construction** — `ResidualEngine.compute_residuals(...)` builds law, constitutive, and scaling residuals from your state.
 - **Physics admissibility scoring** — `audit(log)` returns per-category and overall scores so you see how well predictions satisfy the physics.
-- **Works with any JAX model** — Differentiable end-to-end; use in training loops or as a standalone audit toolkit.
+- **Works across PINNs, CFD surrogates, and other state predictors** — Differentiable end-to-end; use in training loops or as a standalone audit toolkit.
 
 ---
 
