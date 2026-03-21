@@ -175,7 +175,7 @@ Moju does not define physics. Moju provides a structured way to **enforce** and 
 
 ## Learn more
 
-**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, `MonitorConfig`, `AuditSpec`, `audit_spec_to_engine_dict`, build_loss, audit, visualize). Constitutive/scaling closure keys include `ref_delta`, `implied_delta`, `chain_dx`, `chain_dt` (plus scaling `pi_constant` when configured). Use `engine.required_state_keys()` and `engine.required_derivative_keys()` for introspection.
+**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, `MonitorConfig`, `AuditSpec`, `audit_spec_to_engine_dict`, `PathBGridConfig`, `fill_path_b_derivatives`, `fill_law_fd_from_primitives`, `list_law_fd_supported_laws`, build_loss, audit, visualize). Constitutive/scaling closure keys include `ref_delta`, `implied_delta`, `chain_dx`/`chain_dy`/`chain_dz`, `chain_dt` (plus scaling `pi_constant` when configured). Path B optional FD: `compute_residuals(..., auto_path_b_derivatives=...)` and `fill_law_fd=True` for registered law inputs. Use `engine.required_state_keys()` and `engine.required_derivative_keys()` for introspection.
 
 **Examples**
 
@@ -183,9 +183,10 @@ Moju does not define physics. Moju provides a structured way to **enforce** and 
 - Monitor with laws + scaling audit: `python examples/monitor_chain_spatial_demo.py`, `python examples/monitor_chain_temporal_demo.py`.
 - End-to-end NN → residuals → PDF: `python examples/monitor_heat_end_to_end.py`, `python examples/monitor_burgers_end_to_end.py`.
 - CFD snapshot → state_ref → audit: `examples/cfd_snapshot_cookbook_heat_1d.py`; reference loaders: `examples/monitor_state_ref_from_vtu_demo.py`, `from_openfoam`, `from_hdf5`.
+- Path B auto-FD: `examples/cookbook_path_b_fd_audit_pe.py` (audit `d_*_dx` fill for `scaling/pe`), `examples/cookbook_path_b_fd_law_laplace.py` (law `phi_laplacian` fill for `laplace_equation`).
 - Implied constitutive audit (`implied_delta`): `examples/cookbook_constitutive_implied_ideal_gas_rho.py`, `examples/cookbook_constitutive_implied_power_law_fn.py`.
 
-**Paths** — Path A: pass `(model, params, collocation)` and a `state_builder` to build `state_pred`. Path B: pass `state_pred` directly (e.g. from CFD or finite differences). Constitutive and scaling audits use specs tied to `Models.*` and `Groups.*`: **ref_delta** (needs `state_ref`), **implied_delta** (`AuditSpec.implied_value_key` or `implied_fn`; `implied_fn` is omitted from `MonitorConfig.to_dict()`—use in-memory `AuditSpec` + `ResidualEngine(config=...)` or `audit_spec_to_engine_dict`), **chain_dx** / **chain_dt** (need `predicted_spatial` / `predicted_temporal`). R_norm is scale-based (state-derived by default; override with `audit(log, r_ref=...)`).
+**Paths** — Path A: pass `(model, params, collocation)` and a `state_builder` to build `state_pred`. Path B: pass `state_pred` directly (e.g. from CFD or finite differences). Optional **structured-grid FD**: `compute_residuals(..., auto_path_b_derivatives=True|PathBGridConfig)` fills missing audit derivatives (`d_*_dx`, …); `fill_law_fd=True` (with that enabled) fills missing **registered** `Laws.*` inputs (e.g. `phi_laplacian`, `u_grad`) via `law_fd_recipes`. Constitutive and scaling audits use specs tied to `Models.*` and `Groups.*`: **ref_delta** (needs `state_ref`), **implied_delta** (`AuditSpec.implied_value_key` or `implied_fn`; `implied_fn` is omitted from `MonitorConfig.to_dict()`—use in-memory `AuditSpec` + `ResidualEngine(config=...)` or `audit_spec_to_engine_dict`), **chain_dx** / **chain_dy** / **chain_dz** / **chain_dt** (need `predicted_spatial` / `predicted_temporal`; axes from `chain_spatial_axes`). R_norm is scale-based (state-derived by default; override with `audit(log, r_ref=...)`).
 
 **Docs** — [VERSIONING.md](VERSIONING.md). Online docs: overview, Groups, Models, Laws, Operators.
 

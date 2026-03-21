@@ -60,6 +60,10 @@ def test_monitor_module_has_all():
         "AuditSpec",
         "MonitorConfig",
         "audit_spec_to_engine_dict",
+        "PathBGridConfig",
+        "fill_path_b_derivatives",
+        "fill_law_fd_from_primitives",
+        "list_law_fd_supported_laws",
     }
 
 

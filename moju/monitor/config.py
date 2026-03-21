@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 
 @dataclass(frozen=True)
@@ -32,13 +32,15 @@ class AuditSpec:
     implied_fn: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]] = field(
         default=None, repr=False, compare=False
     )
-    # Closure evaluation mode for chain_dx/chain_dt.
+    # Closure evaluation mode for chain_dx/chain_dy/chain_dz/chain_dt.
     # - pointwise: return pointwise residual array (current behavior)
     # - weak: return weighted integrated RMS (noise-robust)
     closure_mode: str = "pointwise"
     # Weak-form hook: canonical axis -> state key holding quadrature weights.
-    # Examples: {"x": "w_x"} or {"t": "w_t"}.
+    # Examples: {"x": "w_x"}, {"y": "w_y"}, {"z": "w_z"}, or {"t": "w_t"}.
     quadrature_weights: Dict[str, str] = field(default_factory=dict)
+    # Spatial chain-rule axes: closure keys chain_dx / chain_dy / chain_dz for each axis listed.
+    chain_spatial_axes: Sequence[str] = field(default_factory=lambda: ["x"])
     # π-constant closure (Path A only): perturb constants along a built-in recipe so the
     # audited Group stays fixed; compare merged state keys between baseline and scaled runs.
     invariance_pi_constant: bool = False
@@ -55,6 +57,7 @@ class AuditSpec:
             "predicted_temporal": list(self.predicted_temporal),
             "closure_mode": self.closure_mode,
             "quadrature_weights": dict(self.quadrature_weights),
+            "chain_spatial_axes": list(self.chain_spatial_axes),
             "invariance_pi_constant": self.invariance_pi_constant,
             "invariance_compare_keys": list(self.invariance_compare_keys),
             "invariance_scale_c": self.invariance_scale_c,
@@ -71,6 +74,7 @@ class AuditSpec:
             predicted_temporal=list(d.get("predicted_temporal") or []),
             closure_mode=str(d.get("closure_mode") or "pointwise"),
             quadrature_weights=dict(d.get("quadrature_weights") or {}),
+            chain_spatial_axes=list(d.get("chain_spatial_axes") or ["x"]),
             invariance_pi_constant=bool(d.get("invariance_pi_constant", False)),
             invariance_compare_keys=list(d.get("invariance_compare_keys") or []),
             invariance_scale_c=float(d.get("invariance_scale_c", 10.0)),

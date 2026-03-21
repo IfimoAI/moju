@@ -6,7 +6,7 @@ ResidualEngine: residuals for governing laws, constitutive, and scaling/similari
 - audit / visualize: same metrics (RMS, R_norm, admissibility) for all residual keys.
 
 Constitutive and scaling/similarity audits are tied to Models.* and Groups.* functions via
-standard closure types (ref_delta, implied_delta, chain_dx, chain_dt). Metrics are consistency
+standard closure types (ref_delta, implied_delta, chain_dx/chain_dy/chain_dz, chain_dt). Metrics are consistency
 indicators, not certification.
 """
 
@@ -28,6 +28,7 @@ from moju.monitor.closure_registry import (
     compute_implied_delta,
     compute_ref_delta,
 )
+from moju.monitor.derivative_keys import CHAIN_SPATIAL_DERIVS, collect_audit_derivative_keys
 from moju.monitor.pi_constant_recipes import (
     GROUP_PI_CONSTANT_RECIPES,
     apply_pi_constant_recipe,
@@ -419,7 +420,7 @@ class ResidualEngine:
         "predicted_temporal": ["T"],           # state keys varying in t
       }
 
-    Derivative convention in state_pred: d_<state_key>_dx and d_<state_key>_dt.
+    Derivative convention in state_pred: d_<state_key>_dx, _dy, _dz, _dt as required by audits.
     """
 
     def __init__(
@@ -497,6 +498,16 @@ class ResidualEngine:
                     raise ValueError(
                         f"{category}:{name} use only one of implied_value_key and implied_fn, not both"
                     )
+                csa = list(spec.get("chain_spatial_axes") or ["x"])
+                allowed = set(CHAIN_SPATIAL_DERIVS)
+                bad = [a for a in csa if a not in allowed]
+                if bad:
+                    raise ValueError(
+                        f"{category}:{name} chain_spatial_axes must be subset of {sorted(allowed)}, "
+                        f"invalid: {bad}"
+                    )
+                if not csa:
+                    raise ValueError(f"{category}:{name} chain_spatial_axes must be non-empty")
 
         _validate_specs(self.constitutive_audit, MODEL_FNS, "constitutive")
         _validate_specs(self.scaling_audit, GROUP_FNS, "scaling")
@@ -563,12 +574,23 @@ class ResidualEngine:
         params: Any = None,
         collocation: Optional[Dict[str, Any]] = None,
         log_to_python: bool = True,
+        auto_path_b_derivatives: Any = False,
+        fill_law_fd: bool = False,
     ) -> Dict[str, Any]:
         """
         Compute residuals.
 
         Path A: pass (model, params, collocation) and configure engine.state_builder.
         Path B: pass state_pred directly.
+
+        If ``auto_path_b_derivatives`` is True, uses default ``PathBGridConfig``; if a
+        ``PathBGridConfig`` instance, uses that layout. Fills missing ``d_*_dx``/``_dy``/``_dz``/``_dt``
+        keys required by audits via finite differences (after group state build, before laws).
+        Warnings are appended to the log ``inferred`` list when enabled.
+
+        If ``fill_law_fd`` is True, ``auto_path_b_derivatives`` must also be enabled; missing
+        **registered** ``Laws.*`` inputs (e.g. ``phi_laplacian``, ``u_grad``) are filled from
+        primitives on the same grid when possible (see ``law_fd_recipes``).
         """
         path_a = state_pred is None
         pi_specs = [s for s in self.scaling_audit if s.get("invariance_pi_constant")]
@@ -591,13 +613,6 @@ class ResidualEngine:
         state_pred_built = self._state_builder(state_pred)
         merged = {**state_pred_built, **self.constants}
 
-        for spec in self.laws_spec:
-            name = spec["name"]
-            state_map = spec["state_map"]
-            kwargs = _kwargs_from_state(merged, self.constants, state_map)
-            fn = _get_fn(spec, Laws)
-            residuals["laws"][name] = fn(**kwargs)
-
         omitted_msgs: List[str] = []
         inferred_msgs: List[str] = []
 
@@ -608,6 +623,43 @@ class ResidualEngine:
         def _maybe_log_infer(msg: str) -> None:
             if self.enable_omit_messages:
                 inferred_msgs.append(msg)
+
+        if fill_law_fd and not auto_path_b_derivatives:
+            raise ValueError(
+                "fill_law_fd=True requires auto_path_b_derivatives=True or a PathBGridConfig"
+            )
+
+        if auto_path_b_derivatives:
+            from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
+
+            if auto_path_b_derivatives is True:
+                grid = PathBGridConfig()
+            elif isinstance(auto_path_b_derivatives, PathBGridConfig):
+                grid = auto_path_b_derivatives
+            else:
+                raise TypeError(
+                    "auto_path_b_derivatives must be False, True, or a PathBGridConfig instance"
+                )
+            state_pred_built, pb_warn = fill_path_b_derivatives(
+                state_pred_built,
+                constitutive_audit=self.constitutive_audit,
+                scaling_audit=self.scaling_audit,
+                laws_spec=self.laws_spec,
+                constants=self.constants,
+                grid=grid,
+                copy=False,
+                fill_law_recipes=bool(fill_law_fd),
+            )
+            merged = {**state_pred_built, **self.constants}
+            for w in pb_warn:
+                _maybe_log_infer(f"path_b_derivatives: {w}")
+
+        for spec in self.laws_spec:
+            name = spec["name"]
+            state_map = spec["state_map"]
+            kwargs = _kwargs_from_state(merged, self.constants, state_map)
+            fn = _get_fn(spec, Laws)
+            residuals["laws"][name] = fn(**kwargs)
 
         def _run_specs(
             specs: Sequence[Dict[str, Any]],
@@ -692,32 +744,39 @@ class ResidualEngine:
                         out[f"{name}/implied_delta"] = jnp.asarray(arr)
 
                 if predicted_spatial and output_key is not None:
-                    if closure_mode == "weak":
-                        arr = compute_chain_weak(
-                            fn=fn,
-                            arg_names=arg_names,
-                            output_key=output_key,
-                            state_map=state_map,
-                            state_pred=merged,
-                            constants=self.constants,
-                            predicted_varying=predicted_spatial,
-                            deriv="x",
-                            weight_key=quadrature_weights.get("x"),
-                        )
-                        _maybe_log_infer(f"{category}:{name} using weak chain_dx")
-                    else:
-                        arr = compute_chain(
-                            fn=fn,
-                            arg_names=arg_names,
-                            output_key=output_key,
-                            state_map=state_map,
-                            state_pred=merged,
-                            constants=self.constants,
-                            predicted_varying=predicted_spatial,
-                            deriv="x",
-                        )
-                    if arr is not None:
-                        out[f"{name}/chain_dx"] = jnp.asarray(arr)
+                    spatial_axes = list(spec.get("chain_spatial_axes") or ["x"])
+                    for spatial_axis in spatial_axes:
+                        if spatial_axis not in CHAIN_SPATIAL_DERIVS:
+                            continue
+                        chain_key = f"chain_d{spatial_axis}"
+                        if closure_mode == "weak":
+                            arr = compute_chain_weak(
+                                fn=fn,
+                                arg_names=arg_names,
+                                output_key=output_key,
+                                state_map=state_map,
+                                state_pred=merged,
+                                constants=self.constants,
+                                predicted_varying=predicted_spatial,
+                                deriv=spatial_axis,
+                                weight_key=quadrature_weights.get(spatial_axis),
+                            )
+                            _maybe_log_infer(
+                                f"{category}:{name} using weak {chain_key}"
+                            )
+                        else:
+                            arr = compute_chain(
+                                fn=fn,
+                                arg_names=arg_names,
+                                output_key=output_key,
+                                state_map=state_map,
+                                state_pred=merged,
+                                constants=self.constants,
+                                predicted_varying=predicted_spatial,
+                                deriv=spatial_axis,
+                            )
+                        if arr is not None:
+                            out[f"{name}/{chain_key}"] = jnp.asarray(arr)
 
                 if predicted_temporal and output_key is not None:
                     if closure_mode == "weak":
@@ -886,22 +945,10 @@ class ResidualEngine:
         return keys
 
     def required_derivative_keys(self) -> Set[str]:
-        keys: Set[str] = set()
-        for spec in self.constitutive_audit + self.scaling_audit:
-            output_key = spec.get("output_key")
-            if not output_key:
-                continue
-            pred_x = list(spec.get("predicted_spatial") or [])
-            pred_t = list(spec.get("predicted_temporal") or [])
-            if pred_x:
-                keys.add(f"d_{output_key}_dx")
-                for k in pred_x:
-                    keys.add(f"d_{k}_dx")
-            if pred_t:
-                keys.add(f"d_{output_key}_dt")
-                for k in pred_t:
-                    keys.add(f"d_{k}_dt")
-        return keys
+        sx, st = collect_audit_derivative_keys(
+            list(self.constitutive_audit), list(self.scaling_audit)
+        )
+        return sx | st
 
 
 def list_constitutive_models():

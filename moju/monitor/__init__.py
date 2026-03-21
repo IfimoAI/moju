@@ -10,6 +10,11 @@ from moju.monitor.auditor import (
     visualize,
 )
 from moju.monitor.config import AuditSpec, MonitorConfig, audit_spec_to_engine_dict
+from moju.monitor.law_fd_recipes import (
+    fill_law_fd_from_primitives,
+    list_law_fd_supported_laws,
+)
+from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
 from moju.monitor.pi_constant_recipes import list_pi_constant_group_names
 
 __all__ = [
@@ -23,5 +28,9 @@ __all__ = [
     "AuditSpec",
     "MonitorConfig",
     "audit_spec_to_engine_dict",
+    "PathBGridConfig",
+    "fill_path_b_derivatives",
+    "fill_law_fd_from_primitives",
+    "list_law_fd_supported_laws",
     "list_pi_constant_group_names",
 ]

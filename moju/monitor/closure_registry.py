@@ -4,12 +4,12 @@ Model/Group closure registry for moju.monitor.
 This module standardizes constitutive + scaling/similarity audits around 4 closures:
   1) ref_delta: F(state_pred) - F(state_ref) (requires state_ref)
   2) implied_delta: F(state_pred) - implied (implied_value_key in state/constants, or implied_fn)
-  3) chain_dx:  d/dx[F(phi)] - sum_i (dF/dphi_i) * dphi_i/dx   (requires spatially varying inputs)
-  4) chain_dt:  d/dt[F(phi)] - sum_i (dF/dphi_i) * dphi_i/dt   (requires temporally varying inputs)
+  3) chain_dx / chain_dy / chain_dz: same chain rule along spatial axes x, y, z (keys d_<k>_dx, etc.)
+  4) chain_dt:  d/dt[F(phi)] - sum_i (dF/dphi_i) * dphi_i/dt
 
 Notes:
   - Path A vs Path B: monitor may build derivatives (Path A) or accept them (Path B).
-    In both cases, chain closures consume derivative keys in state_pred: d_<state_key>_dx, d_<state_key>_dt.
+    Chain closures consume d_<state_key>_dx, _dy, _dz, _dt per AuditSpec.chain_spatial_axes / predicted_*.
   - Chain closures are only computed when the corresponding predicted_* list is non-empty.
   - If required keys are missing, closures return None (auditor records as unknown or omits per policy).
 """
@@ -25,6 +25,8 @@ import jax.numpy as jnp
 from moju.piratio.groups import Groups
 from moju.piratio.models import Models
 
+from moju.monitor.derivative_keys import derivative_state_key
+
 
 def _val(state: Dict[str, Any], constants: Dict[str, Any], key: str) -> Any:
     v = state.get(key)
@@ -34,11 +36,8 @@ def _val(state: Dict[str, Any], constants: Dict[str, Any], key: str) -> Any:
 
 
 def _deriv_key(state_key: str, deriv: str) -> str:
-    if deriv == "x":
-        return f"d_{state_key}_dx"
-    if deriv == "t":
-        return f"d_{state_key}_dt"
-    raise ValueError(f"Unknown deriv {deriv!r}")
+    """Canonical monitor derivative key for state_key and direction x|y|z|t."""
+    return derivative_state_key(state_key, deriv)
 
 
 def _fn_and_args(fn: Callable[..., Any]) -> Tuple[Callable[..., Any], List[str]]:
@@ -149,7 +148,7 @@ def compute_chain(
     state_pred: Dict[str, Any],
     constants: Dict[str, Any],
     predicted_varying: List[str],
-    deriv: str,  # "x" or "t"
+    deriv: str,  # "x", "y", "z", or "t"
 ) -> Optional[jnp.ndarray]:
     # Only compute when at least one input is varying (per plan).
     if not predicted_varying:
@@ -200,7 +199,7 @@ def _broadcast_weights_for_residual(
         # scalar residual: any weight is equivalent
         return jnp.asarray(1.0)
 
-    if deriv == "x":
+    if deriv in ("x", "y", "z"):
         axis = -1
         n = r.shape[axis]
         if w.ndim == 1 and w.shape[0] == n:
