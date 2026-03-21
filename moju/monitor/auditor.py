@@ -3,7 +3,8 @@ ResidualEngine: residuals for governing laws, constitutive, and scaling/similari
 
 - compute_residuals(state_pred, state_ref=None, *, log_to_python=True)
 - build_loss: cascaded RMS over laws only (training).
-- audit / visualize: same metrics (RMS, R_norm, admissibility) for all residual keys.
+- audit / visualize: same metrics (RMS, R_norm, admissibility) for all residual keys;
+  visualize builds a multi-panel matplotlib dashboard (no extra user data required).
 
 Constitutive and scaling/similarity audits are tied to Models.* and Groups.* functions via
 standard closure types (ref_delta, implied_delta, chain_dx/chain_dy/chain_dz, chain_dt). Metrics are consistency
@@ -242,6 +243,83 @@ def build_loss(
     return jnp.sum(w * rms_vals)
 
 
+def _compute_log_step_metrics(
+    log: List[Dict[str, Any]],
+    r_ref: Optional[Dict[str, float]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Per-log-entry admissibility metrics (same rules as ``audit``), without mutating ``log``.
+
+    Returns one dict per entry with keys: ``r_norm``, ``admissibility_score``,
+    ``category_admissibility_score``, ``overall_admissibility_score``, and
+    ``per_key_report`` (flat key -> {rms, r_norm, admissibility_score, admissibility_level}).
+    """
+    if not log:
+        return []
+    first_rms = log[0].get("rms", {})
+    out: List[Dict[str, Any]] = []
+    category_buckets = ("laws", "constitutive", "scaling", "data")
+    for entry in log:
+        rms = entry.get("rms", {})
+        entry_scale = entry.get("scale") or {}
+        r_norm: Dict[str, float] = {}
+        admissibility: Dict[str, float] = {}
+        per_key_report: Dict[str, Any] = {}
+        for k, v in rms.items():
+            if r_ref is not None and k in r_ref and r_ref[k] is not None and r_ref[k] > 0:
+                scale_k = r_ref[k]
+            elif k in entry_scale and entry_scale[k] is not None and entry_scale[k] > 0:
+                scale_k = entry_scale[k]
+            elif k in first_rms and first_rms[k] is not None and first_rms[k] > 0:
+                scale_k = first_rms[k]
+            else:
+                scale_k = 1.0
+            if scale_k <= 0:
+                scale_k = 1.0
+            r_norm[k] = v / scale_k
+            admissibility[k] = 1.0 / (1.0 + r_norm[k])
+            per_key_report[k] = {
+                "rms": v,
+                "r_norm": r_norm[k],
+                "admissibility_score": admissibility[k],
+                "admissibility_level": admissibility_level(admissibility[k]),
+            }
+        category_keys: Dict[str, List[str]] = {c: [] for c in category_buckets}
+        for k in admissibility.keys():
+            if "/" in k:
+                prefix = k.split("/", 1)[0]
+                if prefix in category_keys:
+                    category_keys[prefix].append(k)
+        category_scores: Dict[str, float] = {}
+        for cat, keys in category_keys.items():
+            if not keys:
+                continue
+            gm = 1.0
+            for kk in keys:
+                gm *= float(admissibility.get(kk, 0.0)) ** (1.0 / len(keys))
+            category_scores[cat] = gm
+        cats_present = list(category_scores.keys())
+        if not cats_present:
+            overall = float("nan")
+        elif len(cats_present) == 1:
+            overall = category_scores[cats_present[0]]
+        else:
+            gm = 1.0
+            for cat in cats_present:
+                gm *= float(category_scores[cat]) ** (1.0 / len(cats_present))
+            overall = gm
+        out.append(
+            {
+                "r_norm": r_norm,
+                "admissibility_score": admissibility,
+                "category_admissibility_score": category_scores,
+                "overall_admissibility_score": overall,
+                "per_key_report": per_key_report,
+            }
+        )
+    return out
+
+
 def audit(
     log: List[Dict[str, Any]],
     r_ref: Optional[Dict[str, float]] = None,
@@ -258,69 +336,19 @@ def audit(
 
     Reporting uses three levels (no extra aggregation API): (1) per residual key in
     ``per_key``; (2) geometric mean within each category — ``per_category`` keys
-    ``laws``, ``constitutive``, ``scaling``; (3) overall score — geometric mean of
+    ``laws``, ``constitutive``, ``scaling``, ``data``; (3) overall score — geometric mean of
     the category scores that are present.
     """
     if not log:
         return {"per_key": {}, "overall_admissibility_score": 0.0, "overall_admissibility_level": "Non-Admissible"}
-    first_rms = log[0].get("rms", {})
+    step_metrics = _compute_log_step_metrics(log, r_ref)
     last_report_per_key: Dict[str, Any] = {}
-    for entry in log:
-        rms = entry.get("rms", {})
-        entry_scale = entry.get("scale") or {}
-        r_norm = {}
-        admissibility = {}
-        for k, v in rms.items():
-            if r_ref is not None and k in r_ref and r_ref[k] is not None and r_ref[k] > 0:
-                scale_k = r_ref[k]
-            elif k in entry_scale and entry_scale[k] is not None and entry_scale[k] > 0:
-                scale_k = entry_scale[k]
-            elif k in first_rms and first_rms[k] is not None and first_rms[k] > 0:
-                scale_k = first_rms[k]
-            else:
-                scale_k = 1.0
-            if scale_k <= 0:
-                scale_k = 1.0
-            r_norm[k] = v / scale_k
-            admissibility[k] = 1.0 / (1.0 + r_norm[k])
-            last_report_per_key[k] = {
-                "rms": v,
-                "r_norm": r_norm[k],
-                "admissibility_score": admissibility[k],
-                "admissibility_level": admissibility_level(admissibility[k]),
-            }
-        entry["r_norm"] = r_norm
-        entry["admissibility_score"] = admissibility
-        # Category scores: geometric mean of per-key scores within each category.
-        category_keys: Dict[str, List[str]] = {"laws": [], "constitutive": [], "scaling": []}
-        for k in admissibility.keys():
-            if "/" in k:
-                prefix = k.split("/", 1)[0]
-                if prefix in category_keys:
-                    category_keys[prefix].append(k)
-        category_scores: Dict[str, float] = {}
-        for cat, keys in category_keys.items():
-            if not keys:
-                continue
-            # Include zero scores; omit only when key missing.
-            gm = 1.0
-            for k in keys:
-                gm *= float(admissibility.get(k, 0.0)) ** (1.0 / len(keys))
-            category_scores[cat] = gm
-
-        entry["category_admissibility_score"] = category_scores
-
-        # Overall: geometric mean across present categories (edge cases: 0 -> NaN, 1 -> that score)
-        cats_present = list(category_scores.keys())
-        if not cats_present:
-            entry["overall_admissibility_score"] = float("nan")
-        elif len(cats_present) == 1:
-            entry["overall_admissibility_score"] = category_scores[cats_present[0]]
-        else:
-            gm = 1.0
-            for cat in cats_present:
-                gm *= float(category_scores[cat]) ** (1.0 / len(cats_present))
-            entry["overall_admissibility_score"] = gm
+    for entry, m in zip(log, step_metrics):
+        entry["r_norm"] = m["r_norm"]
+        entry["admissibility_score"] = m["admissibility_score"]
+        entry["category_admissibility_score"] = m["category_admissibility_score"]
+        entry["overall_admissibility_score"] = m["overall_admissibility_score"]
+        last_report_per_key = dict(m["per_key_report"])
     overall = log[-1].get("overall_admissibility_score", 0.0) if log else 0.0
     report = {
         "per_key": last_report_per_key,
@@ -354,45 +382,376 @@ def audit(
     return report
 
 
+def _closure_kind_for_key(flat_key: str) -> Optional[str]:
+    """Last path segment for constitutive/scaling keys (e.g. chain_dx, ref_delta)."""
+    parts = flat_key.split("/")
+    if len(parts) < 2:
+        return None
+    if parts[0] not in ("constitutive", "scaling"):
+        return None
+    return parts[-1]
+
+
+def _keys_by_category(plot_keys: Sequence[str]) -> Dict[str, List[str]]:
+    order = ("laws", "constitutive", "scaling", "data")
+    buckets: Dict[str, List[str]] = {c: [] for c in order}
+    for k in plot_keys:
+        if "/" not in k:
+            continue
+        p = k.split("/", 1)[0]
+        if p in buckets:
+            buckets[p].append(k)
+    return buckets
+
+
+def _build_visualize_bundle(
+    log: List[Dict[str, Any]],
+    keys: Optional[List[str]],
+    r_ref: Optional[Dict[str, float]],
+    max_legend_keys: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Shared arrays and metadata for :func:`visualize` (matplotlib or plotly).
+
+    Does not mutate ``log``. Requires ``numpy`` (already a moju dependency).
+    """
+    import numpy as np
+
+    if not log:
+        return None
+    first_rms = log[0].get("rms", {})
+    plot_keys = list(keys) if keys is not None else list(first_rms.keys())
+    if not plot_keys:
+        return None
+    metrics = _compute_log_step_metrics(log, r_ref)
+    n = len(log)
+    indices = np.arange(n, dtype=float)
+    legend_keys = plot_keys[: max(1, int(max_legend_keys))]
+    buckets = _keys_by_category(plot_keys)
+    ordered_keys: List[str] = []
+    for cat in ("laws", "constitutive", "scaling", "data"):
+        ordered_keys.extend(sorted(buckets[cat]))
+    if not ordered_keys:
+        ordered_keys = list(plot_keys)
+    mat = np.zeros((len(ordered_keys), n))
+    for j in range(n):
+        for i, kk in enumerate(ordered_keys):
+            v = metrics[j]["admissibility_score"].get(kk)
+            mat[i, j] = float(v) if v is not None else float("nan")
+    short_labels = [k if len(k) < 42 else k[:39] + "…" for k in ordered_keys]
+    last_rn = metrics[-1]["r_norm"]
+    ranked = sorted(
+        ((k, float(last_rn[k])) for k in plot_keys if k in last_rn),
+        key=lambda t: t[1],
+        reverse=True,
+    )
+    last_adm = metrics[-1]["admissibility_score"]
+    kind_vals: Dict[str, List[float]] = {}
+    for k in plot_keys:
+        kind = _closure_kind_for_key(k)
+        if kind is None:
+            continue
+        if k in last_adm:
+            kind_vals.setdefault(kind, []).append(float(last_adm[k]))
+    kinds_order = (
+        sorted(kind_vals.keys(), key=lambda x: (-len(kind_vals[x]), x)) if kind_vals else []
+    )
+    means_closure = [float(np.mean(kind_vals[kk])) for kk in kinds_order]
+    om = [len(e.get("omitted") or []) for e in log]
+    inf = [len(e.get("inferred") or []) for e in log]
+    top5 = [k for k, _ in ranked[:5]] if ranked else plot_keys[:5]
+    cat_colors = {
+        "laws": "#1f77b4",
+        "constitutive": "#ff7f0e",
+        "scaling": "#2ca02c",
+        "data": "#9467bd",
+    }
+    last_cat = metrics[-1]["category_admissibility_score"]
+    cats_fin = [
+        (c, float(last_cat[c]))
+        for c in cat_colors
+        if c in last_cat and np.isfinite(last_cat[c])
+    ]
+    rms_title = "RMS per key"
+    if len(plot_keys) > len(legend_keys):
+        rms_title = f"RMS per key (showing {len(legend_keys)} of {len(plot_keys)} keys)"
+    return {
+        "log": log,
+        "metrics": metrics,
+        "n": n,
+        "indices": indices,
+        "plot_keys": plot_keys,
+        "legend_keys": legend_keys,
+        "buckets": buckets,
+        "ordered_keys": ordered_keys,
+        "mat": mat,
+        "short_labels": short_labels,
+        "ranked": ranked,
+        "kind_vals": kind_vals,
+        "kinds_order": kinds_order,
+        "means_closure": means_closure,
+        "om": om,
+        "inf": inf,
+        "top5": top5,
+        "cats_fin": cats_fin,
+        "rms_title": rms_title,
+        "cat_colors": cat_colors,
+        "np": np,
+    }
+
+
 def visualize(
     log: List[Dict[str, Any]],
     keys: Optional[List[str]] = None,
     backend: str = "matplotlib",
+    *,
+    r_ref: Optional[Dict[str, float]] = None,
+    max_legend_keys: int = 16,
 ) -> Any:
+    """
+    Multi-panel monitor dashboard from ``ResidualEngine`` log entries (``rms``, ``scale``).
+
+    Uses the same R_norm / admissibility rules as :func:`audit` via
+    :func:`_compute_log_step_metrics` and **does not mutate** ``log``.
+
+    **Backends**
+
+    - ``matplotlib`` — static figure (requires ``matplotlib``).
+    - ``plotly`` — interactive figure (zoom/pan/hover; requires ``pip install plotly`` or ``moju[viz]``).
+    - ``none`` — returns ``None``.
+
+    Panels (when data allows): RMS and admissibility per key; overall + category trajectories;
+    admissibility heatmap; top ``R_norm`` keys; closure-type summary; omitted/inferred counts;
+    twin RMS / ``R_norm`` for top keys; category radar; worst key per category.
+
+    Parameters
+    ----------
+    log
+        Entries from ``ResidualEngine.log`` (after ``compute_residuals``).
+    keys
+        Subset of flat residual keys to plot; default = all keys in the first entry.
+    backend
+        ``matplotlib``, ``plotly``, or ``none``.
+    r_ref
+        Optional per-key reference scale overrides (same as :func:`audit`).
+    max_legend_keys
+        Cap legend entries on per-key line plots for readability.
+    """
     if backend == "none":
         return None
+
+    bundle = _build_visualize_bundle(log, keys, r_ref, max_legend_keys)
+    if bundle is None:
+        return None
+
+    if backend == "plotly":
+        try:
+            from moju.monitor.visualize_plotly import build_plotly_monitor_figure
+
+            return build_plotly_monitor_figure(bundle)
+        except ImportError:
+            return None
+
     if backend != "matplotlib":
         return None
+
     try:
         import matplotlib.pyplot as plt
     except ImportError:
         return None
-    if not log:
-        return None
-    first_rms = log[0].get("rms", {})
-    plot_keys = keys or list(first_rms.keys())
-    if not plot_keys:
-        return None
-    indices = [i for i in range(len(log))]
-    fig, axes = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
-    ax_rms, ax_adm = axes[0], axes[1]
-    for k in plot_keys:
+
+    np = bundle["np"]
+    log = bundle["log"]
+    metrics = bundle["metrics"]
+    n = bundle["n"]
+    indices = bundle["indices"]
+    plot_keys = bundle["plot_keys"]
+    legend_keys = bundle["legend_keys"]
+    buckets = bundle["buckets"]
+    ordered_keys = bundle["ordered_keys"]
+    mat = bundle["mat"]
+    short_labels = bundle["short_labels"]
+    ranked = bundle["ranked"]
+    kinds_order = bundle["kinds_order"]
+    means_closure = bundle["means_closure"]
+    om = bundle["om"]
+    inf = bundle["inf"]
+    top5 = bundle["top5"]
+    cats_fin = bundle["cats_fin"]
+    rms_title = bundle["rms_title"]
+    cat_colors = bundle["cat_colors"]
+
+    fig = plt.figure(figsize=(13, 22))
+    gs = fig.add_gridspec(
+        8,
+        2,
+        height_ratios=[1.0, 1.0, 0.9, 1.35, 1.0, 0.75, 1.0, 0.85],
+        hspace=0.5,
+        wspace=0.28,
+    )
+
+    # --- 1–2: RMS and admissibility per key ---
+    ax_rms = fig.add_subplot(gs[0, :])
+    ax_adm = fig.add_subplot(gs[1, :], sharex=ax_rms)
+    for k in legend_keys:
         rms_vals = [e.get("rms", {}).get(k) for e in log]
-        rms_vals = [v for v in rms_vals if v is not None]
-        if len(rms_vals) == len(log):
-            ax_rms.plot(indices, rms_vals, label=k)
-        adm_vals = [e.get("admissibility_score", {}).get(k) for e in log]
-        adm_vals = [v for v in adm_vals if v is not None]
-        if len(adm_vals) == len(log):
-            ax_adm.plot(indices, adm_vals, label=k)
+        if all(v is not None for v in rms_vals):
+            ax_rms.plot(indices, rms_vals, label=k, alpha=0.85)
+        adm_vals = [metrics[i]["admissibility_score"].get(k) for i in range(n)]
+        if all(v is not None for v in adm_vals):
+            ax_adm.plot(indices, adm_vals, label=k, alpha=0.85)
     ax_rms.set_ylabel("RMS")
-    ax_rms.legend(loc="best", fontsize=8)
-    ax_rms.set_title("RMS per key")
-    ax_adm.set_ylabel("Admissibility score")
-    ax_adm.set_xlabel("Step / index")
-    ax_adm.legend(loc="best", fontsize=8)
-    ax_adm.set_title("Admissibility score per key")
-    plt.tight_layout()
+    ax_rms.set_title(rms_title)
+    ax_rms.legend(loc="upper right", fontsize=7, ncol=2)
+    ax_rms.grid(True, alpha=0.25)
+    ax_adm.set_ylabel("Admissibility")
+    ax_adm.set_title("Admissibility per key (1/(1+R_norm))")
+    ax_adm.legend(loc="lower right", fontsize=7, ncol=2)
+    ax_adm.grid(True, alpha=0.25)
+    ax_adm.set_ylim(0.0, 1.02)
+
+    # --- 3: Overall + category geometric means ---
+    ax_sum = fig.add_subplot(gs[2, :], sharex=ax_rms)
+    overall_s = [metrics[i]["overall_admissibility_score"] for i in range(n)]
+    if any(np.isfinite(overall_s)):
+        ax_sum.plot(indices, overall_s, color="black", linewidth=2.2, label="Overall")
+    for cat, col in cat_colors.items():
+        ys = []
+        for i in range(n):
+            v = metrics[i]["category_admissibility_score"].get(cat)
+            ys.append(float(v) if v is not None else float("nan"))
+        if any(np.isfinite(ys)):
+            ax_sum.plot(indices, ys, color=col, linestyle="--", alpha=0.9, label=cat)
+    ax_sum.set_ylabel("Admissibility")
+    ax_sum.set_title("Overall and per-category geometric mean admissibility")
+    ax_sum.legend(loc="best", fontsize=8, ncol=5)
+    ax_sum.grid(True, alpha=0.25)
+    ax_sum.set_ylim(0.0, 1.02)
+
+    # --- 4: Heatmap (keys × step) ---
+    ax_hm = fig.add_subplot(gs[3, :])
+    mat_m = np.ma.masked_invalid(mat)
+    im = ax_hm.imshow(
+        mat_m,
+        aspect="auto",
+        cmap="viridis",
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+    )
+    ax_hm.set_yticks(range(len(ordered_keys)))
+    ax_hm.set_yticklabels(short_labels, fontsize=6)
+    step = max(1, n // 20)
+    xt = list(range(0, n, step))
+    ax_hm.set_xticks(xt)
+    ax_hm.set_xticklabels([str(int(i)) for i in xt])
+    ax_hm.set_xlabel("Log index")
+    ax_hm.set_title("Admissibility heatmap (keys × step)")
+    fig.colorbar(im, ax=ax_hm, fraction=0.02, pad=0.01, label="Admissibility")
+
+    # --- 5: Top offenders (last step) ---
+    ax_bar = fig.add_subplot(gs[4, :])
+    top_n = min(15, len(ranked))
+    if top_n:
+        rk, rv = zip(*ranked[:top_n])
+        y_pos = np.arange(top_n)
+        ax_bar.barh(y_pos, rv, color="#c44e52", alpha=0.85)
+        ax_bar.set_yticks(y_pos)
+        ax_bar.set_yticklabels([x if len(x) < 50 else x[:47] + "…" for x in rk], fontsize=7)
+        ax_bar.invert_yaxis()
+        ax_bar.set_xlabel("R_norm (last step)")
+        ax_bar.set_title("Top residual keys by R_norm (last step)")
+        ax_bar.grid(True, axis="x", alpha=0.25)
+    else:
+        ax_bar.set_visible(False)
+
+    # --- 6: Closure-type mean admissibility (last step) ---
+    ax_cl = fig.add_subplot(gs[5, 0])
+    if kinds_order:
+        xpos = np.arange(len(kinds_order))
+        ax_cl.bar(xpos, means_closure, color="#4c72b0", alpha=0.88)
+        ax_cl.set_xticks(xpos)
+        ax_cl.set_xticklabels(kinds_order, rotation=35, ha="right", fontsize=7)
+        ax_cl.set_ylabel("Mean admissibility")
+        ax_cl.set_title("Constitutive/scaling by closure type (last step)")
+        ax_cl.set_ylim(0.0, 1.02)
+        ax_cl.grid(True, axis="y", alpha=0.25)
+    else:
+        ax_cl.text(0.5, 0.5, "No constitutive/scaling keys", ha="center", va="center")
+        ax_cl.set_axis_off()
+
+    # --- 7: Omitted / inferred counts ---
+    ax_om = fig.add_subplot(gs[5, 1])
+    if max(om + inf, default=0) > 0:
+        width = 0.35
+        ax_om.bar(indices - width / 2, om, width, label="omitted", color="#8c564b", alpha=0.85)
+        ax_om.bar(indices + width / 2, inf, width, label="inferred", color="#17becf", alpha=0.85)
+        ax_om.set_xlabel("Log index")
+        ax_om.set_ylabel("Count")
+        ax_om.set_title("Omitted / inferred log messages")
+        ax_om.legend(fontsize=8)
+        ax_om.grid(True, axis="y", alpha=0.25)
+    else:
+        ax_om.text(0.5, 0.5, "No omitted/inferred entries", ha="center", va="center")
+        ax_om.set_axis_off()
+
+    # --- 8: Twin RMS / R_norm for top keys by R_norm ---
+    ax_twin = fig.add_subplot(gs[6, :], sharex=ax_rms)
+    ax_t2 = ax_twin.twinx()
+    for k in top5:
+        rms_s = [e.get("rms", {}).get(k) for e in log]
+        rn_s = [metrics[i]["r_norm"].get(k) for i in range(n)]
+        if all(v is not None for v in rms_s):
+            ax_twin.plot(indices, rms_s, label=f"{k} RMS", linestyle="-", alpha=0.9)
+        if all(v is not None for v in rn_s):
+            ax_t2.plot(indices, rn_s, label=f"{k} R_norm", linestyle="--", alpha=0.75)
+    ax_twin.set_ylabel("RMS", color="#333")
+    ax_t2.set_ylabel("R_norm", color="#666")
+    ax_twin.set_title("Top keys: RMS (solid) vs R_norm (dashed, right axis)")
+    ax_twin.grid(True, alpha=0.25)
+    h1, l1 = ax_twin.get_legend_handles_labels()
+    h2, l2 = ax_t2.get_legend_handles_labels()
+    ax_twin.legend(h1 + h2, l1 + l2, loc="best", fontsize=6, ncol=2)
+
+    # --- 9: Radar (category scores, last step) ---
+    ax_rad = fig.add_subplot(gs[7, 0], projection="polar")
+    if len(cats_fin) >= 2:
+        labels = [c[0] for c in cats_fin]
+        vals = [c[1] for c in cats_fin]
+        angles = np.linspace(0.0, 2 * np.pi, len(labels), endpoint=False)
+        vals_c = vals + vals[:1]
+        angles_c = np.concatenate([angles, [angles[0]]])
+        ax_rad.plot(angles_c, vals_c, "o-", linewidth=2, color="#bcbd22")
+        ax_rad.fill(angles_c, vals_c, alpha=0.25, color="#bcbd22")
+        ax_rad.set_xticks(angles)
+        ax_rad.set_xticklabels(labels, fontsize=8)
+        ax_rad.set_ylim(0.0, 1.0)
+        ax_rad.set_title("Category admissibility (last step)", y=1.08, fontsize=10)
+    else:
+        ax_rad.set_visible(False)
+
+    # Spare panel: min admissibility per category (worst key) over time
+    ax_worst = fig.add_subplot(gs[7, 1], sharex=ax_rms)
+    for cat, col in cat_colors.items():
+        ys = []
+        bk = buckets[cat]
+        if not bk:
+            continue
+        for i in range(n):
+            adm = metrics[i]["admissibility_score"]
+            mnv = min((float(adm[k]) for k in bk if k in adm), default=float("nan"))
+            ys.append(mnv)
+        if any(np.isfinite(ys)):
+            ax_worst.plot(indices, ys, color=col, label=f"min in {cat}", alpha=0.9)
+    ax_worst.set_ylabel("Admissibility")
+    ax_worst.set_title("Worst key per category (min admissibility)")
+    ax_worst.legend(loc="best", fontsize=7)
+    ax_worst.grid(True, alpha=0.25)
+    ax_worst.set_ylim(0.0, 1.02)
+
+    ax_twin.set_xlabel("Log index / step")
+    ax_worst.set_xlabel("Log index / step")
+    fig.suptitle("Moju monitor visualization", fontsize=12, y=0.995)
     return fig
 
 

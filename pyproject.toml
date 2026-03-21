@@ -32,6 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 units = ["pint>=0.20"]
+viz = ["matplotlib>=3.5.0", "plotly>=5.18.0"]
 dev = ["pytest", "black", "ruff"]
 torch = ["torch>=2.0.0", "jax2torch>=0.0.7"]
 report = ["reportlab>=4.0", "optax>=0.2.0"]
