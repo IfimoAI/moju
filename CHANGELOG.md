@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **π-constant scaling closure (Path A):** optional `AuditSpec` fields `invariance_pi_constant`, `invariance_compare_keys`, `invariance_scale_c` for `scaling_audit`. Second forward with built-in constant scaling so the audited group stays fixed; residual logged as `scaling/<name>/pi_constant` with R_norm scale `ε + mean(|scaled compare keys|)`. Built-in recipes for **every** registered `Groups.*` name (`moju.monitor.pi_constant_recipes`, `list_pi_constant_group_names()`); rules may use integer powers of `c` (e.g. `We`, `Gr`, `Da`).
 - **Admissibility docs:** `audit()` docstring and README clarify three reporting levels (per key, per-category geometric means, overall geometric mean). PDF category section notes category scores are geometric means.
+- **Examples:** `examples/cookbook_pi_constant_reynolds.py` and `examples/cookbook_pi_constant_prandtl.py` (Path A π-constant audit end-to-end); tests in `tests/test_examples_pi_constant_cookbooks.py`.
 
 ## [0.4.3] - 2026-03-20
 
