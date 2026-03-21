@@ -335,6 +335,9 @@ class TestRegistryHelpers:
         names = list_constitutive_models()
         assert "sutherland_mu" in names
         assert "thermal_diffusivity" in names
+        assert "smagorinsky_nu_t" in names
+        assert "k_epsilon_nu_t" in names
+        assert "k_omega_nu_t" in names
 
     def test_list_scaling_closure_ids(self):
         ids = list_scaling_closure_ids()

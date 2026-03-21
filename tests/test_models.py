@@ -82,3 +82,46 @@ class TestModelsKnownValues:
         gamma_dot = 100.0
         mu = Models.power_law_mu(gamma_dot=gamma_dot, K=K, n=n)
         assert jnp.allclose(mu, K, rtol=rtol, atol=atol)
+
+    def test_smagorinsky_nu_t(self, rtol, atol):
+        """nu_t = (Cs*Delta)^2 * |S|."""
+        Cs = jnp.array(0.17)
+        Delta = jnp.array(0.01)
+        S = jnp.array(10.0)
+        nu = Models.smagorinsky_nu_t(Cs=Cs, Delta=Delta, strain_rate_magnitude=S)
+        expected = (0.17 * 0.01) ** 2 * 10.0
+        assert jnp.allclose(nu, expected, rtol=rtol, atol=atol)
+
+    def test_k_epsilon_nu_t(self, rtol, atol):
+        """nu_t = C_mu * k^2 / (epsilon + eps0)."""
+        C_mu = jnp.array(0.09)
+        k = jnp.array(4.0)
+        epsilon = jnp.array(2.0)
+        eps0 = jnp.array(1e-9)
+        nu = Models.k_epsilon_nu_t(C_mu=C_mu, k=k, epsilon=epsilon, eps0=eps0)
+        expected = 0.09 * 16.0 / (2.0 + 1e-9)
+        assert jnp.allclose(nu, expected, rtol=rtol, atol=atol)
+
+    def test_k_epsilon_nu_t_small_epsilon_uses_floor(self, rtol, atol):
+        """Floor eps0 keeps nu_t finite when epsilon -> 0."""
+        C_mu = jnp.array(0.09)
+        k = jnp.array(1.0)
+        epsilon = jnp.array(0.0)
+        eps0 = jnp.array(1e-12)
+        nu = Models.k_epsilon_nu_t(C_mu=C_mu, k=k, epsilon=epsilon, eps0=eps0)
+        expected = 0.09 * 1.0 / 1e-12
+        assert jnp.allclose(nu, expected, rtol=rtol, atol=atol)
+
+    def test_k_omega_nu_t(self, rtol, atol):
+        """nu_t = k / (omega + omega0)."""
+        k = jnp.array(0.5)
+        omega = jnp.array(2.0)
+        omega0 = jnp.array(1e-9)
+        nu = Models.k_omega_nu_t(k=k, omega=omega, omega0=omega0)
+        expected = 0.5 / (2.0 + 1e-9)
+        assert jnp.allclose(nu, expected, rtol=rtol, atol=atol)
+
+    def test_k_omega_nu_t_small_omega_uses_floor(self, rtol, atol):
+        omega0 = jnp.array(1e-12)
+        nu = Models.k_omega_nu_t(k=jnp.array(3.0), omega=jnp.array(0.0), omega0=omega0)
+        assert jnp.allclose(nu, 3.0 / 1e-12, rtol=rtol, atol=atol)

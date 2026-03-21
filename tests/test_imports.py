@@ -80,6 +80,19 @@ def test_models_has_ideal_gas_and_sutherland():
     assert callable(Models.sutherland_mu)
 
 
+def test_models_has_smagorinsky_nu_t():
+    """Models exposes Smagorinsky eddy viscosity helper."""
+    from moju.piratio import Models
+    assert hasattr(Models, "smagorinsky_nu_t")
+    assert callable(Models.smagorinsky_nu_t)
+
+
+def test_models_has_k_epsilon_and_k_omega_nu_t():
+    from moju.piratio import Models
+    assert hasattr(Models, "k_epsilon_nu_t") and callable(Models.k_epsilon_nu_t)
+    assert hasattr(Models, "k_omega_nu_t") and callable(Models.k_omega_nu_t)
+
+
 def test_laws_has_mass_incompressible_and_momentum_ns():
     """Laws exposes mass_incompressible and momentum_navier_stokes."""
     from moju.piratio import Laws

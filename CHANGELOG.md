@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **π-constant scaling closure (Path A):** optional `AuditSpec` fields `invariance_pi_constant`, `invariance_compare_keys`, `invariance_scale_c` for `scaling_audit`. Second forward with built-in constant scaling so the audited group stays fixed; residual logged as `scaling/<name>/pi_constant` with R_norm scale `ε + mean(|scaled compare keys|)`. Built-in recipes for **every** registered `Groups.*` name (`moju.monitor.pi_constant_recipes`, `list_pi_constant_group_names()`); rules may use integer powers of `c` (e.g. `We`, `Gr`, `Da`).
 - **Admissibility docs:** `audit()` docstring and README clarify three reporting levels (per key, per-category geometric means, overall geometric mean). PDF category section notes category scores are geometric means.
 - **Examples:** `examples/cookbook_pi_constant_reynolds.py` and `examples/cookbook_pi_constant_prandtl.py` (Path A π-constant audit end-to-end); tests in `tests/test_examples_pi_constant_cookbooks.py`.
+- **Models / examples:** `Models.smagorinsky_nu_t` (LES eddy viscosity template); cookbooks `cookbook_turbulence_law_of_wall.py`, `cookbook_turbulence_colebrook.py`, `cookbook_constitutive_smagorinsky.py` with `tests/test_examples_turbulence_cookbooks.py`.
+- **RANS eddy viscosity (algebraic νₜ):** `Models.k_epsilon_nu_t` and `Models.k_omega_nu_t` with dissipation floors for stable AD; cookbooks `examples/cookbook_constitutive_k_epsilon.py`, `examples/cookbook_constitutive_k_omega.py` (Path B chain_dx); tests in `tests/test_models.py` and `tests/test_examples_turbulence_cookbooks.py`.
 
 ## [0.4.3] - 2026-03-20
 

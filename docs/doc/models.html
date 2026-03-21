@@ -128,6 +128,24 @@
       <div class="desc">Log-law region. y_plus dimensionless wall distance → u_plus.</div>
     </div>
 
+    <h2>Turbulence (eddy viscosity templates)</h2>
+
+    <div class="api-block">
+      <div class="name">Models.smagorinsky_nu_t(Cs, Delta, strain_rate_magnitude)</div>
+      <div class="sig">LES: νₜ = (C_s Δ)² |S|</div>
+      <div class="desc">Cs, Delta [m], |S| [1/s] → νₜ [m²/s]. Cookbook: <code>examples/cookbook_constitutive_smagorinsky.py</code>.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.k_epsilon_nu_t(C_mu, k, epsilon, eps0)</div>
+      <div class="sig">RANS k–ε: νₜ = C_μ k² / (ε + ε₀)</div>
+      <div class="desc">Algebraic νₜ only; ε₀ floors ε for AD. Cookbook: <code>examples/cookbook_constitutive_k_epsilon.py</code>.</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.k_omega_nu_t(k, omega, omega0)</div>
+      <div class="sig">k–ω: νₜ = k / (ω + ω₀)</div>
+      <div class="desc">Algebraic νₜ; ω₀ floors ω. Cookbook: <code>examples/cookbook_constitutive_k_omega.py</code>.</div>
+    </div>
+
     <h2>Reaction and surface tension</h2>
 
     <div class="api-block">

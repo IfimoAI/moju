@@ -238,6 +238,56 @@ class Models:
 
     @staticmethod
     @jax.jit
+    def smagorinsky_nu_t(Cs, Delta, strain_rate_magnitude):
+        """
+        Smagorinsky subgrid eddy viscosity (scalar |S| form).
+
+        :param Cs: Smagorinsky constant (dimensionless), typically ~0.1–0.2.
+        :param Delta: Filter width [m].
+        :param strain_rate_magnitude: Resolved strain-rate magnitude |S| [1/s]
+            (often sqrt(2 S_ij S_ij) from the velocity field).
+        :return: Eddy kinematic viscosity nu_t [m^2/s].
+
+        Use case: LES-style closure auditing; combine with ``constitutive_audit`` chain
+        residuals when ``strain_rate_magnitude`` varies in space or time.
+        """
+        return (Cs * Delta) ** 2 * strain_rate_magnitude
+
+    @staticmethod
+    @jax.jit
+    def k_epsilon_nu_t(C_mu, k, epsilon, eps0):
+        """
+        Standard k–ε eddy viscosity (kinematic): νₜ = C_μ k² / (ε + ε₀).
+
+        :param C_mu: Model constant (dimensionless), often ~0.09.
+        :param k: Turbulent kinetic energy [m²/s²].
+        :param epsilon: Turbulent dissipation rate [m²/s³].
+        :param eps0: Positive floor on ε [same as epsilon] for numerical stability and
+            stable JAX autodiff when ε → 0.
+        :return: Eddy kinematic viscosity νₜ [m²/s].
+
+        This closure is **algebraic νₜ only**. Full k–ε transport PDE residuals belong
+        in ``Laws.*`` or a custom law, not in this helper.
+        """
+        return C_mu * k**2 / (epsilon + eps0)
+
+    @staticmethod
+    @jax.jit
+    def k_omega_nu_t(k, omega, omega0):
+        """
+        Standard k–ω (Wilcox-style) eddy viscosity: νₜ = k / (ω + ω₀).
+
+        :param k: Turbulent kinetic energy [m²/s²].
+        :param omega: Specific dissipation rate [1/s].
+        :param omega0: Positive floor on ω [same as omega] for stability and AD near ω → 0.
+        :return: Eddy kinematic viscosity νₜ [m²/s].
+
+        Algebraic νₜ only; ω and k transport equations are separate (``Laws.*`` / custom).
+        """
+        return k / (omega + omega0)
+
+    @staticmethod
+    @jax.jit
     def orifice_flow(Cd, A, dp, rho):
         """
         Volumetric flow rate through an orifice or restriction.
