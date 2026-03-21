@@ -164,6 +164,7 @@ Optional extras:
 - `pip install moju[ref_foam]` — OpenFOAM snapshot loaders (meshio).
 - `pip install moju[ref_hdf5]` — HDF5 loaders (h5py).
 - `pip install moju[report]` — PDF Physics Admissibility Report from `audit(..., export_dir=...)`.
+- `pip install moju[viz]` — matplotlib + plotly for `visualize(engine.log, backend="matplotlib")` (static) or `backend="plotly"` (interactive).
 
 ---
 
@@ -175,7 +176,7 @@ Moju does not define physics. Moju provides a structured way to **enforce** and 
 
 ## Learn more
 
-**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, `MonitorConfig`, `AuditSpec`, `audit_spec_to_engine_dict`, `PathBGridConfig`, `fill_path_b_derivatives`, `fill_law_fd_from_primitives`, `list_law_fd_supported_laws`, build_loss, audit, visualize). Constitutive/scaling closure keys include `ref_delta`, `implied_delta`, `chain_dx`/`chain_dy`/`chain_dz`, `chain_dt` (plus scaling `pi_constant` when configured). Path B optional FD: `compute_residuals(..., auto_path_b_derivatives=...)` and `fill_law_fd=True` for registered law inputs. Use `engine.required_state_keys()` and `engine.required_derivative_keys()` for introspection.
+**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, `MonitorConfig`, `AuditSpec`, `audit_spec_to_engine_dict`, `PathBGridConfig`, `fill_path_b_derivatives`, `fill_law_fd_from_primitives`, `list_law_fd_supported_laws`, build_loss, audit, `visualize(..., backend="matplotlib"|"plotly"|"none")`). Constitutive/scaling closure keys include `ref_delta`, `implied_delta`, `chain_dx`/`chain_dy`/`chain_dz`, `chain_dt` (plus scaling `pi_constant` when configured). Path B optional FD: `compute_residuals(..., auto_path_b_derivatives=...)` and `fill_law_fd=True` for registered law inputs. Use `engine.required_state_keys()` and `engine.required_derivative_keys()` for introspection.
 
 **Examples**
 

@@ -277,6 +277,81 @@ class TestVisualize:
     def test_visualize_backend_none_returns_none(self):
         assert visualize([{"index": 0, "rms": {"k": 1.0}}], backend="none") is None
 
+    def test_visualize_multi_panel_figure(self):
+        pytest.importorskip("matplotlib")
+        log = [
+            {
+                "index": 0,
+                "rms": {
+                    "laws/a": 1.0,
+                    "constitutive/m/chain_dx": 0.5,
+                    "scaling/pe/chain_dx": 0.1,
+                    "data/T": 0.2,
+                },
+                "scale": {},
+                "omitted": ["demo omit"],
+                "inferred": [],
+            },
+            {
+                "index": 1,
+                "rms": {
+                    "laws/a": 0.5,
+                    "constitutive/m/chain_dx": 0.25,
+                    "scaling/pe/chain_dx": 0.05,
+                    "data/T": 0.1,
+                },
+                "scale": {},
+            },
+        ]
+        fig = visualize(log, backend="matplotlib")
+        assert fig is not None
+        assert len(fig.axes) >= 8
+
+    def test_visualize_plotly_returns_figure(self):
+        pytest.importorskip("plotly")
+        log = [
+            {
+                "index": 0,
+                "rms": {
+                    "laws/a": 1.0,
+                    "constitutive/m/chain_dx": 0.5,
+                    "scaling/pe/chain_dx": 0.1,
+                    "data/T": 0.2,
+                },
+                "scale": {},
+                "omitted": ["demo omit"],
+                "inferred": [],
+            },
+            {
+                "index": 1,
+                "rms": {
+                    "laws/a": 0.5,
+                    "constitutive/m/chain_dx": 0.25,
+                    "scaling/pe/chain_dx": 0.05,
+                    "data/T": 0.1,
+                },
+                "scale": {},
+            },
+        ]
+        fig = visualize(log, backend="plotly")
+        assert fig is not None
+        assert hasattr(fig, "data")
+        assert len(fig.data) >= 1
+
+    def test_compute_log_step_metrics_includes_data_category(self):
+        log = [
+            {
+                "index": 0,
+                "rms": {"laws/a": 1.0, "data/T": 0.5},
+                "scale": {"laws/a": 1.0, "data/T": 1.0},
+            }
+        ]
+        from moju.monitor.auditor import _compute_log_step_metrics
+
+        m = _compute_log_step_metrics(log)
+        assert "data" in m[0]["category_admissibility_score"]
+        assert "laws" in m[0]["category_admissibility_score"]
+
 
 class TestResidualEngineStateBuilder:
     def test_groups_enrich_state(self, rtol, atol):
