@@ -9,7 +9,7 @@ from moju.monitor.auditor import (
     list_scaling_closure_ids,
     visualize,
 )
-from moju.monitor.config import AuditSpec, MonitorConfig
+from moju.monitor.config import AuditSpec, MonitorConfig, audit_spec_to_engine_dict
 from moju.monitor.pi_constant_recipes import list_pi_constant_group_names
 
 __all__ = [
@@ -22,5 +22,6 @@ __all__ = [
     "list_scaling_closure_ids",
     "AuditSpec",
     "MonitorConfig",
+    "audit_spec_to_engine_dict",
     "list_pi_constant_group_names",
 ]

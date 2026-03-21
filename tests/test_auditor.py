@@ -15,6 +15,8 @@ from moju.monitor import (
     list_scaling_closure_ids,
     visualize,
 )
+from moju.monitor.closure_registry import MODEL_FNS, compute_implied_delta
+from moju.piratio.models import Models
 
 
 class TestAdmissibilityLevel:
@@ -328,6 +330,96 @@ class TestCustomFn:
         )
         state = core._state_builder({"a": jnp.array(3.0), "b": jnp.array(4.0)})
         assert jnp.allclose(state["ab"], 12.0, rtol=rtol, atol=atol)
+
+
+class TestImpliedDeltaClosure:
+    def test_compute_implied_delta_value_key(self, rtol, atol):
+        fn, arg_names = MODEL_FNS["ideal_gas_rho"]
+        P, R, T = jnp.array(1e5), jnp.array(287.0), jnp.array(300.0)
+        rho_m = Models.ideal_gas_rho(P, R, T)
+        merged = {"P": P, "R": R, "T": T, "rho_alt": rho_m}
+        r = compute_implied_delta(
+            fn=fn,
+            arg_names=arg_names,
+            state_map={"P": "P", "R": "R", "T": "T"},
+            state_pred=merged,
+            constants={},
+            implied_value_key="rho_alt",
+        )
+        assert r is not None
+        assert jnp.allclose(r, 0.0, rtol=rtol, atol=atol)
+
+    def test_compute_implied_delta_missing_key_returns_none(self):
+        fn, arg_names = MODEL_FNS["ideal_gas_rho"]
+        r = compute_implied_delta(
+            fn=fn,
+            arg_names=arg_names,
+            state_map={"P": "P", "R": "R", "T": "T"},
+            state_pred={"P": 1.0, "R": 1.0, "T": 1.0},
+            constants={},
+            implied_value_key="rho_missing",
+        )
+        assert r is None
+
+    def test_engine_implied_delta_ideal_gas(self, rtol, atol):
+        P, R = jnp.array(101325.0), jnp.array(287.0)
+        T = jnp.array(290.0)
+        rho = Models.ideal_gas_rho(P, R, T)
+        core = ResidualEngine(
+            laws=[],
+            constitutive_audit=[
+                {
+                    "name": "ideal_gas_rho",
+                    "output_key": "rho",
+                    "state_map": {"P": "P", "R": "R", "T": "T"},
+                    "implied_value_key": "rho_implied",
+                }
+            ],
+        )
+        res = core.compute_residuals(
+            {"P": P, "R": R, "T": T, "rho": rho, "rho_implied": rho}
+        )
+        assert "constitutive" in res
+        assert jnp.allclose(
+            res["constitutive"]["ideal_gas_rho/implied_delta"], 0.0, rtol=rtol, atol=atol
+        )
+
+    def test_ref_delta_without_predicted_spatial(self, rtol, atol):
+        """ref_delta runs when state_ref is set even if predicted_* are empty."""
+        core = ResidualEngine(
+            laws=[],
+            constitutive_audit=[
+                {
+                    "name": "ideal_gas_rho",
+                    "output_key": "rho",
+                    "state_map": {"P": "P", "R": "R", "T": "T"},
+                    "predicted_spatial": [],
+                    "predicted_temporal": [],
+                }
+            ],
+        )
+        P, R, T = jnp.array(1e5), jnp.array(287.0), jnp.array(300.0)
+        rho1 = Models.ideal_gas_rho(P, R, T)
+        rho2 = Models.ideal_gas_rho(P * 1.01, R, T)
+        state_pred = {"P": P, "R": R, "T": T, "rho": rho1}
+        state_ref = {"P": P * 1.01, "R": R, "T": T, "rho": rho2}
+        res = core.compute_residuals(state_pred, state_ref=state_ref)
+        assert "ideal_gas_rho/ref_delta" in res["constitutive"]
+
+    def test_implied_both_key_and_fn_raises(self):
+        with pytest.raises(ValueError, match="only one of implied"):
+            ResidualEngine(
+                laws=[],
+                constitutive_audit=[
+                    {
+                        "name": "ideal_gas_rho",
+                        "output_key": "rho",
+                        "state_map": {"P": "P", "R": "R", "T": "T"},
+                        "implied_value_key": "x",
+                        "implied_fn": lambda s, c: s.get("x"),
+                    }
+                ],
+            )
 
 
 class TestRegistryHelpers:

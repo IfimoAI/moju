@@ -1,10 +1,11 @@
 """
 Model/Group closure registry for moju.monitor.
 
-This module standardizes constitutive + scaling/similarity audits around 3 closures:
+This module standardizes constitutive + scaling/similarity audits around 4 closures:
   1) ref_delta: F(state_pred) - F(state_ref) (requires state_ref)
-  2) chain_dx:  d/dx[F(phi)] - sum_i (dF/dphi_i) * dphi_i/dx   (requires spatially varying inputs)
-  3) chain_dt:  d/dt[F(phi)] - sum_i (dF/dphi_i) * dphi_i/dt   (requires temporally varying inputs)
+  2) implied_delta: F(state_pred) - implied (implied_value_key in state/constants, or implied_fn)
+  3) chain_dx:  d/dx[F(phi)] - sum_i (dF/dphi_i) * dphi_i/dx   (requires spatially varying inputs)
+  4) chain_dt:  d/dt[F(phi)] - sum_i (dF/dphi_i) * dphi_i/dt   (requires temporally varying inputs)
 
 Notes:
   - Path A vs Path B: monitor may build derivatives (Path A) or accept them (Path B).
@@ -92,6 +93,51 @@ def compute_ref_delta(
     ref = fn(*ref_args)
     # Some users may also provide output_key in state_ref; we don't require it.
     return jnp.asarray(pred - ref)
+
+
+def compute_implied_delta(
+    *,
+    fn: Callable[..., Any],
+    arg_names: List[str],
+    state_map: Dict[str, str],
+    state_pred: Dict[str, Any],
+    constants: Dict[str, Any],
+    implied_value_key: Optional[str] = None,
+    implied_fn: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]] = None,
+) -> Optional[jnp.ndarray]:
+    """
+    Residual F(pred args) - implied, where implied is either a state key or implied_fn(merged, constants).
+
+    Returns None if implied is not configured, if any model arg is missing, if implied is missing,
+    or if pred - implied is not broadcastable.
+    """
+    if implied_value_key is None and implied_fn is None:
+        return None
+    if implied_value_key is not None and implied_fn is not None:
+        raise ValueError("Provide at most one of implied_value_key and implied_fn")
+
+    pred_args: List[jnp.ndarray] = []
+    for an in arg_names:
+        sk = state_map.get(an)
+        if sk is None:
+            return None
+        pv = _val(state_pred, constants, sk)
+        if pv is None:
+            return None
+        pred_args.append(jnp.asarray(pv))
+    pred = fn(*pred_args)
+
+    if implied_value_key is not None:
+        implied = _val(state_pred, constants, implied_value_key)
+    else:
+        implied = implied_fn(state_pred, constants)  # type: ignore[misc]
+    if implied is None:
+        return None
+    implied = jnp.asarray(implied)
+    try:
+        return jnp.asarray(pred - implied)
+    except (TypeError, ValueError):
+        return None
 
 
 def compute_chain(

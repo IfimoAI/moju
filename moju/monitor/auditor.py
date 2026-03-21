@@ -6,8 +6,8 @@ ResidualEngine: residuals for governing laws, constitutive, and scaling/similari
 - audit / visualize: same metrics (RMS, R_norm, admissibility) for all residual keys.
 
 Constitutive and scaling/similarity audits are tied to Models.* and Groups.* functions via
-standard closure types (ref_delta, chain_dx, chain_dt). Metrics are consistency indicators,
-not certification.
+standard closure types (ref_delta, implied_delta, chain_dx, chain_dt). Metrics are consistency
+indicators, not certification.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from moju.monitor.closure_registry import (
     MODEL_FNS,
     compute_chain,
     compute_chain_weak,
+    compute_implied_delta,
     compute_ref_delta,
 )
 from moju.monitor.pi_constant_recipes import (
@@ -174,6 +175,9 @@ def _state_derived_scale_per_key(
                         parts.append(jnp.ravel(jnp.asarray(merged[sk])))
                 if output_key and output_key in merged:
                     parts.append(jnp.ravel(jnp.asarray(merged[output_key])))
+                ivk = spec.get("implied_value_key")
+                if ivk and ivk in merged:
+                    parts.append(jnp.ravel(jnp.asarray(merged[ivk])))
                 if parts:
                     big = jnp.concatenate(parts)
                     scale = _SCALE_EPS + _rms_scalar(big)
@@ -195,6 +199,9 @@ def _state_derived_scale_per_key(
                         parts.append(jnp.ravel(jnp.asarray(merged[sk])))
                 if output_key and output_key in merged:
                     parts.append(jnp.ravel(jnp.asarray(merged[output_key])))
+                ivk_s = spec.get("implied_value_key")
+                if ivk_s and ivk_s in merged:
+                    parts.append(jnp.ravel(jnp.asarray(merged[ivk_s])))
                 if parts:
                     big = jnp.concatenate(parts)
                     scale = _SCALE_EPS + _rms_scalar(big)
@@ -398,9 +405,10 @@ class ResidualEngine:
       - Path B (advanced): provide state_pred directly.
 
     Closure policy:
-      - If a Model/Group spec has no spatial and no temporal variation, it is omitted from the report.
-      - Spatial-only -> chain_dx only; temporal-only -> chain_dt only; both -> both.
-      - ref_delta is included only when state_ref is provided and variation exists.
+      - chain_dx / chain_dt run only when predicted_spatial / predicted_temporal are non-empty.
+      - ref_delta runs when state_ref is provided (independent of predicted_*).
+      - implied_delta runs when implied_value_key or implied_fn is set; omitted if implied is missing.
+      - A spec with no chain, no ref_delta, and no implied_delta does nothing (optional omit log).
 
     Audit spec shape (constitutive_audit / scaling_audit items):
       {
@@ -433,14 +441,14 @@ class ResidualEngine:
     ):
         # MonitorConfig convenience
         if config is not None:
-            from moju.monitor.config import MonitorConfig
+            from moju.monitor.config import MonitorConfig, audit_spec_to_engine_dict
 
             if isinstance(config, MonitorConfig):
                 constants = config.constants
                 laws = config.laws
                 groups = config.groups
-                constitutive_audit = [s.to_dict() for s in config.constitutive_audit]
-                scaling_audit = [s.to_dict() for s in config.scaling_audit]
+                constitutive_audit = [audit_spec_to_engine_dict(s) for s in config.constitutive_audit]
+                scaling_audit = [audit_spec_to_engine_dict(s) for s in config.scaling_audit]
                 constitutive_custom = config.constitutive_custom
                 scaling_custom = config.scaling_custom
                 primary_fields = list(config.primary_fields)
@@ -483,6 +491,12 @@ class ResidualEngine:
                 for k in spec.get("predicted_temporal", []) or []:
                     if k not in spec["state_map"].values():
                         raise ValueError(f"{category}:{name} predicted_temporal key {k!r} not in state_map values")
+                ivk = spec.get("implied_value_key")
+                ifn = spec.get("implied_fn")
+                if ivk and ifn is not None:
+                    raise ValueError(
+                        f"{category}:{name} use only one of implied_value_key and implied_fn, not both"
+                    )
 
         _validate_specs(self.constitutive_audit, MODEL_FNS, "constitutive")
         _validate_specs(self.scaling_audit, GROUP_FNS, "scaling")
@@ -633,9 +647,15 @@ class ResidualEngine:
                                 break
                     _maybe_log_infer(f"{category}:{name} inferred predicted_temporal={predicted_temporal}")
 
-                if not predicted_spatial and not predicted_temporal:
+                has_implied = bool(spec.get("implied_value_key")) or spec.get("implied_fn") is not None
+                if (
+                    not predicted_spatial
+                    and not predicted_temporal
+                    and state_ref is None
+                    and not has_implied
+                ):
                     _maybe_log_omit(
-                        f"{category}:{name} omitted: no predicted_spatial or predicted_temporal"
+                        f"{category}:{name} omitted: no chain, ref_delta, or implied_delta applicable"
                     )
                     continue
 
@@ -657,6 +677,19 @@ class ResidualEngine:
                     )
                     if arr is not None:
                         out[f"{name}/ref_delta"] = jnp.asarray(arr)
+
+                if has_implied:
+                    arr = compute_implied_delta(
+                        fn=fn,
+                        arg_names=arg_names,
+                        state_map=state_map,
+                        state_pred=merged,
+                        constants=self.constants,
+                        implied_value_key=spec.get("implied_value_key"),
+                        implied_fn=spec.get("implied_fn"),
+                    )
+                    if arr is not None:
+                        out[f"{name}/implied_delta"] = jnp.asarray(arr)
 
                 if predicted_spatial and output_key is not None:
                     if closure_mode == "weak":
@@ -847,6 +880,9 @@ class ResidualEngine:
                 ok = spec.get("output_key")
                 if ok:
                     keys.add(ok)
+                ivk = spec.get("implied_value_key")
+                if ivk:
+                    keys.add(ivk)
         return keys
 
     def required_derivative_keys(self) -> Set[str]:

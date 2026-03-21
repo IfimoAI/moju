@@ -59,6 +59,7 @@ def test_monitor_module_has_all():
         "list_pi_constant_group_names",
         "AuditSpec",
         "MonitorConfig",
+        "audit_spec_to_engine_dict",
     }
 
 

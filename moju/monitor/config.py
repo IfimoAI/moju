@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -16,6 +16,11 @@ class AuditSpec:
     - invariance_pi_constant (scaling only, Path A): second forward with constants scaled so
       the audited Group stays fixed; residual on invariance_compare_keys; flat key
       scaling/<name>/pi_constant. Requires built-in recipe and keys in engine.constants.
+    - implied_value_key (optional): state/constants key holding implied constitutive value;
+      residual constitutive/<name>/implied_delta = F(pred args) - implied. Mutually exclusive
+      with implied_fn. Omitted if key missing (same as other closures returning None).
+    - implied_fn (optional, Python only): (merged_state, constants) -> array or None; not
+      serialized in to_dict(). Use audit_spec_to_engine_dict() when building ResidualEngine.
     """
 
     name: str
@@ -23,6 +28,10 @@ class AuditSpec:
     state_map: Dict[str, str]
     predicted_spatial: List[str] = field(default_factory=list)
     predicted_temporal: List[str] = field(default_factory=list)
+    implied_value_key: Optional[str] = None
+    implied_fn: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]] = field(
+        default=None, repr=False, compare=False
+    )
     # Closure evaluation mode for chain_dx/chain_dt.
     # - pointwise: return pointwise residual array (current behavior)
     # - weak: return weighted integrated RMS (noise-robust)
@@ -37,7 +46,20 @@ class AuditSpec:
     invariance_scale_c: float = 10.0
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        # implied_fn omitted (not JSON-serializable); use audit_spec_to_engine_dict for engine.
+        return {
+            "name": self.name,
+            "output_key": self.output_key,
+            "state_map": dict(self.state_map),
+            "predicted_spatial": list(self.predicted_spatial),
+            "predicted_temporal": list(self.predicted_temporal),
+            "closure_mode": self.closure_mode,
+            "quadrature_weights": dict(self.quadrature_weights),
+            "invariance_pi_constant": self.invariance_pi_constant,
+            "invariance_compare_keys": list(self.invariance_compare_keys),
+            "invariance_scale_c": self.invariance_scale_c,
+            "implied_value_key": self.implied_value_key,
+        }
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "AuditSpec":
@@ -52,7 +74,17 @@ class AuditSpec:
             invariance_pi_constant=bool(d.get("invariance_pi_constant", False)),
             invariance_compare_keys=list(d.get("invariance_compare_keys") or []),
             invariance_scale_c=float(d.get("invariance_scale_c", 10.0)),
+            implied_value_key=(d.get("implied_value_key") or None),
+            implied_fn=None,
         )
+
+
+def audit_spec_to_engine_dict(spec: AuditSpec) -> Dict[str, Any]:
+    """Like AuditSpec.to_dict() but attaches implied_fn for in-memory ResidualEngine specs."""
+    d = spec.to_dict()
+    if spec.implied_fn is not None:
+        d["implied_fn"] = spec.implied_fn
+    return d
 
 
 @dataclass(frozen=True)
