@@ -11,6 +11,7 @@ from moju.monitor import (
     audit,
     build_loss,
     list_constitutive_models,
+    list_pi_constant_group_names,
     list_scaling_closure_ids,
     visualize,
 )
@@ -402,3 +403,148 @@ class TestRequiredKeys:
         residuals = engine.compute_residuals(state_pred, collocation={"x": 0.0, "t": 0.0})
         # With u chosen for predicted_spatial, chain_dx exists only if derivative keys are present; here it is present.
         assert "scaling" in residuals
+
+
+def _re_pi_spec(*, compare_keys=("out",), scale_c=10.0):
+    return {
+        "name": "re",
+        "output_key": "Re",
+        "state_map": {"u": "u", "L": "L", "rho": "rho", "mu": "mu"},
+        "invariance_pi_constant": True,
+        "invariance_compare_keys": list(compare_keys),
+        "invariance_scale_c": scale_c,
+    }
+
+
+class TestPiConstantClosure:
+    def test_list_pi_constant_group_names(self):
+        names = list_pi_constant_group_names()
+        assert "re" in names and "pr" in names and "pe" in names
+
+    def test_apply_pi_constant_recipe_re_preserves_re(self):
+        from moju.monitor.pi_constant_recipes import (
+            GROUP_PI_CONSTANT_RECIPES,
+            apply_pi_constant_recipe,
+        )
+
+        const = {"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0}
+        sm = {"u": "u", "L": "L", "rho": "rho", "mu": "mu"}
+        out = apply_pi_constant_recipe(const, GROUP_PI_CONSTANT_RECIPES["re"], sm, 10.0)
+        Re0 = const["rho"] * const["u"] * const["L"] / const["mu"]
+        Re1 = float(out["rho"] * out["u"] * out["L"] / out["mu"])
+        assert abs(Re0 - Re1) < 1e-9
+
+    def test_apply_pi_constant_recipe_c_must_exceed_one(self):
+        from moju.monitor.pi_constant_recipes import (
+            GROUP_PI_CONSTANT_RECIPES,
+            apply_pi_constant_recipe,
+        )
+
+        const = {"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0}
+        sm = {"u": "u", "L": "L", "rho": "rho", "mu": "mu"}
+        with pytest.raises(ValueError, match="c > 1"):
+            apply_pi_constant_recipe(const, GROUP_PI_CONSTANT_RECIPES["re"], sm, 1.0)
+
+    def test_engine_init_requires_recipe_or_compare_keys(self):
+        with pytest.raises(ValueError, match="invariance_compare_keys"):
+            ResidualEngine(
+                constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
+                laws=[],
+                groups=[],
+                scaling_audit=[_re_pi_spec(compare_keys=())],
+                state_builder=lambda m, p, col, ct: {"out": jnp.array(1.0)},
+            )
+
+    def test_engine_init_unsupported_group_for_pi(self):
+        with pytest.raises(ValueError, match="recipe"):
+            ResidualEngine(
+                constants={"f": 1.0, "u": 1.0, "L": 1.0},
+                laws=[],
+                groups=[],
+                scaling_audit=[
+                    {
+                        "name": "st",
+                        "output_key": "St",
+                        "state_map": {"f": "f", "u": "u", "L": "L"},
+                        "invariance_pi_constant": True,
+                        "invariance_compare_keys": ["x"],
+                    }
+                ],
+                state_builder=lambda m, p, col, ct: {"x": jnp.array(1.0)},
+            )
+
+    def test_engine_init_invariance_c_must_exceed_one(self):
+        with pytest.raises(ValueError, match="invariance_scale_c"):
+            ResidualEngine(
+                constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
+                laws=[],
+                groups=[],
+                scaling_audit=[_re_pi_spec(scale_c=1.0)],
+                state_builder=lambda m, p, col, ct: {"out": ct["L"] / ct["mu"]},
+            )
+
+    def test_path_b_forbidden_when_pi_enabled(self):
+        def sb(model, params, collocation, constants):
+            return {"out": constants["L"] / constants["mu"]}
+
+        engine = ResidualEngine(
+            constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
+            laws=[],
+            groups=[],
+            scaling_audit=[_re_pi_spec()],
+            state_builder=sb,
+        )
+        with pytest.raises(ValueError, match="Path A"):
+            engine.compute_residuals({"out": jnp.array(0.5), "Re": jnp.array(0.25), "u": jnp.array(1.0)})
+
+    def test_path_a_pi_residual_zero_when_invariant(self, rtol, atol):
+        def sb(model, params, collocation, constants):
+            return {"out": constants["L"] / constants["mu"]}
+
+        engine = ResidualEngine(
+            constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
+            laws=[],
+            groups=[],
+            scaling_audit=[_re_pi_spec()],
+            state_builder=sb,
+        )
+        residuals = engine.compute_residuals(None, model=0, params=0, collocation={})
+        r = residuals["scaling"]["re/pi_constant"]
+        assert jnp.allclose(r, 0.0, rtol=rtol, atol=atol)
+
+    def test_pi_constant_scale_uses_mean_abs_scaled_branch(self):
+        def sb(model, params, collocation, constants):
+            return {"out": constants["L"]}
+
+        engine = ResidualEngine(
+            constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
+            laws=[],
+            groups=[],
+            scaling_audit=[_re_pi_spec()],
+            state_builder=sb,
+        )
+        engine.compute_residuals(None, model=0, params=0, collocation={})
+        entry = engine.log[-1]
+        scale = entry["scale"]["scaling/re/pi_constant"]
+        assert scale > 5.0
+        rms = entry["rms"]["scaling/re/pi_constant"]
+        assert rms > 0.01
+
+
+class TestAuditSpecPiFieldsRoundtrip:
+    def test_monitor_config_scaling_audit_pi_fields(self):
+        spec = AuditSpec(
+            name="re",
+            output_key="Re",
+            state_map={"u": "u", "L": "L", "rho": "rho", "mu": "mu"},
+            invariance_pi_constant=True,
+            invariance_compare_keys=["out"],
+            invariance_scale_c=7.0,
+        )
+        cfg = MonitorConfig(constants={}, scaling_audit=[spec])
+        d = cfg.to_dict()
+        cfg2 = MonitorConfig.from_dict(d)
+        s2 = cfg2.scaling_audit[0]
+        assert s2.invariance_pi_constant is True
+        assert s2.invariance_compare_keys == ["out"]
+        assert s2.invariance_scale_c == 7.0

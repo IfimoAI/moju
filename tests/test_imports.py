@@ -37,6 +37,7 @@ def test_import_monitor_all():
         visualize,
         list_constitutive_models,
         list_scaling_closure_ids,
+        list_pi_constant_group_names,
     )
     assert ResidualEngine is not None
     assert callable(list_constitutive_models)
@@ -55,6 +56,7 @@ def test_monitor_module_has_all():
         "visualize",
         "list_constitutive_models",
         "list_scaling_closure_ids",
+        "list_pi_constant_group_names",
         "AuditSpec",
         "MonitorConfig",
     }

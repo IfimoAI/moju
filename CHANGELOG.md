@@ -4,6 +4,13 @@ All notable changes to moju are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+
+- **π-constant scaling closure (Path A):** optional `AuditSpec` fields `invariance_pi_constant`, `invariance_compare_keys`, `invariance_scale_c` for `scaling_audit`. Second forward with built-in constant scaling so the audited group stays fixed; residual logged as `scaling/<name>/pi_constant` with R_norm scale `ε + mean(|scaled compare keys|)`. Built-in recipes for `re`, `pr`, `pe` (`moju.monitor.pi_constant_recipes`, `list_pi_constant_group_names()`).
+- **Admissibility docs:** `audit()` docstring and README clarify three reporting levels (per key, per-category geometric means, overall geometric mean). PDF category section notes category scores are geometric means.
+
 ## [0.4.3] - 2026-03-20
 
 ### Changed

@@ -202,6 +202,12 @@ def write_audit_pdf(
             )
         )
         story.append(t)
+        story.append(
+            Paragraph(
+                "<i>Category scores are geometric means of the per-metric admissibility scores in that section.</i>",
+                body_style,
+            )
+        )
         story.append(Spacer(1, 16))
 
     # Per-key metrics by category
