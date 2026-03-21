@@ -13,6 +13,9 @@ class AuditSpec:
     - output_key: state key for F output (expects derivative keys d_<output_key>_dx/dt for chain closures)
     - state_map: function arg name -> state key
     - predicted_spatial/temporal: state keys (not arg names) that vary in x/t
+    - invariance_pi_constant (scaling only, Path A): second forward with constants scaled so
+      the audited Group stays fixed; residual on invariance_compare_keys; flat key
+      scaling/<name>/pi_constant. Requires built-in recipe and keys in engine.constants.
     """
 
     name: str
@@ -27,6 +30,11 @@ class AuditSpec:
     # Weak-form hook: canonical axis -> state key holding quadrature weights.
     # Examples: {"x": "w_x"} or {"t": "w_t"}.
     quadrature_weights: Dict[str, str] = field(default_factory=dict)
+    # π-constant closure (Path A only): perturb constants along a built-in recipe so the
+    # audited Group stays fixed; compare merged state keys between baseline and scaled runs.
+    invariance_pi_constant: bool = False
+    invariance_compare_keys: List[str] = field(default_factory=list)
+    invariance_scale_c: float = 10.0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -41,6 +49,9 @@ class AuditSpec:
             predicted_temporal=list(d.get("predicted_temporal") or []),
             closure_mode=str(d.get("closure_mode") or "pointwise"),
             quadrature_weights=dict(d.get("quadrature_weights") or {}),
+            invariance_pi_constant=bool(d.get("invariance_pi_constant", False)),
+            invariance_compare_keys=list(d.get("invariance_compare_keys") or []),
+            invariance_scale_c=float(d.get("invariance_scale_c", 10.0)),
         )
 
 

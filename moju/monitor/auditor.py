@@ -27,6 +27,10 @@ from moju.monitor.closure_registry import (
     compute_chain_weak,
     compute_ref_delta,
 )
+from moju.monitor.pi_constant_recipes import (
+    GROUP_PI_CONSTANT_RECIPES,
+    apply_pi_constant_recipe,
+)
 
 
 def _kwargs_from_state(
@@ -241,6 +245,14 @@ def audit(
     model_name: Optional[str] = None,
     model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """
+    Physics admissibility from logged RMS and scales.
+
+    Reporting uses three levels (no extra aggregation API): (1) per residual key in
+    ``per_key``; (2) geometric mean within each category — ``per_category`` keys
+    ``laws``, ``constitutive``, ``scaling``; (3) overall score — geometric mean of
+    the category scores that are present.
+    """
     if not log:
         return {"per_key": {}, "overall_admissibility_score": 0.0, "overall_admissibility_level": "Non-Admissible"}
     first_rms = log[0].get("rms", {})
@@ -474,6 +486,7 @@ class ResidualEngine:
 
         _validate_specs(self.constitutive_audit, MODEL_FNS, "constitutive")
         _validate_specs(self.scaling_audit, GROUP_FNS, "scaling")
+        self._validate_pi_constant_specs()
 
         self._log: List[Dict[str, Any]] = []
         self._index = 0
@@ -482,8 +495,50 @@ class ResidualEngine:
     def log(self) -> List[Dict[str, Any]]:
         return self._log
 
-    def _state_builder(self, state_pred: Dict[str, Any]) -> Dict[str, Any]:
-        return _build_state(state_pred, self.constants, self.groups_spec)
+    def _validate_pi_constant_specs(self) -> None:
+        for spec in self.scaling_audit:
+            if not spec.get("invariance_pi_constant"):
+                continue
+            name = spec["name"]
+            if name not in GROUP_PI_CONSTANT_RECIPES:
+                raise ValueError(
+                    f"scaling:{name} invariance_pi_constant requires a built-in π-constant recipe; "
+                    f"supported: {sorted(GROUP_PI_CONSTANT_RECIPES.keys())}"
+                )
+            recipe = GROUP_PI_CONSTANT_RECIPES[name]
+            sm = spec.get("state_map") or {}
+            for arg_name, _ in recipe:
+                if arg_name not in sm:
+                    raise ValueError(
+                        f"scaling:{name} π-constant recipe needs state_map entry for arg {arg_name!r}"
+                    )
+            cmp_keys = list(spec.get("invariance_compare_keys") or [])
+            if not cmp_keys:
+                raise ValueError(
+                    f"scaling:{name} invariance_pi_constant requires non-empty invariance_compare_keys"
+                )
+            c = float(spec.get("invariance_scale_c", 10.0))
+            if c <= 1.0:
+                raise ValueError(f"scaling:{name} invariance_scale_c must be > 1, got {c}")
+            for arg_name, _ in recipe:
+                sk = sm[arg_name]
+                if sk not in self.constants:
+                    raise ValueError(
+                        f"scaling:{name} π-constant requires key {sk!r} in ResidualEngine.constants "
+                        f"(arg {arg_name!r})"
+                    )
+            if self.state_builder is None:
+                raise ValueError(
+                    f"scaling:{name} invariance_pi_constant requires ResidualEngine(state_builder=...) (Path A only)"
+                )
+
+    def _state_builder(
+        self,
+        state_pred: Dict[str, Any],
+        constants_override: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        c = self.constants if constants_override is None else constants_override
+        return _build_state(state_pred, c, self.groups_spec)
 
     def compute_residuals(
         self,
@@ -501,6 +556,15 @@ class ResidualEngine:
         Path A: pass (model, params, collocation) and configure engine.state_builder.
         Path B: pass state_pred directly.
         """
+        path_a = state_pred is None
+        pi_specs = [s for s in self.scaling_audit if s.get("invariance_pi_constant")]
+        if pi_specs and not path_a:
+            raise ValueError(
+                "π-constant scaling audit (invariance_pi_constant) requires Path A: "
+                "call compute_residuals(..., model=..., params=..., collocation=...) "
+                "without passing state_pred."
+            )
+
         residuals: Dict[str, Any] = {"laws": {}}
 
         if state_pred is None:
@@ -663,6 +727,7 @@ class ResidualEngine:
             if c:
                 residuals["constitutive"] = c
 
+        pi_constant_scales: Dict[str, float] = {}
         if self.scaling_audit or self.scaling_custom:
             s = _run_specs(self.scaling_audit, registry=GROUP_FNS, category="scaling")
             if self.scaling_custom:
@@ -671,6 +736,59 @@ class ResidualEngine:
                     arr = spec["fn"](merged, self.constants)
                     if arr is not None:
                         s[f"custom/{cname}"] = jnp.asarray(arr)
+            if path_a and self.state_builder is not None:
+                for spec in self.scaling_audit:
+                    if not spec.get("invariance_pi_constant"):
+                        continue
+                    name = spec["name"]
+                    c = float(spec.get("invariance_scale_c", 10.0))
+                    if c <= 1.0:
+                        raise ValueError(f"scaling:{name} invariance_scale_c must be > 1, got {c}")
+                    recipe = GROUP_PI_CONSTANT_RECIPES[name]
+                    state_map = spec.get("state_map") or {}
+                    constants_scaled = apply_pi_constant_recipe(
+                        self.constants, recipe, state_map, c
+                    )
+                    state_pred_pi = self.state_builder(model, params, collocation, constants_scaled)
+                    merged_scaled = {
+                        **self._state_builder(state_pred_pi, constants_scaled),
+                        **constants_scaled,
+                    }
+                    fn, arg_names = GROUP_FNS[name]
+                    kb = _kwargs_from_state(merged, self.constants, state_map)
+                    ks = _kwargs_from_state(merged_scaled, constants_scaled, state_map)
+                    val_b = fn(**{an: kb[an] for an in arg_names})
+                    val_s = fn(**{an: ks[an] for an in arg_names})
+                    if not jnp.allclose(
+                        jnp.asarray(val_b), jnp.asarray(val_s), rtol=1e-4, atol=1e-6
+                    ):
+                        raise ValueError(
+                            f"scaling:{name} π-constant scaled inputs did not preserve group value "
+                            f"(baseline {val_b!r} vs scaled {val_s!r})"
+                        )
+                    compare_keys = list(spec.get("invariance_compare_keys") or [])
+                    parts_r: List[jnp.ndarray] = []
+                    parts_scale: List[jnp.ndarray] = []
+                    for ck in compare_keys:
+                        if ck not in merged:
+                            raise KeyError(
+                                f"scaling:{name} invariance_compare_keys: {ck!r} missing from baseline merged state"
+                            )
+                        if ck not in merged_scaled:
+                            raise KeyError(
+                                f"scaling:{name} invariance_compare_keys: {ck!r} missing from scaled merged state"
+                            )
+                        vb = jnp.asarray(merged[ck])
+                        vs = jnp.asarray(merged_scaled[ck])
+                        parts_r.append(jnp.ravel(vs - vb))
+                        parts_scale.append(jnp.ravel(jnp.abs(vs)))
+                    r_pi = jnp.concatenate(parts_r) if parts_r else jnp.array([0.0])
+                    stacked_abs = jnp.concatenate(parts_scale) if parts_scale else jnp.array([0.0])
+                    flat_pi = f"{name}/pi_constant"
+                    s[flat_pi] = r_pi
+                    scale_key = f"scaling/{flat_pi}"
+                    mean_abs = float(jax.device_get(jnp.mean(stacked_abs)))
+                    pi_constant_scales[scale_key] = float(_SCALE_EPS + mean_abs)
             if s:
                 residuals["scaling"] = s
 
@@ -696,6 +814,7 @@ class ResidualEngine:
             state_ref_built_for_scale,
             to_python=log_to_python,
         )
+        scale_per_key.update(pi_constant_scales)
         entry: Dict[str, Any] = {"index": self._index, "rms": rms_per_key, "scale": scale_per_key}
         if omitted_msgs:
             entry["omitted"] = omitted_msgs
