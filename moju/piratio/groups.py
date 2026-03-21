@@ -67,6 +67,10 @@ class Groups:
         :return: Dimensionless Grashof number.
         
         SciML: Drives the buoyancy source term in natural convection models.
+
+        Note: ``g`` is fixed at 9.81 m/s² (not a function argument). π-constant audit
+        recipes in ``moju.monitor.pi_constant_recipes`` rescale only ``beta``, ``dT``,
+        ``L``, and ``nu``.
         """
         g = 9.81
         return (g * beta * dT * L**3) / (nu**2)
