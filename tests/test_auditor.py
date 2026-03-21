@@ -420,6 +420,8 @@ class TestPiConstantClosure:
     def test_list_pi_constant_group_names(self):
         names = list_pi_constant_group_names()
         assert "re" in names and "pr" in names and "pe" in names
+        assert "st" in names and "gr" in names and "we" in names
+        assert len(names) == 22
 
     def test_apply_pi_constant_recipe_re_preserves_re(self):
         from moju.monitor.pi_constant_recipes import (
@@ -455,23 +457,10 @@ class TestPiConstantClosure:
                 state_builder=lambda m, p, col, ct: {"out": jnp.array(1.0)},
             )
 
-    def test_engine_init_unsupported_group_for_pi(self):
-        with pytest.raises(ValueError, match="recipe"):
-            ResidualEngine(
-                constants={"f": 1.0, "u": 1.0, "L": 1.0},
-                laws=[],
-                groups=[],
-                scaling_audit=[
-                    {
-                        "name": "st",
-                        "output_key": "St",
-                        "state_map": {"f": "f", "u": "u", "L": "L"},
-                        "invariance_pi_constant": True,
-                        "invariance_compare_keys": ["x"],
-                    }
-                ],
-                state_builder=lambda m, p, col, ct: {"x": jnp.array(1.0)},
-            )
+    def test_all_registered_groups_have_pi_recipe(self):
+        from moju.monitor.pi_constant_recipes import assert_pi_recipes_cover_all_groups
+
+        assert_pi_recipes_cover_all_groups()
 
     def test_engine_init_invariance_c_must_exceed_one(self):
         with pytest.raises(ValueError, match="invariance_scale_c"):

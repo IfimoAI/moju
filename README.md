@@ -125,7 +125,7 @@ Moju gives you physics diagnostics, not just a loss. The audit report looks like
 
 Report keys: `report["per_category"]` (`laws`, `constitutive`, `scaling`), `report["overall_admissibility_score"]`, `report["overall_admissibility_level"]`. Per-key RMS, R_norm, and admissibility are in `report["per_key"]`.
 
-**Admissibility levels:** (1) each residual key has its own score in `per_key`; (2) each category score in `per_category` is the **geometric mean** of the scores for all keys in that category (governing laws, constitutive models, scaling/groups); (3) the **overall** score is the geometric mean of those category scores that are present. New metrics use the same pipeline—for example optional **π-constant** checks on a scaling audit add a key `scaling/<name>/pi_constant` and are included in the scaling category mean.
+**Admissibility levels:** (1) each residual key has its own score in `per_key`; (2) each category score in `per_category` is the **geometric mean** of the scores for all keys in that category (governing laws, constitutive models, scaling/groups); (3) the **overall** score is the geometric mean of those category scores that are present. New metrics use the same pipeline—for example optional **π-constant** checks on a scaling audit add a key `scaling/<name>/pi_constant` and are included in the scaling category mean. π-constant recipes exist for **every** registered dimensionless group (`list_pi_constant_group_names()`); each recipe scales selected inputs by powers of `c>1` so the group value is unchanged (see `moju.monitor.pi_constant_recipes`). For **Grashof** (`gr`), `g` is fixed inside `Groups.gr`; the recipe only varies the other arguments.
 
 ---
 
