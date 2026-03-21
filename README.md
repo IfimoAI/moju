@@ -125,7 +125,7 @@ Moju gives you physics diagnostics, not just a loss. The audit report looks like
 
 Report keys: `report["per_category"]` (`laws`, `constitutive`, `scaling`), `report["overall_admissibility_score"]`, `report["overall_admissibility_level"]`. Per-key RMS, R_norm, and admissibility are in `report["per_key"]`.
 
-**Admissibility levels:** (1) each residual key has its own score in `per_key`; (2) each category score in `per_category` is the **geometric mean** of the scores for all keys in that category (governing laws, constitutive models, scaling/groups); (3) the **overall** score is the geometric mean of those category scores that are present. New metrics use the same pipeline—for example optional **π-constant** checks on a scaling audit add a key `scaling/<name>/pi_constant` and are included in the scaling category mean. π-constant recipes exist for **every** registered dimensionless group (`list_pi_constant_group_names()`); each recipe scales selected inputs by powers of `c>1` so the group value is unchanged (see `moju.monitor.pi_constant_recipes`). For **Grashof** (`gr`), `g` is fixed inside `Groups.gr`; the recipe only varies the other arguments. End-to-end π-constant examples: `examples/cookbook_pi_constant_reynolds.py`, `examples/cookbook_pi_constant_prandtl.py`. Turbulence-related constitutive chain audits: `examples/cookbook_turbulence_law_of_wall.py`, `examples/cookbook_turbulence_colebrook.py`, `examples/cookbook_constitutive_smagorinsky.py`, `examples/cookbook_constitutive_k_epsilon.py` (k–ε νₜ), `examples/cookbook_constitutive_k_omega.py` (k–ω νₜ). These νₜ closures are algebraic only; full k–ε/k–ω transport belongs in `Laws.*` if you need PDE residuals.
+**Admissibility levels:** (1) each residual key has its own score in `per_key`; (2) each category score in `per_category` is the **geometric mean** of the scores for all keys in that category (governing laws, constitutive models, scaling/groups); (3) the **overall** score is the geometric mean of those category scores that are present. New metrics use the same pipeline—for example optional **π-constant** checks on a scaling audit add a key `scaling/<name>/pi_constant` and are included in the scaling category mean. π-constant recipes exist for **every** registered dimensionless group (`list_pi_constant_group_names()`); each recipe scales selected inputs by powers of `c>1` so the group value is unchanged (see `moju.monitor.pi_constant_recipes`). For **Grashof** (`gr`), `g` is fixed inside `Groups.gr`; the recipe only varies the other arguments. End-to-end π-constant examples: `examples/cookbook_pi_constant_reynolds.py`, `examples/cookbook_pi_constant_prandtl.py`. Turbulence-related constitutive chain audits: `examples/cookbook_turbulence_law_of_wall.py`, `examples/cookbook_turbulence_colebrook.py`, `examples/cookbook_constitutive_smagorinsky.py`, `examples/cookbook_constitutive_k_epsilon.py` (k–ε νₜ), `examples/cookbook_constitutive_k_omega.py` (k–ω νₜ). These νₜ closures are algebraic only; full k–ε/k–ω transport belongs in `Laws.*` if you need PDE residuals. **Implied constitutive audit** (`constitutive/<name>/implied_delta`): compare `Models.*` to an alternate value in `state_pred` via `AuditSpec.implied_value_key`, or to `implied_fn(state, constants)` (Python-only; omitted from `to_dict()`). Cookbooks: `examples/cookbook_constitutive_implied_ideal_gas_rho.py`, `examples/cookbook_constitutive_implied_power_law_fn.py`.
 
 ---
 
@@ -145,7 +145,7 @@ Report keys: `report["per_category"]` (`laws`, `constitutive`, `scaling`), `repo
 | **Models**      | Constitutive relationships (e.g. viscosity μ(T), density ρ(P,T)). |
 | **Groups**      | Dimensionless quantities (Re, Pr, Pe, Ma, …). |
 | **Laws**        | Governing equations (mass, momentum, energy, …); residuals go into `build_loss`. |
-| **ResidualEngine** | Builds state from config and optional predictions; runs laws and optional constitutive/scaling audits; produces residuals and a log. |
+| **ResidualEngine** | Builds state from config and optional predictions; runs laws and optional constitutive/scaling audits (`ref_delta`, `implied_delta`, `chain_dx`/`chain_dt`, …); produces residuals and a log. |
 | **build_loss**  | Builds a scalar physics loss from residuals (laws only). |
 | **audit**       | Takes the engine log; returns per-key and per-category admissibility and overall score. |
 
@@ -175,7 +175,7 @@ Moju does not define physics. Moju provides a structured way to **enforce** and 
 
 ## Learn more
 
-**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, build_loss, audit, visualize). Use `MonitorConfig` and `AuditSpec` for typed config; `engine.required_state_keys()` and `engine.required_derivative_keys()` for introspection.
+**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, `MonitorConfig`, `AuditSpec`, `audit_spec_to_engine_dict`, build_loss, audit, visualize). Constitutive/scaling closure keys include `ref_delta`, `implied_delta`, `chain_dx`, `chain_dt` (plus scaling `pi_constant` when configured). Use `engine.required_state_keys()` and `engine.required_derivative_keys()` for introspection.
 
 **Examples**
 
@@ -183,8 +183,9 @@ Moju does not define physics. Moju provides a structured way to **enforce** and 
 - Monitor with laws + scaling audit: `python examples/monitor_chain_spatial_demo.py`, `python examples/monitor_chain_temporal_demo.py`.
 - End-to-end NN → residuals → PDF: `python examples/monitor_heat_end_to_end.py`, `python examples/monitor_burgers_end_to_end.py`.
 - CFD snapshot → state_ref → audit: `examples/cfd_snapshot_cookbook_heat_1d.py`; reference loaders: `examples/monitor_state_ref_from_vtu_demo.py`, `from_openfoam`, `from_hdf5`.
+- Implied constitutive audit (`implied_delta`): `examples/cookbook_constitutive_implied_ideal_gas_rho.py`, `examples/cookbook_constitutive_implied_power_law_fn.py`.
 
-**Paths** — Path A: pass `(model, params, collocation)` and a `state_builder` to build `state_pred`. Path B: pass `state_pred` directly (e.g. from CFD or finite differences). Constitutive and scaling audits use specs tied to `Models.*` and `Groups.*` (ref_delta, chain_dx, chain_dt). R_norm is scale-based (state-derived by default; override with `audit(log, r_ref=...)`).
+**Paths** — Path A: pass `(model, params, collocation)` and a `state_builder` to build `state_pred`. Path B: pass `state_pred` directly (e.g. from CFD or finite differences). Constitutive and scaling audits use specs tied to `Models.*` and `Groups.*`: **ref_delta** (needs `state_ref`), **implied_delta** (`AuditSpec.implied_value_key` or `implied_fn`; `implied_fn` is omitted from `MonitorConfig.to_dict()`—use in-memory `AuditSpec` + `ResidualEngine(config=...)` or `audit_spec_to_engine_dict`), **chain_dx** / **chain_dt** (need `predicted_spatial` / `predicted_temporal`). R_norm is scale-based (state-derived by default; override with `audit(log, r_ref=...)`).
 
 **Docs** — [VERSIONING.md](VERSIONING.md). Online docs: overview, Groups, Models, Laws, Operators.
 
