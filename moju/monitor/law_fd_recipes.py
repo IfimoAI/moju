@@ -24,6 +24,7 @@ from moju.monitor.path_b_derivatives import (
     _fill_temporal_derivative,
     _get_coord,
     _infer_spatial_dim,
+    _jnp_gradient_multi,
     _merged,
     _rectilinear_meshgrid_1d_axes,
     _separable_1d_coords,
@@ -140,10 +141,10 @@ def _scalar_laplacian_steady(
             warnings.append(str(e))
             return None
         try:
-            grads = jnp.gradient(K, *coords)
+            grads = _jnp_gradient_multi(K, coords)
             acc = jnp.zeros_like(K)
             for i, gi in enumerate(grads):
-                parts = jnp.gradient(gi, *coords)
+                parts = _jnp_gradient_multi(gi, coords)
                 acc = acc + parts[i]
             return acc
         except Exception as e:  # noqa: BLE001
@@ -162,10 +163,10 @@ def _scalar_laplacian_steady(
     rect1d = _rectilinear_meshgrid_1d_axes(K, x, y, z, dim)
     if rect1d is not None:
         try:
-            grads = jnp.gradient(K, *rect1d)
+            grads = _jnp_gradient_multi(K, rect1d)
             acc = jnp.zeros_like(K)
             for i, gi in enumerate(grads):
-                parts = jnp.gradient(gi, *rect1d)
+                parts = _jnp_gradient_multi(gi, rect1d)
                 acc = acc + parts[i]
             return acc
         except Exception as e:  # noqa: BLE001

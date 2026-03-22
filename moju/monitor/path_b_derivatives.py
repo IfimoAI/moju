@@ -85,7 +85,48 @@ def _grad_along_axis_uniform(K: jnp.ndarray, axis: int) -> jnp.ndarray:
     return jnp.gradient(K, axis=axis)
 
 
+def _uniform_1d_spacing(
+    c: jnp.ndarray, *, rtol: float = 1e-4, atol: float = 1e-6
+) -> Optional[float]:
+    """
+    Return spacing ``h`` if ``c`` is effectively uniform (``diff(c)`` constant).
+
+    JAX ``jnp.gradient(values, coord)`` with a coordinate array can fail on uniform
+    ``linspace`` grids in float32 (tiny ``diff`` jitter) or raise
+    "Non-constant spacing not implemented" across versions. Using scalar ``h`` avoids that.
+    """
+    c = jnp.reshape(jnp.asarray(c), (-1,))
+    n = int(c.shape[0])
+    if n < 2:
+        return None
+    dc = jnp.diff(c)
+    if not bool(jnp.allclose(dc, dc[0], rtol=rtol, atol=atol)):
+        return None
+    h = dc[0]
+    if abs(float(h)) < 1e-15:
+        return None
+    return float(h)
+
+
+def _jnp_gradient_multi(
+    K: jnp.ndarray, coord_list: Sequence[jnp.ndarray]
+) -> Tuple[jnp.ndarray, ...]:
+    """
+    ``jnp.gradient(K, *coords)`` but use scalar spacings when each 1D coord is uniform.
+
+    Keeps Path B / law-FD behavior stable across JAX versions (esp. float32 + Python 3.9 CI).
+    """
+    coords = [jnp.asarray(x) for x in coord_list]
+    hs = [_uniform_1d_spacing(c) for c in coords]
+    if len(hs) == len(coords) and all(h is not None for h in hs):
+        return jnp.gradient(K, *tuple(hs))
+    return jnp.gradient(K, *coords)
+
+
 def _grad_1d_nonuniform(values: jnp.ndarray, coord: jnp.ndarray) -> jnp.ndarray:
+    h = _uniform_1d_spacing(coord)
+    if h is not None:
+        return jnp.asarray(jnp.gradient(values, h))
     return jnp.asarray(jnp.gradient(values, coord))
 
 
@@ -225,7 +266,7 @@ def _fill_spatial_derivative_steady(
             warnings.append(str(e))
             return None
         try:
-            grads = jnp.gradient(K, *coords)
+            grads = _jnp_gradient_multi(K, coords)
         except Exception as e:  # noqa: BLE001
             warnings.append(f"jnp.gradient failed: {e}")
             return None
@@ -241,7 +282,7 @@ def _fill_spatial_derivative_steady(
     rect1d = _rectilinear_meshgrid_1d_axes(K, x, y, z, dim)
     if rect1d is not None:
         try:
-            grads = jnp.gradient(K, *rect1d)
+            grads = _jnp_gradient_multi(K, rect1d)
         except Exception as e:  # noqa: BLE001
             warnings.append(f"jnp.gradient failed: {e}")
             return None
@@ -282,8 +323,12 @@ def _fill_temporal_derivative(
     tail = int(jnp.prod(jnp.array(K.shape[1:]))) if K.ndim > 1 else 1
     K2 = jnp.reshape(K, (nt, tail))
 
+    ht = _uniform_1d_spacing(t)
+
     def col_grad(col: jnp.ndarray) -> jnp.ndarray:
-        return jnp.gradient(col, t)
+        if ht is not None:
+            return jnp.asarray(jnp.gradient(col, ht))
+        return jnp.asarray(jnp.gradient(col, t))
 
     d2 = jax.vmap(col_grad, in_axes=1, out_axes=1)(K2)
     return jnp.reshape(d2, K.shape)
