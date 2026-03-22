@@ -165,6 +165,28 @@ Optional extras:
 - `pip install moju[ref_hdf5]` — HDF5 loaders (h5py).
 - `pip install moju[report]` — PDF Physics Admissibility Report from `audit(..., export_dir=...)`.
 - `pip install moju[viz]` — matplotlib + plotly for `visualize(engine.log, backend="matplotlib")` (static) or `backend="plotly"` (interactive).
+- `pip install moju[studio]` — Streamlit + Plotly for **Moju Studio** (`streamlit run apps/moju_studio/Home.py` from a source checkout; see `apps/moju_studio/README.md`).
+- `pip install moju[studio-science]` — optional **HDF5 / NetCDF** state uploads in Studio (`h5py`, `xarray`, `netCDF4`); `.npz` / `.npy` work with `studio` alone.
+
+| If you need… | Extra | Install |
+| ------------- | ----- | ------- |
+| Reference grids / NetCDF → `state_ref` | `ref` | `pip install moju[ref]` |
+| VTK/VTU reference | `ref_vtk` | `pip install moju[ref_vtk]` |
+| OpenFOAM reference | `ref_foam` | `pip install moju[ref_foam]` |
+| HDF5 reference | `ref_hdf5` | `pip install moju[ref_hdf5]` |
+| PDF report export | `report` | `pip install moju[report]` |
+| Matplotlib / Plotly dashboards | `viz` | `pip install moju[viz]` |
+| Moju Studio (Streamlit) | `studio` | `pip install moju[studio]` |
+| Studio HDF5 / NetCDF uploads | `studio-science` | `pip install moju[studio-science]` |
+| PyTorch ↔ JAX law bridge | `torch` | `pip install moju[torch]` |
+
+### Troubleshooting import errors
+
+- **`ImportError` for xarray, h5py, plotly, streamlit, reportlab, …**  
+  Install the matching extra from the table above (e.g. `moju[ref]` for xarray loaders, `moju[studio-science]` for Studio HDF5/NetCDF). Core `pip install moju` only pulls JAX and NumPy.
+
+- **`ValueError: numpy.dtype size changed` or similar when importing an optional package**  
+  Usually a **binary wheel mismatch** after upgrading NumPy (e.g. NumPy 2 vs extensions built for NumPy 1). Use a **clean virtual environment**, align versions (`pip install -U numpy h5py xarray` / the failing package), or reinstall the optional stack. `moju.monitor.state_ref` catches a broken xarray import so `import moju.monitor.state_ref` still loads; xarray-based helpers then raise a clear error until the environment is fixed.
 
 ---
 
