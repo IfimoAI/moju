@@ -8,7 +8,11 @@ from moju.monitor.derivative_keys import (
     collect_audit_derivative_keys,
     derivative_state_key,
 )
-from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
+from moju.monitor.path_b_derivatives import (
+    PathBGridConfig,
+    _uniform_1d_spacing,
+    fill_path_b_derivatives,
+)
 
 
 class TestDerivativeKeys:
@@ -69,7 +73,10 @@ class TestFillPathBDerivatives:
         )
         assert not w
         assert "d_Re_dx" in out
-        expect = jnp.gradient(Re, x)
+        # Match implementation: uniform scalar spacing (jnp.gradient(Re, x) raises on JAX float32 linspace)
+        hx = _uniform_1d_spacing(x)
+        assert hx is not None
+        expect = jnp.asarray(jnp.gradient(Re, hx))
         assert jnp.allclose(out["d_Re_dx"], expect, rtol=1e-5, atol=1e-5)
 
     def test_skip_existing_non_none(self):
@@ -116,7 +123,11 @@ class TestFillPathBDerivatives:
         )
         assert not w
         assert "d_T_dy" in out
-        _, dTdy = jnp.gradient(T, x, y)
+        # Match implementation: scalar spacings (jnp.gradient(T, x, y) fails to broadcast on some JAX versions)
+        hx = _uniform_1d_spacing(x)
+        hy = _uniform_1d_spacing(y)
+        assert hx is not None and hy is not None
+        _, dTdy = jnp.gradient(T, hx, hy)
         assert jnp.allclose(out["d_T_dy"], dTdy, rtol=1e-4, atol=1e-4)
 
     def test_unsteady_dt(self):
