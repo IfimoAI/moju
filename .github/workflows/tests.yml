@@ -7,6 +7,43 @@ on:
     branches: [main, dev]
 
 jobs:
+  smoke_minimal_install:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package only (no dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Smoke import primary API
+        run: |
+          python -c "import moju; from moju.monitor import ResidualEngine, audit, visualize; print('ok', moju.__version__)"
+
+  smoke_studio_science:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dev + studio-science
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,studio-science]"
+      - name: Smoke import Studio science loaders
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -c "from apps.moju_studio.studio_io import load_h5_bytes, load_netcdf_bytes, load_npy_bytes; print('studio_io ok')"
+
   test:
     runs-on: ubuntu-latest
     strategy:
