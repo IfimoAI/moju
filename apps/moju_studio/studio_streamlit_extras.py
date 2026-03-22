@@ -5,7 +5,7 @@ Streamlit UX helpers: caching registries, safe use of toast / status / fragment 
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Callable, Iterator, List, Tuple
+from typing import Any, Callable, Iterator, List, Optional, Tuple
 
 import streamlit as st
 
@@ -23,7 +23,7 @@ def cached_registry_names() -> Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str
     )
 
 
-def toast(msg: str, *, icon: str | None = None) -> None:
+def toast(msg: str, *, icon: Optional[str] = None) -> None:
     if hasattr(st, "toast"):
         st.toast(msg, icon=icon)
     else:

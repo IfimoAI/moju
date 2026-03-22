@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import jax.numpy as jnp
 import numpy as np
@@ -127,7 +127,7 @@ def load_netcdf_bytes(data: bytes, variable_names: str = "") -> Dict[str, Any]:
     xr = _import_xarray()
     bio = BytesIO(data)
     # Try common engines for in-memory NetCDF3/4.
-    last_err: Exception | None = None
+    last_err: Optional[Exception] = None
     opened = None
     for engine in ("netcdf4", "scipy"):
         try:
