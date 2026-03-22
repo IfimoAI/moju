@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moju"
-version = "0.4.3"
+version = "0.5.0"
 description = "Physics-informed machine learning framework for enforcing governing equations, and auditing physical consistency across PINNs, CFD surrogates, and other state predictors"
 readme = "README.md"
 authors = [{ name = "Ifimo Lab", email = "lab@ifimoanalytics.com" }]

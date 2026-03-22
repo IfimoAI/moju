@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-21
+
 ### Added
 
 - **Moju Studio (Streamlit):** optional app under `apps/moju_studio/` — upload `state_pred` / `state_ref` as `.npz`, **form builder** for laws/groups/constitutive/scaling audits (or full JSON), Path B / Path A shim, **PathBGridConfig** for FD, `audit`/`visualize` **r_ref** and weights, session log append + Plotly key subset redraw, **pred−ref** spatial view, preflight checklist download, optional **PDF ZIP** (`moju[report]`). **UX:** sidebar navigation + `page_link`, run **form**, **`st.status`** pipeline, **`st.toast`**, **`@st.fragment`** spatial/redraw, **`st.dialog`** clear-log confirm, RMS **`column_config`**, Plotly **`on_select`** where supported; **Quick start** / **Help** pages; repo-root **`.streamlit/config.toml`**. Requires **streamlit >= 1.33**. Install: `pip install "moju[studio,viz]"` (editable from repo). See `apps/moju_studio/README.md`.
@@ -19,6 +21,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Examples:** `examples/cookbook_pi_constant_reynolds.py` and `examples/cookbook_pi_constant_prandtl.py` (Path A π-constant audit end-to-end); tests in `tests/test_examples_pi_constant_cookbooks.py`.
 - **Models / examples:** `Models.smagorinsky_nu_t` (LES eddy viscosity template); cookbooks `cookbook_turbulence_law_of_wall.py`, `cookbook_turbulence_colebrook.py`, `cookbook_constitutive_smagorinsky.py` with `tests/test_examples_turbulence_cookbooks.py`.
 - **RANS eddy viscosity (algebraic νₜ):** `Models.k_epsilon_nu_t` and `Models.k_omega_nu_t` with dissipation floors for stable AD; cookbooks `examples/cookbook_constitutive_k_epsilon.py`, `examples/cookbook_constitutive_k_omega.py` (Path B chain_dx); tests in `tests/test_models.py` and `tests/test_examples_turbulence_cookbooks.py`.
+- **Studio data formats:** optional extra `moju[studio-science]` for HDF5 / NetCDF / `.npy` state uploads in Moju Studio (`h5py`, `xarray`, `netCDF4`).
+- **Studio π-constant gating:** π-constant scaling audits require a recomputing `state_builder` and non-empty `invariance_compare_keys`; default NPZ Path A shim is rejected when π is enabled (clear errors + tests + docs).
+
+### Fixed
+
+- **Path B / law FD + JAX:** detect approximately uniform 1D grid spacing and use scalar `jnp.gradient(..., h)` so float32 `linspace` and stricter JAX versions do not raise "Non-constant spacing not implemented" or skip chain/law residuals on Python 3.9 CI. Tests use the same scalar-spacing references where `jnp.gradient(f, coord)` is unsupported.
+- **Python 3.9:** avoid PEP 604 `X | Y` type hints in Studio modules so sources parse on 3.9.
+
+### Changed
+
+- **CI / docs:** minimal-install and `studio-science` import smoke jobs; README optional-extras table and import troubleshooting; root + Studio README updates for science extras.
 
 ## [0.4.3] - 2026-03-20
 
