@@ -142,15 +142,7 @@ engine = ResidualEngine(
             "fn": Groups.bi,
         },
     ],
-    constitutive_audit=[
-        {
-            "name": "thermal_diffusivity",
-            "output_key": "alpha",
-            "state_map": {"k": "k", "rho": "rho", "cp": "cp"},
-            "predicted_spatial": ["k", "rho"],
-            "predicted_temporal": ["k", "rho"],
-        }
-    ],
+    # Law-linked implied audit adds thermal_diffusivity vs α from T_t / T_xx (see law_implied_diagnostics).
     scaling_audit=[
         {
             "name": "fo",

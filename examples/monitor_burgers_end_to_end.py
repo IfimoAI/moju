@@ -6,6 +6,7 @@ Shows:
   - NN u(params,t,x)
   - Operators: u_t, u_x, u_xx
   - Laws.burgers_equation residual
+  - Law-linked implied ``re``: catalog Groups.re vs Re from momentum-balance rearrangement (needs rho, mu in state)
   - Required keys introspection
   - audit() PDF export when moju[report] installed
 """
@@ -42,7 +43,7 @@ def u_field(params, t, x):
     return mlp(params, tx)[..., 0]
 
 
-def build_state(params, t, x, *, Re, U, L):
+def build_state(params, t, x, *, Re, U, L, rho_const: float = 1.0):
     u = u_field(params, t, x)
     u_t = Operators.time_derivative(u_field, params, t, x)
 
@@ -65,6 +66,9 @@ def build_state(params, t, x, *, Re, U, L):
     u_grad = u_x[:, None, None]
     u_lap = u_xx[:, None]
 
+    rho = jnp.full_like(u, rho_const)
+    mu = rho * U * L / Re
+
     return {
         "u": u_vec,
         "u_t": u_t_vec,
@@ -73,6 +77,8 @@ def build_state(params, t, x, *, Re, U, L):
         "Re": jnp.broadcast_to(Re, (u.shape[0],)),
         "U": jnp.broadcast_to(U, (u.shape[0],)),
         "L": jnp.broadcast_to(L, (u.shape[0],)),
+        "rho": rho[:, None],
+        "mu": mu[:, None],
     }
 
 

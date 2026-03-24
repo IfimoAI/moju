@@ -10,12 +10,26 @@ from moju.monitor.auditor import (
     visualize,
 )
 from moju.monitor.config import AuditSpec, MonitorConfig, audit_spec_to_engine_dict
+from moju.monitor.derived_state_chain import (
+    apply_derived_state_chain,
+    eval_derived_expr,
+    all_ref_keys_from_chain,
+    keys_produced_by_chain,
+)
 from moju.monitor.law_fd_recipes import (
     fill_law_fd_from_primitives,
     list_law_fd_supported_laws,
 )
+from moju.monitor.law_implied_diagnostics import (
+    effective_audit_specs_for_fragment,
+    law_implied_unsupported_reasons,
+    list_laws_with_implied_diagnostics,
+    merge_fragment_law_implied_audit_specs,
+    merge_law_implied_audit_specs,
+)
 from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
 from moju.monitor.pi_constant_recipes import list_pi_constant_group_names
+from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
 
 __all__ = [
     "ResidualEngine",
@@ -28,9 +42,20 @@ __all__ = [
     "AuditSpec",
     "MonitorConfig",
     "audit_spec_to_engine_dict",
+    "apply_derived_state_chain",
+    "eval_derived_expr",
+    "all_ref_keys_from_chain",
+    "keys_produced_by_chain",
     "PathBGridConfig",
     "fill_path_b_derivatives",
     "fill_law_fd_from_primitives",
     "list_law_fd_supported_laws",
+    "effective_audit_specs_for_fragment",
+    "law_implied_unsupported_reasons",
+    "list_laws_with_implied_diagnostics",
+    "merge_law_implied_audit_specs",
+    "merge_fragment_law_implied_audit_specs",
     "list_pi_constant_group_names",
+    "pretty_residual_key",
+    "pretty_category_name",
 ]

@@ -19,6 +19,8 @@ if str(_ROOT) not in sys.path:
 
 import streamlit as st
 
+from apps.moju_studio.studio_streamlit_extras import studio_sidebar_branding_and_nav
+
 st.set_page_config(
     page_title="Moju Studio",
     page_icon="🔬",
@@ -26,24 +28,34 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.title("Moju Studio")
+with st.sidebar:
+    studio_sidebar_branding_and_nav()
+
+st.markdown("# Moju Studio")
 st.markdown(
-    """
-Welcome. Use the **sidebar** (or the links below) to open **Audit**, **Quick start**, or **Help**.
-
-**Requirements:** `pip install "moju[studio,viz]"` (Streamlit **>= 1.33**). Run from the **repository root** so `.streamlit/config.toml` applies.
-
-**Docs:** repository README and `moju.monitor` API.
-"""
+    "Explore governing-law and constitutive residuals on your **state_pred** (Path B) or builder-based "
+    "state (Path A), with an interactive **Plotly** dashboard and session log for multi-step runs."
 )
+st.divider()
+c1, c2 = st.columns(2)
+with c1:
+    st.markdown(
+        """
+**Setup**
 
-try:
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.page_link("pages/1_Audit.py", label="Open Audit", icon="🔬")
-    with c2:
-        st.page_link("pages/2_Quick_start.py", label="Quick start", icon="📘")
-    with c3:
-        st.page_link("pages/3_Help.py", label="Help and UX", icon="❓")
-except Exception:  # noqa: BLE001
-    st.info("Select a page under **pages** in the sidebar to continue.")
+- `pip install -e ".[studio,viz]"` from the **repository root**
+- Streamlit **≥ 1.33**
+- Run: `streamlit run apps/moju_studio/Home.py`
+"""
+    )
+with c2:
+    st.markdown(
+        """
+**Start here**
+
+- Open **Audit** in the sidebar: upload data, configure laws/models, run Path A or B
+- **Quick start** — minimal Path B workflow
+- **Help** — Streamlit patterns used in this app
+"""
+    )
+st.caption("Theme and server options: `.streamlit/config.toml` at the repo root when you start Streamlit there.")

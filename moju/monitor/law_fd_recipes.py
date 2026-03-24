@@ -19,13 +19,16 @@ import jax.numpy as jnp
 
 from moju.monitor.path_b_derivatives import (
     PathBGridConfig,
+    _align_1d_field_and_coord,
     _fill_spatial_derivative,
     _fill_spatial_derivative_steady,
     _fill_temporal_derivative,
     _get_coord,
     _infer_spatial_dim,
+    _is_steady_leading_time_stack,
     _jnp_gradient_multi,
     _merged,
+    _meshgrid_separable_axis_coords,
     _rectilinear_meshgrid_1d_axes,
     _separable_1d_coords,
 )
@@ -152,14 +155,17 @@ def _scalar_laplacian_steady(
             return None
     # meshgrid
     if dim == 1:
-        c = x
-        if c is None or c.shape != K.shape:
-            warnings.append("meshgrid 1D laplacian: need x same shape as field")
+        aligned = _align_1d_field_and_coord(K, x, warnings, "meshgrid 1D laplacian")
+        if aligned is None:
             return None
-        g = _fill_spatial_derivative_steady(K, "x", cfg, x, y, z, dim, [])
+        K1, c1, orig_shape = aligned
+        g = _fill_spatial_derivative_steady(K1, "x", cfg, c1, y, z, dim, warnings)
         if g is None:
             return None
-        return _fill_spatial_derivative_steady(g, "x", cfg, x, y, z, dim, [])
+        lap = _fill_spatial_derivative_steady(g, "x", cfg, c1, y, z, dim, warnings)
+        if lap is None:
+            return None
+        return jnp.reshape(lap, orig_shape)
     rect1d = _rectilinear_meshgrid_1d_axes(K, x, y, z, dim)
     if rect1d is not None:
         try:
@@ -167,6 +173,18 @@ def _scalar_laplacian_steady(
             acc = jnp.zeros_like(K)
             for i, gi in enumerate(grads):
                 parts = _jnp_gradient_multi(gi, rect1d)
+                acc = acc + parts[i]
+            return acc
+        except Exception as e:  # noqa: BLE001
+            warnings.append(f"laplacian jnp.gradient failed: {e}")
+            return None
+    sep_axes = _meshgrid_separable_axis_coords(K, x, y, z, dim)
+    if sep_axes is not None:
+        try:
+            grads = _jnp_gradient_multi(K, sep_axes)
+            acc = jnp.zeros_like(K)
+            for i, gi in enumerate(grads):
+                parts = _jnp_gradient_multi(gi, sep_axes)
                 acc = acc + parts[i]
             return acc
         except Exception as e:  # noqa: BLE001
@@ -199,6 +217,16 @@ def _scalar_laplacian(
 ) -> Optional[jnp.ndarray]:
     x, y, z = _get_coord(m, cfg, "x"), _get_coord(m, cfg, "y"), _get_coord(m, cfg, "z")
     steady = cfg.steady
+    K = jnp.asarray(K)
+    if steady and _is_steady_leading_time_stack(K, cfg, m):
+        dim_s = _infer_spatial_dim(jnp.asarray(K[0]), True, cfg.spatial_dimension)
+        first = _scalar_laplacian_steady(K[0], cfg, x, y, z, dim_s, warnings)
+        if first is None:
+            return None
+        return jax.vmap(
+            lambda ks: _scalar_laplacian_steady(ks, cfg, x, y, z, dim_s, [])
+        )(K)
+
     dim = _infer_spatial_dim(K, steady, cfg.spatial_dimension)
     if not steady:
         if K.ndim < 2:
@@ -299,6 +327,20 @@ def _law_name_from_spec(spec: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _constants_supplies_real_value(constants: Dict[str, Any], target_sk: str) -> bool:
+    """True if ``constants`` has a non-null, non-placeholder entry for ``target_sk`` (blocks FD fill)."""
+    if target_sk not in constants:
+        return False
+    v = constants[target_sk]
+    if v is None:
+        return False
+    if isinstance(v, str):
+        low = v.strip().lower()
+        if low in {"none", "null", "nan", "na", ""}:
+            return False
+    return True
+
+
 def _resolve_source_state_key(
     recipe: LawFDArgRecipe,
     law_arg_name: str,
@@ -341,6 +383,8 @@ def fill_law_fd_from_primitives(
         sm: Dict[str, str],
     ) -> bool:
         if state.get(target_sk) is not None:
+            return False
+        if _constants_supplies_real_value(c, target_sk):
             return False
         recipes = LAW_FD_RECIPES.get(law_name) or {}
         recipe = recipes.get(arg_name)

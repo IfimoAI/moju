@@ -74,3 +74,16 @@ def run_dialog_if_available(dialog_fn: Callable[[], None], trigger: bool) -> Non
     d = getattr(st, "dialog", None)
     if d is not None:
         dialog_fn()
+
+
+def studio_sidebar_branding_and_nav() -> None:
+    """Moju Studio header plus global page links (label + icon, vertical list)."""
+    st.markdown("### Moju Studio")
+    st.caption("Interactive physics audit explorer · Streamlit + Moju monitor.")
+    try:
+        st.page_link("Home.py", label="Home", icon="🏠")
+        st.page_link("pages/1_Audit.py", label="Audit", icon="🔬")
+        st.page_link("pages/2_Quick_start.py", label="Quick start", icon="📘")
+        st.page_link("pages/3_Help.py", label="Help", icon="❓")
+    except Exception:  # noqa: BLE001
+        st.caption("Use **Home** in the app menu if page links are unavailable.")

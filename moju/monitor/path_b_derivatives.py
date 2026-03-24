@@ -42,7 +42,8 @@ class PathBGridConfig:
 
 
 def _merged(state: Dict[str, Any], constants: Dict[str, Any]) -> Dict[str, Any]:
-    return {**state, **constants}
+    """Constants first, then ``state`` — prediction / NPZ fields must not be masked by constants."""
+    return {**constants, **state}
 
 
 def _parse_deriv_key(key: str) -> Optional[Tuple[str, str]]:
@@ -77,6 +78,12 @@ def _spatial_ndim_from_field(K: jnp.ndarray, steady: bool) -> int:
 def _infer_spatial_dim(K: jnp.ndarray, steady: bool, declared: Union[int, str]) -> int:
     if declared != "auto":
         return int(declared)
+    # Column-shaped uploads (N, 1) are common; treat as 1D spatial for FD (uses coord ``x``).
+    if steady and K.ndim == 2 and int(K.shape[1]) == 1:
+        return 1
+    # Row-shaped (1, N) is common in tabular / exported NPZ; same 1D spatial interpretation.
+    if steady and K.ndim == 2 and int(K.shape[0]) == 1:
+        return 1
     return _spatial_ndim_from_field(K, steady)
 
 
@@ -172,6 +179,51 @@ def _spatial_shape(K: jnp.ndarray, steady: bool) -> Tuple[int, ...]:
     return tuple(int(s) for s in sp.shape)
 
 
+def _coerce_1d_axis_vector(c: Optional[jnp.ndarray], n: int) -> Optional[jnp.ndarray]:
+    """``(n,)`` from any 1D-compatible array; ``None`` if length does not match ``n``."""
+    if c is None:
+        return None
+    a = jnp.reshape(jnp.asarray(c), (-1,))
+    if int(a.shape[0]) != int(n):
+        return None
+    return a
+
+
+def _meshgrid_separable_axis_coords(
+    K: jnp.ndarray,
+    x: Optional[jnp.ndarray],
+    y: Optional[jnp.ndarray],
+    z: Optional[jnp.ndarray],
+    dim: int,
+) -> Optional[List[jnp.ndarray]]:
+    """
+    Many NPZs store a tensor-product grid as ``T (nx, ny[, nz])`` with **1D** ``x (nx,)``,
+    ``y (ny,)``, ``z (nz,)`` while ``PathBGridConfig.layout`` defaults to ``meshgrid``.
+    Return spacing vectors for ``jnp.gradient`` when that layout applies; else ``None``.
+    """
+    K = jnp.asarray(K)
+    if dim == 2:
+        if K.ndim != 2:
+            return None
+        nx, ny = int(K.shape[0]), int(K.shape[1])
+        xc = _coerce_1d_axis_vector(x, nx)
+        yc = _coerce_1d_axis_vector(y, ny)
+        if xc is None or yc is None:
+            return None
+        return [xc, yc]
+    if dim == 3:
+        if K.ndim != 3:
+            return None
+        nx, ny, nz = int(K.shape[0]), int(K.shape[1]), int(K.shape[2])
+        xc = _coerce_1d_axis_vector(x, nx)
+        yc = _coerce_1d_axis_vector(y, ny)
+        zc = _coerce_1d_axis_vector(z, nz)
+        if xc is None or yc is None or zc is None:
+            return None
+        return [xc, yc]
+    return None
+
+
 def _rectilinear_meshgrid_1d_axes(
     K: jnp.ndarray,
     x: Optional[jnp.ndarray],
@@ -209,6 +261,67 @@ def _rectilinear_meshgrid_1d_axes(
     return None
 
 
+def _is_steady_leading_time_stack(
+    K: jnp.ndarray,
+    cfg: PathBGridConfig,
+    m: Dict[str, Any],
+) -> bool:
+    """
+    ``steady=True`` (Studio default) but the leading axis is often **time / snapshots**, not space.
+
+    - If ``t(nt,)`` exists and matches ``K.shape[0]``, treat as a time stack (including ``(nt, nx)``
+      when ``nt == nx`` square 2D arrays).
+    - If **no** ``t`` (common in NPZ stacks), use a conservative rule for ``(n0, nx, ny)`` with 1D
+      ``x(nx)``, ``y(ny)``: when ``n0 > max(nx, ny)`` and ``z`` does not look like the coordinate
+      for the leading **spatial** axis, assume ``n0`` is snapshot index and ``vmap`` spatial FD.
+    """
+    if not cfg.steady or K.ndim < 2:
+        return False
+    K = jnp.asarray(K)
+    n0 = int(K.shape[0])
+    t = _get_coord(m, cfg, "t")
+    if t is not None:
+        ta = jnp.asarray(t)
+        if ta.ndim == 1 and int(ta.shape[0]) == n0:
+            if K.ndim >= 3:
+                return True
+            # 2D (nt, nx): treat as time stack when t matches leading dim and x matches second dim,
+            # including square (n, n) where nt == nx (previously excluded and mis-handled as 2D spatial).
+            if K.ndim == 2:
+                x = _get_coord(m, cfg, "x")
+                return _coerce_1d_axis_vector(x, int(K.shape[1])) is not None
+        return False
+
+    # No ``t`` (or wrong length): snapshot stack heuristic for 3D-shaped arrays
+    if K.ndim == 3:
+        z = _get_coord(m, cfg, "z")
+        if z is not None:
+            zc_n0 = _coerce_1d_axis_vector(z, n0)
+            if zc_n0 is not None:
+                # z aligns with leading dim → first axis is a spatial direction, not snapshots
+                return False
+        nx, ny = int(K.shape[1]), int(K.shape[2])
+        x = _get_coord(m, cfg, "x")
+        y = _get_coord(m, cfg, "y")
+        if _coerce_1d_axis_vector(x, nx) is None or _coerce_1d_axis_vector(y, ny) is None:
+            return False
+        mxy = max(nx, ny)
+        mnx = min(nx, ny)
+        if mxy == 0:
+            return False
+        # Many snapshots (nt >> nx) OR short stacks (nt < min in-plane) vs a full spatial brick
+        return n0 > mxy or n0 < mnx
+
+    if K.ndim == 2 and int(K.shape[0]) != int(K.shape[1]):
+        nx = int(K.shape[1])
+        x = _get_coord(m, cfg, "x")
+        if _coerce_1d_axis_vector(x, nx) is None:
+            return False
+        return n0 > nx
+
+    return False
+
+
 def _fill_spatial_derivative(
     K: jnp.ndarray,
     deriv_axis: str,
@@ -220,6 +333,19 @@ def _fill_spatial_derivative(
     x, y, z = _get_coord(m, cfg, "x"), _get_coord(m, cfg, "y"), _get_coord(m, cfg, "z")
     steady = cfg.steady
     dim = _infer_spatial_dim(K, steady, cfg.spatial_dimension)
+
+    if steady and _is_steady_leading_time_stack(K, cfg, m):
+        dim_s = _infer_spatial_dim(jnp.asarray(K[0]), True, cfg.spatial_dimension)
+
+        def _slice_fill(Ks: jnp.ndarray) -> jnp.ndarray:
+            return _fill_spatial_derivative_steady(
+                Ks, deriv_axis, cfg, x, y, z, dim_s, []
+            )
+
+        first = _slice_fill(K[0])
+        if first is None:
+            return None
+        return jax.vmap(_slice_fill)(K)
 
     if not steady:
         if K.ndim < 2:
@@ -242,6 +368,41 @@ def _fill_spatial_derivative(
         return jax.vmap(_slice_fill)(K)
 
     return _fill_spatial_derivative_steady(K, deriv_axis, cfg, x, y, z, dim, warnings)
+
+
+def _align_1d_field_and_coord(
+    K: jnp.ndarray,
+    c: Optional[jnp.ndarray],
+    warnings: List[str],
+    context: str,
+) -> Optional[Tuple[jnp.ndarray, jnp.ndarray, Tuple[int, ...]]]:
+    """
+    For 1D meshgrid FD, allow ``field`` and ``x`` to differ in shape if sizes match
+    (e.g. ``(N,)`` vs ``(N, 1)``), then ravel for ``jnp.gradient``-style ops.
+    Returns ``(K1, c1, original_K_shape)``.
+    """
+    if c is None:
+        warnings.append(f"{context}: missing x coordinate")
+        return None
+    K_a, c_a = jnp.asarray(K), jnp.asarray(c)
+    if K_a.size == 0:
+        warnings.append(f"{context}: empty field")
+        return None
+    orig_shape = tuple(int(s) for s in K_a.shape)
+    if K_a.shape == c_a.shape:
+        if K_a.ndim == 1:
+            return K_a, c_a, orig_shape
+        # (N, 1), (1, N), etc.: same shape as coord but need 1D vectors for jnp.gradient.
+        if min(int(s) for s in K_a.shape) == 1:
+            return jnp.reshape(K_a, (-1,)), jnp.reshape(c_a, (-1,)), orig_shape
+        return K_a, c_a, orig_shape
+    if K_a.size != c_a.size:
+        warnings.append(
+            f"{context}: x and field must match shape or total size "
+            f"(got field {K_a.shape}, x {c_a.shape})"
+        )
+        return None
+    return jnp.reshape(K_a, (-1,)), jnp.reshape(c_a, (-1,)), orig_shape
 
 
 def _fill_spatial_derivative_steady(
@@ -272,17 +433,27 @@ def _fill_spatial_derivative_steady(
             return None
         return grads[axis_index]
 
-    # meshgrid: coordinate arrays same shape as K
+    # meshgrid: coordinate arrays same shape as K (or same size — ravel)
     if dim == 1:
-        c = x
-        if c is None or c.shape != K.shape:
-            warnings.append("meshgrid 1D: need x same shape as field")
+        aligned = _align_1d_field_and_coord(K, x, warnings, "meshgrid 1D")
+        if aligned is None:
             return None
-        return _grad_1d_nonuniform(K, c)
+        K1, c1, orig_shape = aligned
+        out = _grad_1d_nonuniform(K1, c1)
+        return jnp.reshape(out, orig_shape)
     rect1d = _rectilinear_meshgrid_1d_axes(K, x, y, z, dim)
     if rect1d is not None:
         try:
             grads = _jnp_gradient_multi(K, rect1d)
+        except Exception as e:  # noqa: BLE001
+            warnings.append(f"jnp.gradient failed: {e}")
+            return None
+        return grads[axis_index]
+
+    sep_axes = _meshgrid_separable_axis_coords(K, x, y, z, dim)
+    if sep_axes is not None:
+        try:
+            grads = _jnp_gradient_multi(K, sep_axes)
         except Exception as e:  # noqa: BLE001
             warnings.append(f"jnp.gradient failed: {e}")
             return None

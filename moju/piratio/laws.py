@@ -109,12 +109,26 @@ class Laws:
         :param fo: Fourier number from Groups.fo(alpha, t, L).
         :param t: Elapsed time [s].
         :param L: Characteristic length [m].
-        :return: Scalar residual.
+        :return: Residual, same broadcast shape as ``T_t`` / ``T_laplacian`` / ``alpha``.
+
+        When ``t`` is ``(n_t,)`` but fields are ``(n_t, n_x, ...)``, ``alpha`` is broadcast over
+        trailing spatial axes (elementwise PDE residual on the grid).
 
         Use case: Pure heat conduction in solids or static fluids.
         """
         alpha = fo * (L**2) / t
-        return T_t - alpha * T_laplacian
+        tt = jnp.asarray(T_t)
+        lap = jnp.asarray(T_laplacian)
+        a = jnp.asarray(alpha)
+        target_ndim = max(tt.ndim, lap.ndim, a.ndim)
+        if tt.ndim < target_ndim:
+            tt = jnp.reshape(tt, tt.shape + (1,) * (target_ndim - tt.ndim))
+        if lap.ndim < target_ndim:
+            lap = jnp.reshape(lap, lap.shape + (1,) * (target_ndim - lap.ndim))
+        if a.ndim < target_ndim:
+            a = jnp.reshape(a, a.shape + (1,) * (target_ndim - a.ndim))
+        tt, a, lap = jnp.broadcast_arrays(tt, a, lap)
+        return tt - a * lap
 
     @staticmethod
     @jax.jit

@@ -72,6 +72,7 @@ def build_audit_spec_dict(
     invariance_pi_constant: bool = False,
     invariance_compare_keys: Optional[Sequence[str]] = None,
     invariance_scale_c: float = 10.0,
+    chain_output: str = "state_derivative",
 ) -> Dict[str, Any]:
     """Build a JSON-compatible dict for MonitorConfig.from_dict (constitutive or scaling row)."""
     d: Dict[str, Any] = {
@@ -83,6 +84,7 @@ def build_audit_spec_dict(
         "closure_mode": str(closure_mode),
         "quadrature_weights": dict(quadrature_weights or {}),
         "chain_spatial_axes": list(chain_spatial_axes or ["x"]),
+        "chain_output": str(chain_output),
         "invariance_pi_constant": bool(invariance_pi_constant),
         "invariance_compare_keys": list(invariance_compare_keys or []),
         "invariance_scale_c": float(invariance_scale_c),
@@ -121,9 +123,9 @@ def merge_simple_config_with_json_override(
 ) -> Dict[str, Any]:
     """
     Start from ``simple`` fragment. For each of ``laws``, ``groups``, ``constitutive_audit``,
-    and ``scaling_audit``, if that key is present in the parsed override JSON, the override
-    list replaces the form-built list (including explicit ``[]``). ``constants`` are
-    shallow-merged; ``primary_fields`` are replaced if present in the override.
+    ``scaling_audit``, and ``derived_state_chain``, if that key is present in the parsed
+    override JSON, the override list replaces the form-built list (including explicit ``[]``).
+    ``constants`` are shallow-merged; ``primary_fields`` are replaced if present in the override.
     """
     out = {
         "laws": list(simple.get("laws") or []),
@@ -132,6 +134,8 @@ def merge_simple_config_with_json_override(
         "scaling_audit": list(simple.get("scaling_audit") or []),
         "constants": dict(simple.get("constants") or {}),
         "primary_fields": list(simple.get("primary_fields") or []),
+        "derived_state_chain": list(simple.get("derived_state_chain") or []),
+        "law_implied_audits": bool(simple.get("law_implied_audits", True)),
     }
     raw = (override_json or "").strip()
     if not raw:
@@ -140,7 +144,7 @@ def merge_simple_config_with_json_override(
     if not isinstance(j, dict):
         raise ValueError("JSON override must be an object")
 
-    for key in ("laws", "groups", "constitutive_audit", "scaling_audit"):
+    for key in ("laws", "groups", "constitutive_audit", "scaling_audit", "derived_state_chain"):
         if key in j and j[key] is not None:
             out[key] = list(j[key])
 
@@ -151,6 +155,9 @@ def merge_simple_config_with_json_override(
 
     if "primary_fields" in j and j["primary_fields"] is not None:
         out["primary_fields"] = list(j["primary_fields"])
+
+    if "law_implied_audits" in j and j["law_implied_audits"] is not None:
+        out["law_implied_audits"] = bool(j["law_implied_audits"])
 
     return out
 
@@ -170,9 +177,16 @@ def preflight_checklist_text(
     required_state: Sequence[str],
     required_deriv: Sequence[str],
     npz_keys: Sequence[str],
+    *,
+    available_keys: Optional[Sequence[str]] = None,
 ) -> str:
-    """Human-readable checklist for download."""
-    nk = set(npz_keys)
+    """Human-readable checklist for download.
+
+    If ``available_keys`` is set (e.g. dependency planner ``effective_available_keys``), ``[x]``
+    marks keys present in NPZ **or** Constants (plus alias expansion). Otherwise only ``npz_keys``
+    are used for checkmarks.
+    """
+    nk = set(available_keys) if available_keys is not None else set(npz_keys)
     lines = ["# Moju Studio preflight checklist", ""]
     lines.append("## Required state keys")
     for k in sorted(required_state):
@@ -181,4 +195,28 @@ def preflight_checklist_text(
     lines.append("## Required derivative keys (for configured audits)")
     for k in sorted(required_deriv):
         lines.append(f"- {'[x]' if k in nk else '[ ]'} {k}")
+    lines.append("")
+    if available_keys is not None:
+        lines.append(
+            "_Checkmarks use merged **NPZ ∪ Constants** key names (with built-in aliases to canonical keys)._"
+        )
+    else:
+        lines.append(
+            "_Checkmarks use **NPZ keys only**; pass ``available_keys`` from the dependency planner to include Constants._"
+        )
     return "\n".join(lines)
+
+
+def preflight_checklist_with_dependency_plan(
+    required_state: Sequence[str],
+    required_deriv: Sequence[str],
+    npz_keys: Sequence[str],
+    plan_markdown: str,
+    *,
+    available_keys: Optional[Sequence[str]] = None,
+) -> str:
+    """Append Studio dependency planner output (markdown) to the downloadable checklist."""
+    base = preflight_checklist_text(
+        required_state, required_deriv, npz_keys, available_keys=available_keys
+    )
+    return f"{base}\n\n## Dependency planner (FD / aliases)\n\n{plan_markdown.strip()}\n"

@@ -7,6 +7,12 @@ This module standardizes constitutive + scaling/similarity audits around 4 closu
   3) chain_dx / chain_dy / chain_dz: same chain rule along spatial axes x, y, z (keys d_<k>_dx, etc.)
   4) chain_dt:  d/dt[F(phi)] - sum_i (dF/dphi_i) * dphi_i/dt
 
+  **Chain residual (pointwise):** ``LHS - RHS`` with
+  ``RHS = sum_i (dF/dphi_i) * (d phi_i / d axis)`` (JAX grad on ``F`` w.r.t. primitive args) and
+  ``LHS`` either (default) ``d_<output_key>/d(axis)`` from merged state (usually Path B FD on the
+  group/model output field), or (``chain_output="fd_on_composition"``) a finite-difference derivative
+  of ``F(*args)`` along the mesh using coordinate ``x`` / ``t`` / etc. from state.
+
 Notes:
   - Path A vs Path B: monitor may build derivatives (Path A) or accept them (Path B).
     Chain closures consume d_<state_key>_dx, _dy, _dz, _dt per AuditSpec.chain_spatial_axes / predicted_*.
@@ -139,6 +145,66 @@ def compute_implied_delta(
         return None
 
 
+def _composition_lhs_fd(
+    F: jnp.ndarray,
+    state_pred: Dict[str, Any],
+    constants: Dict[str, Any],
+    deriv: str,
+) -> Optional[jnp.ndarray]:
+    """
+    Finite-difference ``dF/d(axis)`` for composed output ``F`` using mesh coords in state.
+
+    Supported layouts (conservative): 1D ``F``; or leading time ``(n_t, ...)`` with ``t(n_t,)``;
+    or trailing spatial ``(..., n_x)`` with ``x(n_x,)``. Returns ``None`` if coord missing or
+    shape mismatch.
+    """
+    from moju.monitor.path_b_derivatives import _grad_1d_nonuniform
+
+    F = jnp.asarray(F)
+    if F.ndim == 0:
+        return jnp.zeros_like(F)
+
+    if deriv == "t":
+        t = _val(state_pred, constants, "t")
+        if t is None:
+            return None
+        ta = jnp.asarray(t).reshape(-1)
+        if int(F.shape[0]) != int(ta.shape[0]):
+            return None
+        if F.ndim == 1:
+            return jnp.asarray(_grad_1d_nonuniform(F, ta))
+        cols = [
+            jnp.asarray(_grad_1d_nonuniform(F[:, j], ta)) for j in range(int(F.shape[1]))
+        ]
+        return jnp.stack(cols, axis=1)
+
+    if deriv in ("x", "y", "z"):
+        key = {"x": "x", "y": "y", "z": "z"}[deriv]
+        c = _val(state_pred, constants, key)
+        if c is None:
+            return None
+        ca = jnp.asarray(c).reshape(-1)
+        n = int(ca.shape[0])
+        if int(F.shape[-1]) == n:
+            if F.ndim == 1:
+                return jnp.asarray(_grad_1d_nonuniform(F, ca))
+            rows = [
+                jnp.asarray(_grad_1d_nonuniform(F[i], ca)) for i in range(int(F.shape[0]))
+            ]
+            return jnp.stack(rows, axis=0)
+        # e.g. (nx, ny) with x length nx — vary along axis 0
+        if F.ndim >= 2 and int(F.shape[0]) == n:
+            if F.ndim == 2:
+                cols = [
+                    jnp.asarray(_grad_1d_nonuniform(F[:, j], ca))
+                    for j in range(int(F.shape[1]))
+                ]
+                return jnp.stack(cols, axis=1)
+        return None
+
+    return None
+
+
 def compute_chain(
     *,
     fn: Callable[..., Any],
@@ -149,14 +215,16 @@ def compute_chain(
     constants: Dict[str, Any],
     predicted_varying: List[str],
     deriv: str,  # "x", "y", "z", or "t"
+    chain_output: str = "state_derivative",
 ) -> Optional[jnp.ndarray]:
     # Only compute when at least one input is varying (per plan).
     if not predicted_varying:
         return None
 
-    d_out = state_pred.get(_deriv_key(output_key, deriv))
-    if d_out is None:
-        return None
+    if chain_output not in ("state_derivative", "fd_on_composition"):
+        raise ValueError(
+            f"chain_output must be 'state_derivative' or 'fd_on_composition', got {chain_output!r}"
+        )
 
     args: List[jnp.ndarray] = []
     d_args: List[jnp.ndarray] = []
@@ -176,11 +244,23 @@ def compute_chain(
         else:
             d_args.append(jnp.asarray(0.0))
 
+    if chain_output == "state_derivative":
+        d_out = state_pred.get(_deriv_key(output_key, deriv))
+        if d_out is None:
+            return None
+        d_out_arr = jnp.asarray(d_out)
+    else:
+        F_eval = fn(*args)
+        lhs = _composition_lhs_fd(jnp.asarray(F_eval), state_pred, constants, deriv)
+        if lhs is None:
+            return None
+        d_out_arr = jnp.asarray(lhs)
+
     grads = _grad_wrt_args(fn, args)
     rhs = jnp.asarray(0.0)
     for g, dv in zip(grads, d_args):
         rhs = rhs + g * dv
-    return jnp.asarray(d_out) - rhs
+    return jnp.asarray(d_out_arr) - rhs
 
 
 def _broadcast_weights_for_residual(
@@ -233,6 +313,7 @@ def compute_chain_weak(
     predicted_varying: List[str],
     deriv: str,  # "x" or "t"
     weight_key: Optional[str] = None,
+    chain_output: str = "state_derivative",
 ) -> Optional[jnp.ndarray]:
     """
     Weak-form / integrated variant of chain closure.
@@ -249,6 +330,7 @@ def compute_chain_weak(
         constants=constants,
         predicted_varying=predicted_varying,
         deriv=deriv,
+        chain_output=chain_output,
     )
     if r is None:
         return None
@@ -259,17 +341,17 @@ def compute_chain_weak(
     else:
         wv = None
     if wv is None:
-        # uniform weights
-        return jnp.sqrt(jnp.mean(rr))
+        # uniform weights (ignore NaN cells in residual)
+        return jnp.sqrt(jnp.nanmean(rr))
 
     w = jnp.asarray(wv)
     wb = _broadcast_weights_for_residual(jnp.asarray(r), w=w, deriv=deriv)
     if wb is None:
         # If weights shape doesn't match our minimal structured conventions, fall back to uniform.
-        return jnp.sqrt(jnp.mean(rr))
+        return jnp.sqrt(jnp.nanmean(rr))
 
-    num = jnp.sum(wb * rr)
-    den = jnp.sum(wb)
+    num = jnp.nansum(wb * rr)
+    den = jnp.nansum(wb)
     den = jnp.where(den > 0, den, 1.0)
     return jnp.sqrt(num / den)
 

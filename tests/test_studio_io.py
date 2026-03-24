@@ -134,3 +134,8 @@ def test_studio_core_laplace_path_b():
     assert any(k.startswith("laws/") for k in flat)
     miss_s, _miss_d = preflight_engine(engine, set(pred.keys()))
     assert not miss_s
+
+    from apps.moju_studio.studio_core import preflight_engine_with_available_keys
+
+    miss2, _ = preflight_engine_with_available_keys(engine, set(pred.keys()))
+    assert miss2 == miss_s

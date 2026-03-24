@@ -211,6 +211,63 @@ class Models:
 
     @staticmethod
     @jax.jit
+    def mass_diffusivity(fo_mass, t, L):
+        """
+        Mass diffusivity recovered from Fourier number for mass.
+
+        :param fo_mass: Mass Fourier number from Groups.fo_mass(D, t, L).
+        :param t: Elapsed time [s].
+        :param L: Characteristic length [m].
+        :return: Mass diffusivity D [m^2/s].
+        """
+        return fo_mass * (L**2) / t
+
+    @staticmethod
+    @jax.jit
+    def wave_speed_from_st(omega, L, st_wave):
+        """
+        Wave speed from wave Strouhal definition.
+
+        :param omega: Angular frequency [rad/s].
+        :param L: Characteristic length [m].
+        :param st_wave: Wave Strouhal number from Groups.st_wave(omega, L, c).
+        :return: Wave speed c [m/s].
+        """
+        return (omega * L) / st_wave
+
+    @staticmethod
+    @jax.jit
+    def dynamic_viscosity_from_re(rho, u, L, re):
+        """
+        Dynamic viscosity from Reynolds number definition using local speed magnitude.
+
+        :param rho: Density [kg/m^3].
+        :param u: Velocity vector [m/s] or scalar speed.
+        :param L: Characteristic length [m].
+        :param re: Reynolds number.
+        :return: Dynamic viscosity mu [Pa*s].
+        """
+        u_arr = jnp.asarray(u)
+        u_mag = jnp.abs(u_arr) if u_arr.ndim == 0 else jnp.sqrt(jnp.sum(u_arr**2, axis=-1))
+        return (jnp.asarray(rho) * u_mag * jnp.asarray(L)) / (jnp.asarray(re) + 1e-30)
+
+    @staticmethod
+    @jax.jit
+    def scalar_diffusivity_from_pe(u, L, pe):
+        """
+        Effective scalar diffusivity from Peclet number definition.
+
+        :param u: Velocity vector [m/s] or scalar speed.
+        :param L: Characteristic length [m].
+        :param pe: Peclet number.
+        :return: Effective diffusivity kappa [m^2/s].
+        """
+        u_arr = jnp.asarray(u)
+        u_mag = jnp.abs(u_arr) if u_arr.ndim == 0 else jnp.sqrt(jnp.sum(u_arr**2, axis=-1))
+        return (u_mag * jnp.asarray(L)) / (jnp.asarray(pe) + 1e-30)
+
+    @staticmethod
+    @jax.jit
     def arrhenius_rate(A, Ea, T, R=8.314):
         """
         Arrhenius reaction rate constant vs temperature.

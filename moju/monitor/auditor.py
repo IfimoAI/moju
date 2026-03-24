@@ -4,7 +4,7 @@ ResidualEngine: residuals for governing laws, constitutive, and scaling/similari
 - compute_residuals(state_pred, state_ref=None, *, log_to_python=True)
 - build_loss: cascaded RMS over laws only (training).
 - audit / visualize: same metrics (RMS, R_norm, admissibility) for all residual keys;
-  visualize builds a multi-panel matplotlib dashboard (no extra user data required).
+  visualize builds training/test dashboards (optional spatial law panel for x slices).
 
 Constitutive and scaling/similarity audits are tied to Models.* and Groups.* functions via
 standard closure types (ref_delta, implied_delta, chain_dx/chain_dy/chain_dz, chain_dt). Metrics are consistency
@@ -14,7 +14,8 @@ indicators, not certification.
 from __future__ import annotations
 
 import datetime
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Union
+import math
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Union
 
 import jax
 import jax.numpy as jnp
@@ -29,24 +30,91 @@ from moju.monitor.closure_registry import (
     compute_implied_delta,
     compute_ref_delta,
 )
+from moju.monitor.derived_state_chain import all_ref_keys_from_chain, keys_produced_by_chain
 from moju.monitor.derivative_keys import CHAIN_SPATIAL_DERIVS, collect_audit_derivative_keys
 from moju.monitor.pi_constant_recipes import (
     GROUP_PI_CONSTANT_RECIPES,
     apply_pi_constant_recipe,
 )
+from moju.monitor.law_implied_diagnostics import (
+    merge_fragment_law_implied_audit_specs,
+    merge_law_implied_audit_specs,
+)
+from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
+
+DEFAULT_VISUALIZE_TITLE_TRAINING = "Physics admissibility audit (model training)"
+DEFAULT_VISUALIZE_TITLE_TEST = "State prediction audit (physics residuals)"
+
+
+def _resolve_visualize_figure_title(mode: str, figure_title: Optional[str]) -> str:
+    """Figure title for :func:`visualize`; non-empty ``figure_title`` overrides mode default."""
+    if figure_title is not None and str(figure_title).strip():
+        return str(figure_title).strip()
+    if mode == "training":
+        return DEFAULT_VISUALIZE_TITLE_TRAINING
+    return DEFAULT_VISUALIZE_TITLE_TEST
+
+
+def _state_key_suggests_law_fd_fill(key: str) -> bool:
+    """True if missing key may be fillable via fill_law_fd (derived law input)."""
+    if key.endswith("_laplacian") or key.endswith("_grad") or key.endswith("_tt"):
+        return True
+    if key.endswith("_t") and not key.endswith("_tt"):
+        return True
+    return key == "u_grad"
+
+
+def _string_placeholder_like(v: Any, *, key: str, arg_name: str) -> bool:
+    """Best-effort check for UI placeholders accidentally saved as strings."""
+    if not isinstance(v, str):
+        return False
+    s = v.strip()
+    if not s:
+        return True
+    low = s.lower()
+    if low in {"none", "null", "nan", "na"}:
+        return True
+    return s == key or s == arg_name
 
 
 def _kwargs_from_state(
-    state: Dict[str, Any], constants: Dict[str, Any], state_map: Dict[str, str]
+    state: Dict[str, Any],
+    constants: Dict[str, Any],
+    state_map: Dict[str, str],
+    *,
+    law_context: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build kwargs for a law/group from state_map (arg_name -> state_key)."""
     out = {}
     for arg_name, key in state_map.items():
         val = state.get(key)
+        if _string_placeholder_like(val, key=key, arg_name=str(arg_name)):
+            val = None
         if val is None:
             val = constants.get(key)
+            if _string_placeholder_like(val, key=key, arg_name=str(arg_name)):
+                val = None
         if val is None:
-            raise KeyError(f"Key {key!r} not found in state or constants (arg {arg_name})")
+            msg = f"Key {key!r} not found in state or constants (arg {arg_name})"
+            if law_context is not None:
+                msg += f" (law {law_context!r})"
+                if _state_key_suggests_law_fd_fill(key):
+                    msg += (
+                        " — on Path B, enable auto_path_b_derivatives=True and fill_law_fd=True, "
+                        "provide the primitive field (e.g. T for T_laplacian) and mesh coordinates "
+                        "(x, and y/z/t as needed); see moju.monitor.law_fd_recipes.LAW_FD_RECIPES. "
+                        "The engine does not rename NPZ keys: use key `T` (or change law state_map), "
+                        "not only Studio alias hints."
+                    )
+            raise KeyError(msg)
+        if isinstance(val, str):
+            msg = (
+                f"Key {key!r} resolved to string value {val!r} (arg {arg_name})"
+                " but laws expect numeric array-like inputs."
+            )
+            if law_context is not None:
+                msg += f" (law {law_context!r})"
+            raise TypeError(msg)
         out[arg_name] = val
     return out
 
@@ -64,7 +132,7 @@ def _build_state(
 ) -> Dict[str, Any]:
     """Run group specs in order; write output_key into state."""
     state = dict(state_pred)
-    merged = {**state, **constants}
+    merged = {**constants, **state}
     for spec in groups_spec:
         state_map = spec["state_map"]
         output_key = spec["output_key"]
@@ -76,10 +144,15 @@ def _build_state(
 
 
 def _rms_scalar(x: jnp.ndarray) -> jnp.ndarray:
-    return jnp.sqrt(jnp.mean(x**2))
+    a = jnp.asarray(x)
+    if a.size == 0:
+        return jnp.asarray(float("nan"))
+    return jnp.sqrt(jnp.nanmean(jnp.square(a)))
 
 
 def admissibility_level(score: float) -> str:
+    if not math.isfinite(score):
+        return "Unknown"
     if score >= 0.90:
         return "High Admissibility"
     if score >= 0.70:
@@ -87,6 +160,26 @@ def admissibility_level(score: float) -> str:
     if score >= 0.40:
         return "Low Admissibility"
     return "Non-Admissible"
+
+
+def _geom_mean_admissibility(values: Sequence[float]) -> float:
+    """
+    Geometric mean over finite scores only. If any finite value is <= 0, returns 0.0.
+    If no finite values, returns NaN.
+    """
+    finite: List[float] = []
+    for x in values:
+        try:
+            xf = float(x)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(xf):
+            finite.append(xf)
+    if not finite:
+        return float("nan")
+    if min(finite) <= 0.0:
+        return 0.0
+    return float(math.exp(sum(math.log(x) for x in finite) / len(finite)))
 
 
 def _rms_per_key(
@@ -165,7 +258,15 @@ def _state_derived_scale_per_key(
             continue
         if prefix == "constitutive":
             name = rest.split("/")[0]
-            spec = next((s for s in constitutive_audit if s.get("name") == name), None)
+            spec = next(
+                (
+                    s
+                    for s in constitutive_audit
+                    if s.get("name") == name
+                    or (s.get("residual_basename") or "").split("/")[0] == name
+                ),
+                None,
+            )
             if spec is None:
                 scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
             else:
@@ -189,7 +290,15 @@ def _state_derived_scale_per_key(
             continue
         if prefix == "scaling":
             name = rest.split("/")[0]
-            spec = next((s for s in scaling_audit if s.get("name") == name), None)
+            spec = next(
+                (
+                    s
+                    for s in scaling_audit
+                    if s.get("name") == name
+                    or (s.get("residual_basename") or "").split("/")[0] == name
+                ),
+                None,
+            )
             if spec is None:
                 scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
             else:
@@ -274,10 +383,21 @@ def _compute_log_step_metrics(
                 scale_k = first_rms[k]
             else:
                 scale_k = 1.0
-            if scale_k <= 0:
+            if scale_k <= 0 or not math.isfinite(float(scale_k)):
                 scale_k = 1.0
-            r_norm[k] = v / scale_k
-            admissibility[k] = 1.0 / (1.0 + r_norm[k])
+            try:
+                v_f = float(v)
+            except (TypeError, ValueError):
+                v_f = float("nan")
+            if not math.isfinite(v_f):
+                r_norm[k] = float("nan")
+                admissibility[k] = float("nan")
+            else:
+                r_norm[k] = v_f / scale_k
+                if not math.isfinite(r_norm[k]):
+                    admissibility[k] = float("nan")
+                else:
+                    admissibility[k] = 1.0 / (1.0 + r_norm[k])
             per_key_report[k] = {
                 "rms": v,
                 "r_norm": r_norm[k],
@@ -294,20 +414,15 @@ def _compute_log_step_metrics(
         for cat, keys in category_keys.items():
             if not keys:
                 continue
-            gm = 1.0
-            for kk in keys:
-                gm *= float(admissibility.get(kk, 0.0)) ** (1.0 / len(keys))
-            category_scores[cat] = gm
+            vals = [float(admissibility[kk]) for kk in keys]
+            cat_gm = _geom_mean_admissibility(vals)
+            if math.isfinite(cat_gm):
+                category_scores[cat] = cat_gm
         cats_present = list(category_scores.keys())
         if not cats_present:
             overall = float("nan")
-        elif len(cats_present) == 1:
-            overall = category_scores[cats_present[0]]
         else:
-            gm = 1.0
-            for cat in cats_present:
-                gm *= float(category_scores[cat]) ** (1.0 / len(cats_present))
-            overall = gm
+            overall = _geom_mean_admissibility([float(category_scores[c]) for c in cats_present])
         out.append(
             {
                 "r_norm": r_norm,
@@ -336,8 +451,9 @@ def audit(
 
     Reporting uses three levels (no extra aggregation API): (1) per residual key in
     ``per_key``; (2) geometric mean within each category — ``per_category`` keys
-    ``laws``, ``constitutive``, ``scaling``, ``data``; (3) overall score — geometric mean of
-    the category scores that are present.
+    ``laws``, ``constitutive``, ``scaling``, ``data`` — using **finite** per-key
+    admissibility only (non-finite keys are skipped; empty categories omitted); (3) overall
+    score — geometric mean of **finite** category scores only.
     """
     if not log:
         return {"per_key": {}, "overall_admissibility_score": 0.0, "overall_admissibility_level": "Non-Admissible"}
@@ -382,16 +498,6 @@ def audit(
     return report
 
 
-def _closure_kind_for_key(flat_key: str) -> Optional[str]:
-    """Last path segment for constitutive/scaling keys (e.g. chain_dx, ref_delta)."""
-    parts = flat_key.split("/")
-    if len(parts) < 2:
-        return None
-    if parts[0] not in ("constitutive", "scaling"):
-        return None
-    return parts[-1]
-
-
 def _keys_by_category(plot_keys: Sequence[str]) -> Dict[str, List[str]]:
     order = ("laws", "constitutive", "scaling", "data")
     buckets: Dict[str, List[str]] = {c: [] for c in order}
@@ -404,11 +510,85 @@ def _keys_by_category(plot_keys: Sequence[str]) -> Dict[str, List[str]]:
     return buckets
 
 
+def _parse_spatial_law_panel(spatial_law_panel: Optional[Any]) -> Optional[Dict[str, Any]]:
+    """
+    Validate optional spatial panel: ``{"x": 1D, "values": {law_key: 1D same length}}``.
+
+    Law keys may be bare names or ``laws/<name>``. Returns ``x``, ``Z`` (n_laws × n_x),
+    and ``row_labels`` (pretty strings) or ``None`` if invalid.
+    """
+    if spatial_law_panel is None:
+        return None
+    if not isinstance(spatial_law_panel, Mapping):
+        return None
+    x = spatial_law_panel.get("x")
+    values = spatial_law_panel.get("values")
+    if x is None or values is None or not isinstance(values, Mapping):
+        return None
+    import numpy as np
+
+    x_arr = np.asarray(x, dtype=float).ravel()
+    rows: List[Any] = []
+    labels: List[str] = []
+    for k in sorted(values.keys()):
+        v = values[k]
+        arr = np.asarray(v, dtype=float).ravel()
+        if arr.shape != x_arr.shape:
+            return None
+        rows.append(arr)
+        lk = str(k)
+        flat = lk if lk.startswith("laws/") else f"laws/{lk}"
+        labels.append(pretty_residual_key(flat))
+    if not rows:
+        return None
+    pos_ax = spatial_law_panel.get("position_axis")
+    out: Dict[str, Any] = {"x": x_arr, "Z": np.stack(rows, axis=0), "row_labels": labels}
+    if pos_ax is not None and str(pos_ax).strip():
+        out["position_axis"] = str(pos_ax).strip()
+    return out
+
+
+def _parse_spatial_rnorm_panel(spatial_rnorm_panel: Optional[Any]) -> Optional[Dict[str, Any]]:
+    """
+    Validate optional R_norm spatial panel: ``{"x": 1D, "values": {flat_key: 1D}}``.
+    """
+    if spatial_rnorm_panel is None:
+        return None
+    if not isinstance(spatial_rnorm_panel, Mapping):
+        return None
+    x = spatial_rnorm_panel.get("x")
+    values = spatial_rnorm_panel.get("values")
+    if x is None or values is None or not isinstance(values, Mapping):
+        return None
+    import numpy as np
+
+    x_arr = np.asarray(x, dtype=float).ravel()
+    rows: List[Any] = []
+    labels: List[str] = []
+    for k in sorted(values.keys()):
+        arr = np.asarray(values[k], dtype=float).ravel()
+        if arr.shape != x_arr.shape:
+            return None
+        rows.append(arr)
+        labels.append(pretty_residual_key(str(k)))
+    if not rows:
+        return None
+    pos_ax = spatial_rnorm_panel.get("position_axis")
+    out: Dict[str, Any] = {"x": x_arr, "Z": np.stack(rows, axis=0), "row_labels": labels}
+    if pos_ax is not None and str(pos_ax).strip():
+        out["position_axis"] = str(pos_ax).strip()
+    return out
+
+
 def _build_visualize_bundle(
     log: List[Dict[str, Any]],
     keys: Optional[List[str]],
     r_ref: Optional[Dict[str, float]],
     max_legend_keys: int,
+    *,
+    spatial_parsed: Optional[Dict[str, Any]],
+    spatial_rnorm_parsed: Optional[Dict[str, Any]] = None,
+    mode: str,
 ) -> Optional[Dict[str, Any]]:
     """
     Shared arrays and metadata for :func:`visualize` (matplotlib or plotly).
@@ -426,55 +606,65 @@ def _build_visualize_bundle(
     metrics = _compute_log_step_metrics(log, r_ref)
     n = len(log)
     indices = np.arange(n, dtype=float)
-    legend_keys = plot_keys[: max(1, int(max_legend_keys))]
+    cap = max(1, int(max_legend_keys))
+    use_bar_chart = mode == "test" or (mode == "training" and n == 1)
+    bar_keys = plot_keys[: min(48, len(plot_keys))]
+
     buckets = _keys_by_category(plot_keys)
-    ordered_keys: List[str] = []
-    for cat in ("laws", "constitutive", "scaling", "data"):
-        ordered_keys.extend(sorted(buckets[cat]))
-    if not ordered_keys:
-        ordered_keys = list(plot_keys)
-    mat = np.zeros((len(ordered_keys), n))
+    category_training: Dict[str, Dict[str, Any]] = {}
+    cat_order = ("laws", "constitutive") if mode == "training" else ("laws", "constitutive", "scaling")
+    for cat in cat_order:
+        cat_keys = sorted(buckets.get(cat, []))[:cap]
+        nk = len(cat_keys)
+        mat = np.zeros((nk, n)) if nk else np.zeros((0, n))
+        for j in range(n):
+            for i, kk in enumerate(cat_keys):
+                v = metrics[j]["r_norm"].get(kk)
+                mat[i, j] = float(v) if v is not None else float("nan")
+        category_training[cat] = {
+            "keys": cat_keys,
+            "displays": [pretty_residual_key(k) for k in cat_keys],
+            "r_norm_mat": mat,
+        }
+
+    legend_keys = plot_keys[: min(cap, len(plot_keys))]
+    r_norm_mat = np.zeros((len(legend_keys), n))
     for j in range(n):
-        for i, kk in enumerate(ordered_keys):
-            v = metrics[j]["admissibility_score"].get(kk)
-            mat[i, j] = float(v) if v is not None else float("nan")
-    short_labels = [k if len(k) < 42 else k[:39] + "…" for k in ordered_keys]
+        for i, kk in enumerate(legend_keys):
+            v = metrics[j]["r_norm"].get(kk)
+            r_norm_mat[i, j] = float(v) if v is not None else float("nan")
+
+    legend_display = [pretty_residual_key(k) for k in legend_keys]
+    bar_display = [pretty_residual_key(k) for k in bar_keys]
+    bar_values = []
     last_rn = metrics[-1]["r_norm"]
-    ranked = sorted(
-        ((k, float(last_rn[k])) for k in plot_keys if k in last_rn),
-        key=lambda t: t[1],
-        reverse=True,
-    )
-    last_adm = metrics[-1]["admissibility_score"]
-    kind_vals: Dict[str, List[float]] = {}
-    for k in plot_keys:
-        kind = _closure_kind_for_key(k)
-        if kind is None:
-            continue
-        if k in last_adm:
-            kind_vals.setdefault(kind, []).append(float(last_adm[k]))
-    kinds_order = (
-        sorted(kind_vals.keys(), key=lambda x: (-len(kind_vals[x]), x)) if kind_vals else []
-    )
-    means_closure = [float(np.mean(kind_vals[kk])) for kk in kinds_order]
-    om = [len(e.get("omitted") or []) for e in log]
-    inf = [len(e.get("inferred") or []) for e in log]
-    top5 = [k for k, _ in ranked[:5]] if ranked else plot_keys[:5]
+    for kk in bar_keys:
+        v = last_rn.get(kk)
+        bar_values.append(float(v) if v is not None else float("nan"))
+    bar_values_arr = np.asarray(bar_values, dtype=float)
+
     cat_colors = {
-        "laws": "#1f77b4",
-        "constitutive": "#ff7f0e",
-        "scaling": "#2ca02c",
-        "data": "#9467bd",
+        "laws": "#4e79a7",
+        "constitutive": "#f28e2b",
+        "scaling": "#59a14f",
+        "data": "#b07aa1",
     }
     last_cat = metrics[-1]["category_admissibility_score"]
     cats_fin = [
-        (c, float(last_cat[c]))
+        (pretty_category_name(c), float(last_cat[c]))
         for c in cat_colors
         if c in last_cat and np.isfinite(last_cat[c])
     ]
-    rms_title = "RMS per key"
-    if len(plot_keys) > len(legend_keys):
-        rms_title = f"RMS per key (showing {len(legend_keys)} of {len(plot_keys)} keys)"
+    nr_title = "Normalized Residuals"
+    if not use_bar_chart and len(plot_keys) > len(legend_keys):
+        nr_title = f"Normalized Residuals (showing {len(legend_keys)} of {len(plot_keys)} keys)"
+
+    category_titles = {
+        "laws": "Normalized Governing Laws Residuals",
+        "constitutive": "Normalized Constitutive Residuals",
+        "scaling": "Normalized Scaling Residuals",
+    }
+
     return {
         "log": log,
         "metrics": metrics,
@@ -482,22 +672,132 @@ def _build_visualize_bundle(
         "indices": indices,
         "plot_keys": plot_keys,
         "legend_keys": legend_keys,
-        "buckets": buckets,
-        "ordered_keys": ordered_keys,
-        "mat": mat,
-        "short_labels": short_labels,
-        "ranked": ranked,
-        "kind_vals": kind_vals,
-        "kinds_order": kinds_order,
-        "means_closure": means_closure,
-        "om": om,
-        "inf": inf,
-        "top5": top5,
+        "legend_display": legend_display,
+        "r_norm_mat": r_norm_mat,
+        "category_training": category_training,
+        "category_titles": category_titles,
+        "use_bar_chart": use_bar_chart,
+        "bar_keys": bar_keys,
+        "bar_display": bar_display,
+        "bar_values": bar_values_arr,
+        "overall_adm": [float(metrics[i]["overall_admissibility_score"]) for i in range(n)],
         "cats_fin": cats_fin,
-        "rms_title": rms_title,
         "cat_colors": cat_colors,
+        "spatial": spatial_parsed,
+        "spatial_rnorm": spatial_rnorm_parsed,
+        "mode": mode,
+        "nr_title": nr_title,
         "np": np,
     }
+
+
+def _apply_visualize_style() -> Dict[str, Any]:
+    """Publication-oriented matplotlib rcParams (restored by caller context)."""
+    return {
+        "figure.facecolor": "white",
+        "axes.facecolor": "#fafafa",
+        "axes.edgecolor": "#333333",
+        "axes.labelcolor": "#222222",
+        "axes.titlecolor": "#1a1a1a",
+        "text.color": "#222222",
+        "xtick.color": "#333333",
+        "ytick.color": "#333333",
+        "grid.color": "#cccccc",
+        "grid.linestyle": "-",
+        "grid.linewidth": 0.6,
+        "font.size": 10,
+        "axes.titlesize": 11,
+        "axes.labelsize": 10,
+        "legend.fontsize": 8,
+        "lines.linewidth": 1.6,
+    }
+
+
+R_NORM_LOG_EPS = 1e-12
+
+
+def _apply_visualize_style_actionable() -> Dict[str, Any]:
+    """Stronger typography and spines for :func:`visualize` dashboards."""
+    base = _apply_visualize_style()
+    extra: Dict[str, Any] = {
+        "axes.titlesize": 12,
+        "axes.labelsize": 11,
+        "axes.linewidth": 1.2,
+        "xtick.major.width": 1.0,
+        "ytick.major.width": 1.0,
+        "font.size": 10.5,
+        "legend.fontsize": 9,
+        "lines.linewidth": 2.0,
+    }
+    return {**base, **extra}
+
+
+def _admissibility_status_hml(score: float) -> str:
+    """HIGH / MODERATE / LOW band for headline (same bands as former diagnostics plot)."""
+    if not math.isfinite(score):
+        return "N/A"
+    if score >= 0.9:
+        return "HIGH"
+    if score >= 0.7:
+        return "MODERATE"
+    return "LOW"
+
+
+def _category_adm_bar_color(score: float) -> str:
+    if not math.isfinite(score):
+        return "#bdc3c7"
+    if score >= 0.9:
+        return "#27ae60"
+    if score >= 0.7:
+        return "#e67e22"
+    return "#c0392b"
+
+
+def _transform_r_norm_y(ys: Any, np: Any, log_scale: bool) -> Any:
+    """R_norm line-plot values: optional log10(R_norm + eps)."""
+    arr = np.asarray(ys, dtype=float)
+    if not log_scale:
+        return arr
+    return np.log10(np.maximum(arr, 0.0) + R_NORM_LOG_EPS)
+
+
+def _category_three_pillar_scores(metrics: List[Dict[str, Any]]) -> tuple[List[str], List[float]]:
+    """Labels and scores for laws / constitutive pillars (final step)."""
+    last_cat = metrics[-1]["category_admissibility_score"]
+    order = ("laws", "constitutive")
+    labels = [pretty_category_name(c) for c in order]
+    vals = [float(last_cat[c]) if c in last_cat and math.isfinite(float(last_cat[c])) else float("nan") for c in order]
+    return list(labels), vals
+
+
+def _matplotlib_draw_category_adm_three_pillar(ax: Any, metrics: List[Dict[str, Any]], np: Any) -> None:
+    """Horizontal bar chart for laws/constitutive pillars (matplotlib)."""
+    clabels, cvals = _category_three_pillar_scores(metrics)
+    y_pos = np.arange(len(clabels))
+    colors_b = [_category_adm_bar_color(v) for v in cvals]
+    bar_lengths = np.array([v if math.isfinite(v) else 0.0 for v in cvals], dtype=float)
+    ax.barh(
+        y_pos,
+        bar_lengths,
+        color=colors_b,
+        edgecolor="#333333",
+        linewidth=0.9,
+        height=0.55,
+    )
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(clabels, fontsize=10)
+    ax.set_xlim(0, 1.12)
+    ax.set_xlabel("Admissibility", fontsize=10)
+    ax.set_title("Category admissibility (final step)", fontsize=11, fontweight="600")
+    for i, v in enumerate(cvals):
+        if math.isfinite(v):
+            ax.text(min(v + 0.02, 1.04), i, f"{v:.3f}", va="center", fontsize=9, fontweight="600")
+        else:
+            ax.text(0.02, i, "N/A", va="center", fontsize=9, color="#666666")
+    ax.grid(True, axis="x", alpha=0.35)
+    ax.set_axisbelow(True)
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.05)
 
 
 def visualize(
@@ -507,22 +807,53 @@ def visualize(
     *,
     r_ref: Optional[Dict[str, float]] = None,
     max_legend_keys: int = 16,
+    mode: str = "training",
+    spatial_law_panel: Optional[Dict[str, Any]] = None,
+    spatial_rnorm_panel: Optional[Dict[str, Any]] = None,
+    figure_title: Optional[str] = None,
+    step_label: str = "Step",
+    r_norm_scale: str = "log",
+    spatial_heatmap_colorscale: Optional[str] = None,
 ) -> Any:
     """
-    Multi-panel monitor dashboard from ``ResidualEngine`` log entries (``rms``, ``scale``).
+    Monitor dashboard from ``ResidualEngine`` log entries (``rms``, ``scale``).
 
     Uses the same R_norm / admissibility rules as :func:`audit` via
     :func:`_compute_log_step_metrics` and **does not mutate** ``log``.
 
+    **Modes**
+
+    - ``training`` (multi-step) — **Top row:** overall admissibility vs step (with final
+      value marker) and **horizontal category admissibility bars** (laws / constitutive,
+      final step). **Second row:** two panels — :math:`R_{\\mathrm{norm}}` vs
+      step for **governing laws** and **constitutive** (``data/`` and ``scaling/`` omitted);
+      **y-axis** is ``log10(R_{\\mathrm{norm}} + \\varepsilon)`` by default, or linear if
+      ``r_norm_scale="linear"``. **Optional third row:** spatial law heatmap when
+      third row is used when ``spatial_law_panel`` or ``spatial_rnorm_panel`` is set.
+    - ``training`` (single log entry) — horizontal bars for normalized residuals, category
+      admissibility bars, optional spatial panel (compact layout).
+    - ``test`` — Uses the **last** log entry only: horizontal bar chart of normalized
+      residuals per key, category admissibility bars, and optional spatial panel.
+
+    **Spatial panel**
+
+    The log stores **scalar** RMS per key per step only. To plot law residuals vs
+    ``x`` (e.g. at a fixed time slice), pass ``spatial_law_panel``::
+
+        {"x": jax.numpy.linspace(...), "values": {"laplace_equation": r_norm_along_x, ...}}
+
+    Each value array must match ``x`` in shape. Keys may be bare law names or
+    ``laws/<name>``.
+    For constitutive-only spatial slices, pass ``spatial_rnorm_panel`` with the same
+    shape contract (Studio uses this for ``constitutive/...`` rows alongside laws).
+    Optional ``position_axis`` (e.g. ``\"y\"``) on each panel dict sets the horizontal
+    axis label; default is ``x``.
+
     **Backends**
 
     - ``matplotlib`` — static figure (requires ``matplotlib``).
-    - ``plotly`` — interactive figure (zoom/pan/hover; requires ``pip install plotly`` or ``moju[viz]``).
+    - ``plotly`` — interactive figure (requires ``pip install plotly`` or ``moju[viz]``).
     - ``none`` — returns ``None``.
-
-    Panels (when data allows): RMS and admissibility per key; overall + category trajectories;
-    admissibility heatmap; top ``R_norm`` keys; closure-type summary; omitted/inferred counts;
-    twin RMS / ``R_norm`` for top keys; category radar; worst key per category.
 
     Parameters
     ----------
@@ -535,20 +866,64 @@ def visualize(
     r_ref
         Optional per-key reference scale overrides (same as :func:`audit`).
     max_legend_keys
-        Cap legend entries on per-key line plots for readability.
+        Cap legend entries on per-key line plots for readability (training mode, multi-step).
+    mode
+        ``training`` or ``test``. Test mode slices to the last entry when ``len(log) > 1``.
+    spatial_law_panel
+        Optional ``dict`` with ``x`` and ``values`` (see above).
+    spatial_rnorm_panel
+        Optional ``dict`` with ``x`` and ``values`` for per-key R_norm spatial slices.
+    figure_title
+        Optional override for the figure title. If omitted or blank, a mode-specific
+        default is used (training vs test).
+    step_label
+        X-axis label for training step axis (e.g. ``Iteration`` or ``Epoch``).
+    r_norm_scale
+        ``log`` (default) plots ``log10(R_norm + ε)`` on the three category residual
+        panels; ``linear`` plots raw ``R_norm``. Does not affect the overall admissibility
+        axis.
+    spatial_heatmap_colorscale
+        Plotly colorscale name for optional spatial heatmaps (e.g. ``\"Jet\"``, ``\"Viridis\"``).
+        Default ``None`` uses ``Jet`` in the Plotly backend.
     """
     if backend == "none":
         return None
+    if mode not in ("training", "test"):
+        raise ValueError("mode must be 'training' or 'test'")
+    if r_norm_scale not in ("log", "linear"):
+        raise ValueError("r_norm_scale must be 'log' or 'linear'")
 
-    bundle = _build_visualize_bundle(log, keys, r_ref, max_legend_keys)
+    work_log = list(log)
+    if mode == "test" and len(work_log) > 1:
+        work_log = work_log[-1:]
+
+    spatial_parsed = _parse_spatial_law_panel(spatial_law_panel)
+    spatial_rnorm_parsed = _parse_spatial_rnorm_panel(spatial_rnorm_panel)
+    bundle = _build_visualize_bundle(
+        work_log,
+        keys,
+        r_ref,
+        max_legend_keys,
+        spatial_parsed=spatial_parsed,
+        spatial_rnorm_parsed=spatial_rnorm_parsed,
+        mode=mode,
+    )
     if bundle is None:
         return None
+
+    resolved_title = _resolve_visualize_figure_title(mode, figure_title)
 
     if backend == "plotly":
         try:
             from moju.monitor.visualize_plotly import build_plotly_monitor_figure
 
-            return build_plotly_monitor_figure(bundle)
+            return build_plotly_monitor_figure(
+                bundle,
+                figure_title=resolved_title,
+                step_label=step_label,
+                r_norm_scale=r_norm_scale,
+                spatial_heatmap_colorscale=spatial_heatmap_colorscale,
+            )
         except ImportError:
             return None
 
@@ -561,197 +936,282 @@ def visualize(
         return None
 
     np = bundle["np"]
-    log = bundle["log"]
-    metrics = bundle["metrics"]
     n = bundle["n"]
     indices = bundle["indices"]
-    plot_keys = bundle["plot_keys"]
-    legend_keys = bundle["legend_keys"]
-    buckets = bundle["buckets"]
-    ordered_keys = bundle["ordered_keys"]
-    mat = bundle["mat"]
-    short_labels = bundle["short_labels"]
-    ranked = bundle["ranked"]
-    kinds_order = bundle["kinds_order"]
-    means_closure = bundle["means_closure"]
-    om = bundle["om"]
-    inf = bundle["inf"]
-    top5 = bundle["top5"]
+    use_bar_chart = bundle["use_bar_chart"]
+    bar_display = bundle["bar_display"]
+    bar_values = bundle["bar_values"]
+    overall_adm = bundle["overall_adm"]
     cats_fin = bundle["cats_fin"]
-    rms_title = bundle["rms_title"]
-    cat_colors = bundle["cat_colors"]
+    spatial = bundle["spatial"]
+    spatial_rnorm = bundle.get("spatial_rnorm")
+    mode_eff = bundle["mode"]
 
-    fig = plt.figure(figsize=(13, 22))
-    gs = fig.add_gridspec(
-        8,
-        2,
-        height_ratios=[1.0, 1.0, 0.9, 1.35, 1.0, 0.75, 1.0, 0.85],
-        hspace=0.5,
-        wspace=0.28,
-    )
+    has_spatial = spatial is not None
+    has_spatial_rnorm = spatial_rnorm is not None
+    category_training = bundle.get("category_training") or {}
+    category_titles = bundle.get("category_titles") or {}
+    metrics = bundle["metrics"]
+    use_log_rnorm = r_norm_scale == "log"
+    rnorm_ylabel = "log10(R_norm + ε)" if use_log_rnorm else "Normalized residual (R norm)"
 
-    # --- 1–2: RMS and admissibility per key ---
-    ax_rms = fig.add_subplot(gs[0, :])
-    ax_adm = fig.add_subplot(gs[1, :], sharex=ax_rms)
-    for k in legend_keys:
-        rms_vals = [e.get("rms", {}).get(k) for e in log]
-        if all(v is not None for v in rms_vals):
-            ax_rms.plot(indices, rms_vals, label=k, alpha=0.85)
-        adm_vals = [metrics[i]["admissibility_score"].get(k) for i in range(n)]
-        if all(v is not None for v in adm_vals):
-            ax_adm.plot(indices, adm_vals, label=k, alpha=0.85)
-    ax_rms.set_ylabel("RMS")
-    ax_rms.set_title(rms_title)
-    ax_rms.legend(loc="upper right", fontsize=7, ncol=2)
-    ax_rms.grid(True, alpha=0.25)
-    ax_adm.set_ylabel("Admissibility")
-    ax_adm.set_title("Admissibility per key (1/(1+R_norm))")
-    ax_adm.legend(loc="lower right", fontsize=7, ncol=2)
-    ax_adm.grid(True, alpha=0.25)
-    ax_adm.set_ylim(0.0, 1.02)
+    style = _apply_visualize_style_actionable()
+    with plt.rc_context(rc=style):
+        if mode_eff == "training" and not use_bar_chart:
+            fig_h = 11.5 if (has_spatial or has_spatial_rnorm) else 9.0
+            fig = plt.figure(figsize=(14.0, fig_h), constrained_layout=True)
+            n_outer = 3 if (has_spatial or has_spatial_rnorm) else 2
+            hratios = [1.05, 1.12, 1.05] if (has_spatial or has_spatial_rnorm) else [1.05, 1.2]
+            outer = fig.add_gridspec(n_outer, 1, height_ratios=hratios)
 
-    # --- 3: Overall + category geometric means ---
-    ax_sum = fig.add_subplot(gs[2, :], sharex=ax_rms)
-    overall_s = [metrics[i]["overall_admissibility_score"] for i in range(n)]
-    if any(np.isfinite(overall_s)):
-        ax_sum.plot(indices, overall_s, color="black", linewidth=2.2, label="Overall")
-    for cat, col in cat_colors.items():
-        ys = []
-        for i in range(n):
-            v = metrics[i]["category_admissibility_score"].get(cat)
-            ys.append(float(v) if v is not None else float("nan"))
-        if any(np.isfinite(ys)):
-            ax_sum.plot(indices, ys, color=col, linestyle="--", alpha=0.9, label=cat)
-    ax_sum.set_ylabel("Admissibility")
-    ax_sum.set_title("Overall and per-category geometric mean admissibility")
-    ax_sum.legend(loc="best", fontsize=8, ncol=5)
-    ax_sum.grid(True, alpha=0.25)
-    ax_sum.set_ylim(0.0, 1.02)
+            g_top = outer[0].subgridspec(1, 2, wspace=0.24)
+            ax_overall = fig.add_subplot(g_top[0, 0])
+            ax_cat = fig.add_subplot(g_top[0, 1])
+            last_ov = float(overall_adm[-1]) if len(overall_adm) else float("nan")
+            status_hml = _admissibility_status_hml(last_ov)
+            if any(np.isfinite(overall_adm)):
+                ax_overall.plot(
+                    indices,
+                    overall_adm,
+                    color="#2c3e50",
+                    linewidth=2.2,
+                    label="Overall admissibility",
+                )
+                ax_overall.margins(y=0.12)
+                ax_overall.relim()
+                ax_overall.autoscale(axis="y")
+                if math.isfinite(last_ov):
+                    lix = float(indices[-1])
+                    ax_overall.scatter(
+                        [lix],
+                        [last_ov],
+                        s=95,
+                        color="#c0392b",
+                        zorder=5,
+                        edgecolors="white",
+                        linewidths=1.6,
+                    )
+                    ax_overall.annotate(
+                        f"{last_ov:.4f}",
+                        xy=(lix, last_ov),
+                        xytext=(10, 4),
+                        textcoords="offset points",
+                        fontsize=10,
+                        fontweight="600",
+                        color="#2c3e50",
+                    )
+            ax_overall.set_xlabel(step_label)
+            ax_overall.set_ylabel("Admissibility")
+            ax_overall.set_title("Overall admissibility", fontweight="600")
+            ax_overall.grid(True, alpha=0.4)
+            for spine in ax_overall.spines.values():
+                spine.set_linewidth(1.05)
+            if any(np.isfinite(overall_adm)):
+                ax_overall.legend(
+                    loc="upper left",
+                    bbox_to_anchor=(0.02, 0.98),
+                    framealpha=0.92,
+                    fontsize=9,
+                )
 
-    # --- 4: Heatmap (keys × step) ---
-    ax_hm = fig.add_subplot(gs[3, :])
-    mat_m = np.ma.masked_invalid(mat)
-    im = ax_hm.imshow(
-        mat_m,
-        aspect="auto",
-        cmap="viridis",
-        vmin=0.0,
-        vmax=1.0,
-        interpolation="nearest",
-    )
-    ax_hm.set_yticks(range(len(ordered_keys)))
-    ax_hm.set_yticklabels(short_labels, fontsize=6)
-    step = max(1, n // 20)
-    xt = list(range(0, n, step))
-    ax_hm.set_xticks(xt)
-    ax_hm.set_xticklabels([str(int(i)) for i in xt])
-    ax_hm.set_xlabel("Log index")
-    ax_hm.set_title("Admissibility heatmap (keys × step)")
-    fig.colorbar(im, ax=ax_hm, fraction=0.02, pad=0.01, label="Admissibility")
+            _matplotlib_draw_category_adm_three_pillar(ax_cat, metrics, np)
 
-    # --- 5: Top offenders (last step) ---
-    ax_bar = fig.add_subplot(gs[4, :])
-    top_n = min(15, len(ranked))
-    if top_n:
-        rk, rv = zip(*ranked[:top_n])
-        y_pos = np.arange(top_n)
-        ax_bar.barh(y_pos, rv, color="#c44e52", alpha=0.85)
-        ax_bar.set_yticks(y_pos)
-        ax_bar.set_yticklabels([x if len(x) < 50 else x[:47] + "…" for x in rk], fontsize=7)
-        ax_bar.invert_yaxis()
-        ax_bar.set_xlabel("R_norm (last step)")
-        ax_bar.set_title("Top residual keys by R_norm (last step)")
-        ax_bar.grid(True, axis="x", alpha=0.25)
-    else:
-        ax_bar.set_visible(False)
+            g_cat = outer[1].subgridspec(1, 2, wspace=0.45)
+            ax_laws = fig.add_subplot(g_cat[0, 0])
+            ax_const = fig.add_subplot(g_cat[0, 1], sharex=ax_laws, sharey=ax_laws)
+            palette = plt.cm.tab10(np.linspace(0, 0.9, 10))
+            cat_axes = (ax_laws, ax_const)
+            cat_ids = ("laws", "constitutive")
+            for ax_i, cat in enumerate(cat_ids):
+                ax_c = cat_axes[ax_i]
+                info = category_training.get(cat, {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))})
+                ckeys = info["keys"]
+                displays = info["displays"]
+                mat = info["r_norm_mat"]
+                title_c = category_titles.get(
+                    cat,
+                    cat.replace("_", " ").title(),
+                )
+                if not ckeys:
+                    ax_c.text(
+                        0.5,
+                        0.5,
+                        "No keys in this category",
+                        ha="center",
+                        va="center",
+                        transform=ax_c.transAxes,
+                        fontsize=10,
+                        color="#666666",
+                    )
+                else:
+                    for i, _kk in enumerate(ckeys):
+                        ys = mat[i, :]
+                        if np.all(np.isfinite(ys)):
+                            y_plot = _transform_r_norm_y(ys, np, use_log_rnorm)
+                            ax_c.plot(
+                                indices,
+                                y_plot,
+                                label=displays[i],
+                                color=palette[i % len(palette)],
+                                alpha=0.9,
+                                linewidth=1.8,
+                            )
+                    ax_c.legend(
+                        loc="center left",
+                        bbox_to_anchor=(1.02, 0.5),
+                        borderaxespad=0.0,
+                        framealpha=0.92,
+                        fontsize=7,
+                        labelspacing=0.35,
+                        handlelength=1.2,
+                    )
+                ax_c.set_title(title_c, fontsize=11, fontweight="600")
+                ax_c.grid(True, alpha=0.4)
+                ax_c.set_xlabel(step_label)
+                for spine in ax_c.spines.values():
+                    spine.set_linewidth(1.05)
+                if ax_i == 0:
+                    ax_c.set_ylabel(rnorm_ylabel)
+                else:
+                    plt.setp(ax_c.get_yticklabels(), visible=False)
 
-    # --- 6: Closure-type mean admissibility (last step) ---
-    ax_cl = fig.add_subplot(gs[5, 0])
-    if kinds_order:
-        xpos = np.arange(len(kinds_order))
-        ax_cl.bar(xpos, means_closure, color="#4c72b0", alpha=0.88)
-        ax_cl.set_xticks(xpos)
-        ax_cl.set_xticklabels(kinds_order, rotation=35, ha="right", fontsize=7)
-        ax_cl.set_ylabel("Mean admissibility")
-        ax_cl.set_title("Constitutive/scaling by closure type (last step)")
-        ax_cl.set_ylim(0.0, 1.02)
-        ax_cl.grid(True, axis="y", alpha=0.25)
-    else:
-        ax_cl.text(0.5, 0.5, "No constitutive/scaling keys", ha="center", va="center")
-        ax_cl.set_axis_off()
+            if has_spatial or has_spatial_rnorm:
+                g_sp = outer[2].subgridspec(1, 2 if (has_spatial and has_spatial_rnorm) else 1, wspace=0.25)
+                ax_idx = 0
+                if has_spatial:
+                    ax_sp = fig.add_subplot(g_sp[0, ax_idx])
+                    ax_idx += 1
+                    Z = spatial["Z"]
+                    x_sp = spatial["x"]
+                    row_labels = spatial["row_labels"]
+                    im = ax_sp.imshow(
+                        Z,
+                        aspect="auto",
+                        cmap="cividis",
+                        extent=(float(x_sp[0]), float(x_sp[-1]), len(row_labels) - 0.5, -0.5),
+                        interpolation="nearest",
+                    )
+                    ax_sp.set_yticks(range(len(row_labels)))
+                    ax_sp.set_yticklabels(row_labels, fontsize=8)
+                    ax_sp.set_xlabel("Position x")
+                    ax_sp.set_title("Law Residuals Along x (User Slice)")
+                    fig.colorbar(im, ax=ax_sp, fraction=0.03, pad=0.03, label="R norm")
+                if has_spatial_rnorm:
+                    ax_rn = fig.add_subplot(g_sp[0, ax_idx])
+                    Zr = spatial_rnorm["Z"]
+                    xr = spatial_rnorm["x"]
+                    rl = spatial_rnorm["row_labels"]
+                    imr = ax_rn.imshow(
+                        Zr,
+                        aspect="auto",
+                        cmap="magma",
+                        extent=(float(xr[0]), float(xr[-1]), len(rl) - 0.5, -0.5),
+                        interpolation="nearest",
+                    )
+                    ax_rn.set_yticks(range(len(rl)))
+                    ax_rn.set_yticklabels(rl, fontsize=8)
+                    ax_rn.set_xlabel("Position x")
+                    ax_rn.set_title("R_norm Along x (User Slice)")
+                    fig.colorbar(imr, ax=ax_rn, fraction=0.03, pad=0.03, label="R norm")
 
-    # --- 7: Omitted / inferred counts ---
-    ax_om = fig.add_subplot(gs[5, 1])
-    if max(om + inf, default=0) > 0:
-        width = 0.35
-        ax_om.bar(indices - width / 2, om, width, label="omitted", color="#8c564b", alpha=0.85)
-        ax_om.bar(indices + width / 2, inf, width, label="inferred", color="#17becf", alpha=0.85)
-        ax_om.set_xlabel("Log index")
-        ax_om.set_ylabel("Count")
-        ax_om.set_title("Omitted / inferred log messages")
-        ax_om.legend(fontsize=8)
-        ax_om.grid(True, axis="y", alpha=0.25)
-    else:
-        ax_om.text(0.5, 0.5, "No omitted/inferred entries", ha="center", va="center")
-        ax_om.set_axis_off()
+            fig.suptitle(resolved_title, fontsize=18, fontweight="700", y=1.01)
+            if math.isfinite(last_ov):
+                fig.text(
+                    0.5,
+                    0.945,
+                    f"Overall admissibility (final): {last_ov:.4f} — {status_hml}",
+                    ha="center",
+                    fontsize=12,
+                    fontweight="700",
+                    color="#1a1a1a",
+                    transform=fig.transFigure,
+                )
+            fig.set_constrained_layout_pads(w_pad=0.06, h_pad=0.06, hspace=0.08, wspace=0.08)
+            return fig
 
-    # --- 8: Twin RMS / R_norm for top keys by R_norm ---
-    ax_twin = fig.add_subplot(gs[6, :], sharex=ax_rms)
-    ax_t2 = ax_twin.twinx()
-    for k in top5:
-        rms_s = [e.get("rms", {}).get(k) for e in log]
-        rn_s = [metrics[i]["r_norm"].get(k) for i in range(n)]
-        if all(v is not None for v in rms_s):
-            ax_twin.plot(indices, rms_s, label=f"{k} RMS", linestyle="-", alpha=0.9)
-        if all(v is not None for v in rn_s):
-            ax_t2.plot(indices, rn_s, label=f"{k} R_norm", linestyle="--", alpha=0.75)
-    ax_twin.set_ylabel("RMS", color="#333")
-    ax_t2.set_ylabel("R_norm", color="#666")
-    ax_twin.set_title("Top keys: RMS (solid) vs R_norm (dashed, right axis)")
-    ax_twin.grid(True, alpha=0.25)
-    h1, l1 = ax_twin.get_legend_handles_labels()
-    h2, l2 = ax_t2.get_legend_handles_labels()
-    ax_twin.legend(h1 + h2, l1 + l2, loc="best", fontsize=6, ncol=2)
+        fig_h = 8.5 if has_spatial else 6.5
+        nrows = 2
+        fig = plt.figure(figsize=(10.0, fig_h), constrained_layout=True)
+        height_ratios = [1.15, 1.05]
+        gs = fig.add_gridspec(nrows, 2, height_ratios=height_ratios)
 
-    # --- 9: Radar (category scores, last step) ---
-    ax_rad = fig.add_subplot(gs[7, 0], projection="polar")
-    if len(cats_fin) >= 2:
-        labels = [c[0] for c in cats_fin]
-        vals = [c[1] for c in cats_fin]
-        angles = np.linspace(0.0, 2 * np.pi, len(labels), endpoint=False)
-        vals_c = vals + vals[:1]
-        angles_c = np.concatenate([angles, [angles[0]]])
-        ax_rad.plot(angles_c, vals_c, "o-", linewidth=2, color="#bcbd22")
-        ax_rad.fill(angles_c, vals_c, alpha=0.25, color="#bcbd22")
-        ax_rad.set_xticks(angles)
-        ax_rad.set_xticklabels(labels, fontsize=8)
-        ax_rad.set_ylim(0.0, 1.0)
-        ax_rad.set_title("Category admissibility (last step)", y=1.08, fontsize=10)
-    else:
-        ax_rad.set_visible(False)
+        ax0 = fig.add_subplot(gs[0, :])
+        valid = np.isfinite(bar_values)
+        if np.any(valid):
+            y_pos = np.arange(len(bar_display))
+            colors = plt.cm.Blues(np.linspace(0.35, 0.85, len(bar_display)))
+            ax0.barh(
+                y_pos,
+                np.where(valid, bar_values, 0.0),
+                color=colors,
+                edgecolor="white",
+                linewidth=0.5,
+            )
+            ax0.set_yticks(y_pos)
+            ax0.set_yticklabels(
+                [d if len(d) < 46 else d[:43] + "…" for d in bar_display],
+                fontsize=8,
+            )
+            ax0.invert_yaxis()
+        ax0.set_xlabel("Normalized residual (R norm)")
+        ax0.set_title("Normalized Residuals")
+        ax0.grid(True, axis="x", alpha=0.4)
 
-    # Spare panel: min admissibility per category (worst key) over time
-    ax_worst = fig.add_subplot(gs[7, 1], sharex=ax_rms)
-    for cat, col in cat_colors.items():
-        ys = []
-        bk = buckets[cat]
-        if not bk:
-            continue
-        for i in range(n):
-            adm = metrics[i]["admissibility_score"]
-            mnv = min((float(adm[k]) for k in bk if k in adm), default=float("nan"))
-            ys.append(mnv)
-        if any(np.isfinite(ys)):
-            ax_worst.plot(indices, ys, color=col, label=f"min in {cat}", alpha=0.9)
-    ax_worst.set_ylabel("Admissibility")
-    ax_worst.set_title("Worst key per category (min admissibility)")
-    ax_worst.legend(loc="best", fontsize=7)
-    ax_worst.grid(True, alpha=0.25)
-    ax_worst.set_ylim(0.0, 1.02)
+        polar_row = 1
+        polar_span_full = mode_eff == "test" and not has_spatial
+        if polar_span_full:
+            ax_cat2 = fig.add_subplot(gs[polar_row, :])
+            ax_sp = None
+        else:
+            ax_cat2 = fig.add_subplot(gs[polar_row, 0])
+            ax_sp = fig.add_subplot(gs[polar_row, 1])
 
-    ax_twin.set_xlabel("Log index / step")
-    ax_worst.set_xlabel("Log index / step")
-    fig.suptitle("Moju monitor visualization", fontsize=12, y=0.995)
+        _matplotlib_draw_category_adm_three_pillar(ax_cat2, metrics, np)
+
+        if ax_sp is not None:
+            if spatial is not None:
+                Z = spatial["Z"]
+                x_sp = spatial["x"]
+                row_labels = spatial["row_labels"]
+                im = ax_sp.imshow(
+                    Z,
+                    aspect="auto",
+                    cmap="cividis",
+                    extent=(float(x_sp[0]), float(x_sp[-1]), len(row_labels) - 0.5, -0.5),
+                    interpolation="nearest",
+                )
+                ax_sp.set_yticks(range(len(row_labels)))
+                ax_sp.set_yticklabels(row_labels, fontsize=8)
+                ax_sp.set_xlabel("Position x")
+                ax_sp.set_title("Law Residuals Along x (User Slice)")
+                fig.colorbar(im, ax=ax_sp, fraction=0.046, pad=0.04, label="R norm")
+            else:
+                ax_sp.text(
+                    0.5,
+                    0.5,
+                    "Spatial panel: pass spatial_law_panel\nwith x and per-law values.",
+                    ha="center",
+                    va="center",
+                    fontsize=10,
+                    color="#555555",
+                    transform=ax_sp.transAxes,
+                )
+                ax_sp.set_axis_off()
+
+        fig.suptitle(resolved_title, fontsize=18, fontweight="700")
+        last_ov_c = float(overall_adm[-1]) if len(overall_adm) else float("nan")
+        if math.isfinite(last_ov_c):
+            fig.text(
+                0.5,
+                0.93,
+                f"Overall admissibility (final): {last_ov_c:.4f} — {_admissibility_status_hml(last_ov_c)}",
+                ha="center",
+                fontsize=11,
+                fontweight="700",
+                color="#1a1a1a",
+                transform=fig.transFigure,
+            )
+
     return fig
 
 
@@ -766,9 +1226,13 @@ class ResidualEngine:
 
     Closure policy:
       - chain_dx / chain_dt run only when predicted_spatial / predicted_temporal are non-empty.
-      - ref_delta runs when state_ref is provided (independent of predicted_*).
+      - ref_delta runs when state_ref is provided (independent of predicted_*), unless the spec sets
+        include_ref_delta=False.
       - implied_delta runs when implied_value_key or implied_fn is set; omitted if implied is missing.
       - A spec with no chain, no ref_delta, and no implied_delta does nothing (optional omit log).
+      - Law-linked implied rows (see ``moju.monitor.law_implied_diagnostics``) are prepended when
+        ``law_implied_audits`` is true (``MonitorConfig`` default). Use optional ``residual_basename``
+        for unique flat keys under each category.
 
     Audit spec shape (constitutive_audit / scaling_audit items):
       {
@@ -793,12 +1257,15 @@ class ResidualEngine:
         scaling_audit: Optional[List[Dict[str, Any]]] = None,
         constitutive_custom: Optional[List[Dict[str, Any]]] = None,
         scaling_custom: Optional[List[Dict[str, Any]]] = None,
+        derived_state_chain: Optional[List[Dict[str, Any]]] = None,
         state_builder: Optional[
             Callable[[Any, Any, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
         ] = None,
         enable_omit_messages: bool = True,
         primary_fields: Optional[List[str]] = None,
+        law_implied_audits: bool = True,
     ):
+        law_implied_enabled = bool(law_implied_audits)
         # MonitorConfig convenience
         if config is not None:
             from moju.monitor.config import MonitorConfig, audit_spec_to_engine_dict
@@ -811,7 +1278,9 @@ class ResidualEngine:
                 scaling_audit = [audit_spec_to_engine_dict(s) for s in config.scaling_audit]
                 constitutive_custom = config.constitutive_custom
                 scaling_custom = config.scaling_custom
+                derived_state_chain = list(config.derived_state_chain or [])
                 primary_fields = list(config.primary_fields)
+                law_implied_enabled = bool(config.law_implied_audits)
                 if config.state_builder is not None and state_builder is None:
                     state_builder = config.state_builder
             else:
@@ -822,8 +1291,14 @@ class ResidualEngine:
         self.groups_spec = list(groups or [])
         self.constitutive_audit = list(constitutive_audit or [])
         self.scaling_audit = list(scaling_audit or [])
+        li_c, li_s = merge_law_implied_audit_specs(self.laws_spec, enabled=law_implied_enabled)
+        mc, rc = merge_fragment_law_implied_audit_specs(li_c, self.constitutive_audit)
+        ms, rs = merge_fragment_law_implied_audit_specs(li_s, self.scaling_audit)
+        self.constitutive_audit = mc + rc
+        self.scaling_audit = ms + rs
         self.constitutive_custom = list(constitutive_custom or [])
         self.scaling_custom = list(scaling_custom or [])
+        self.derived_state_chain = list(derived_state_chain or [])
         self.state_builder = state_builder
         self.enable_omit_messages = bool(enable_omit_messages)
         self.primary_fields = list(primary_fields or ["T", "u", "v", "w", "p", "rho"])
@@ -845,12 +1320,20 @@ class ResidualEngine:
                 missing_args = [an for an in arg_names if an not in spec["state_map"]]
                 if missing_args:
                     raise ValueError(f"{category}:{name} state_map missing args: {missing_args}")
+                sm_vals = set(spec["state_map"].values())
+                out_k = spec.get("output_key")
                 for k in spec.get("predicted_spatial", []) or []:
-                    if k not in spec["state_map"].values():
-                        raise ValueError(f"{category}:{name} predicted_spatial key {k!r} not in state_map values")
+                    if k not in sm_vals and k != out_k:
+                        raise ValueError(
+                            f"{category}:{name} predicted_spatial key {k!r} must be a state_map value "
+                            f"or match output_key {out_k!r}"
+                        )
                 for k in spec.get("predicted_temporal", []) or []:
-                    if k not in spec["state_map"].values():
-                        raise ValueError(f"{category}:{name} predicted_temporal key {k!r} not in state_map values")
+                    if k not in sm_vals and k != out_k:
+                        raise ValueError(
+                            f"{category}:{name} predicted_temporal key {k!r} must be a state_map value "
+                            f"or match output_key {out_k!r}"
+                        )
                 ivk = spec.get("implied_value_key")
                 ifn = spec.get("implied_fn")
                 if ivk and ifn is not None:
@@ -867,6 +1350,12 @@ class ResidualEngine:
                     )
                 if not csa:
                     raise ValueError(f"{category}:{name} chain_spatial_axes must be non-empty")
+                co = str(spec.get("chain_output") or "state_derivative")
+                if co not in ("state_derivative", "fd_on_composition"):
+                    raise ValueError(
+                        f"{category}:{name} chain_output must be 'state_derivative' or "
+                        f"'fd_on_composition', got {co!r}"
+                    )
 
         _validate_specs(self.constitutive_audit, MODEL_FNS, "constitutive")
         _validate_specs(self.scaling_audit, GROUP_FNS, "scaling")
@@ -878,6 +1367,14 @@ class ResidualEngine:
     @property
     def log(self) -> List[Dict[str, Any]]:
         return self._log
+
+    def clear_log(self) -> None:
+        """Remove all logged steps and reset the step counter.
+
+        Safe to call between training runs; does not alter engine configuration.
+        """
+        self._log.clear()
+        self._index = 0
 
     def _validate_pi_constant_specs(self) -> None:
         for spec in self.scaling_audit:
@@ -961,6 +1458,7 @@ class ResidualEngine:
             )
 
         residuals: Dict[str, Any] = {"laws": {}}
+        pb_warn: List[str] = []
 
         if state_pred is None:
             if self.state_builder is None:
@@ -968,9 +1466,6 @@ class ResidualEngine:
             if model is None or params is None or collocation is None:
                 raise ValueError("Path A requires model, params, and collocation")
             state_pred = self.state_builder(model, params, collocation, self.constants)
-
-        state_pred_built = self._state_builder(state_pred)
-        merged = {**state_pred_built, **self.constants}
 
         omitted_msgs: List[str] = []
         inferred_msgs: List[str] = []
@@ -982,6 +1477,34 @@ class ResidualEngine:
         def _maybe_log_infer(msg: str) -> None:
             if self.enable_omit_messages:
                 inferred_msgs.append(msg)
+
+        state_for_groups = dict(state_pred)
+        if self.derived_state_chain:
+            from moju.monitor.derived_state_chain import apply_derived_state_chain
+
+            state_for_groups, _dwarn = apply_derived_state_chain(
+                state_for_groups,
+                self.constants,
+                self.derived_state_chain,
+            )
+            for w in _dwarn:
+                _maybe_log_infer(f"derived_state: {w}")
+
+        state_pred_built = self._state_builder(state_for_groups)
+        merged = {**self.constants, **state_pred_built}
+
+        def _state_ref_raw_after_derived(sr: Dict[str, Any]) -> Dict[str, Any]:
+            s0 = dict(sr)
+            if self.derived_state_chain:
+                from moju.monitor.derived_state_chain import apply_derived_state_chain
+
+                s0, wr = apply_derived_state_chain(s0, self.constants, self.derived_state_chain)
+                for x in wr:
+                    _maybe_log_infer(f"derived_state(ref): {x}")
+            return s0
+
+        def _merge_state_ref(sr: Dict[str, Any]) -> Dict[str, Any]:
+            return {**self._state_builder(_state_ref_raw_after_derived(sr)), **self.constants}
 
         if fill_law_fd and not auto_path_b_derivatives:
             raise ValueError(
@@ -1009,14 +1532,24 @@ class ResidualEngine:
                 copy=False,
                 fill_law_recipes=bool(fill_law_fd),
             )
-            merged = {**state_pred_built, **self.constants}
+            merged = {**self.constants, **state_pred_built}
             for w in pb_warn:
                 _maybe_log_infer(f"path_b_derivatives: {w}")
 
         for spec in self.laws_spec:
             name = spec["name"]
             state_map = spec["state_map"]
-            kwargs = _kwargs_from_state(merged, self.constants, state_map)
+            try:
+                kwargs = _kwargs_from_state(
+                    merged, self.constants, state_map, law_context=str(name)
+                )
+            except KeyError as err:
+                if pb_warn:
+                    tail = "\n".join(f"  - {w}" for w in pb_warn[:32])
+                    raise KeyError(
+                        f"{err.args[0]}\n\nFinite-difference / law-FD fill reported:\n{tail}"
+                    ) from err
+                raise
             fn = _get_fn(spec, Laws)
             residuals["laws"][name] = fn(**kwargs)
 
@@ -1033,6 +1566,7 @@ class ResidualEngine:
                 state_map = spec.get("state_map") or {}
                 closure_mode = str(spec.get("closure_mode") or "pointwise")
                 quadrature_weights = dict(spec.get("quadrature_weights") or {})
+                chain_out = str(spec.get("chain_output") or "state_derivative")
                 if closure_mode not in ("pointwise", "weak"):
                     raise ValueError(f"{category}:{name} closure_mode must be 'pointwise' or 'weak', got {closure_mode!r}")
                 # Sensible defaults (medium effort): when not provided, infer from collocation and common keys
@@ -1075,19 +1609,24 @@ class ResidualEngine:
                     # unknown function name -> omit silently (config validation should catch)
                     continue
                 fn, arg_names = reg
+                base = spec.get("residual_basename") or name
 
-                if state_ref is not None and output_key is not None:
+                if (
+                    state_ref is not None
+                    and output_key is not None
+                    and spec.get("include_ref_delta", True)
+                ):
                     arr = compute_ref_delta(
                         fn=fn,
                         arg_names=arg_names,
                         output_key=output_key,
                         state_map=state_map,
                         state_pred=merged,
-                        state_ref={**self._state_builder(state_ref), **self.constants},
+                        state_ref=_merge_state_ref(state_ref),
                         constants=self.constants,
                     )
                     if arr is not None:
-                        out[f"{name}/ref_delta"] = jnp.asarray(arr)
+                        out[f"{base}/ref_delta"] = jnp.asarray(arr)
 
                 if has_implied:
                     arr = compute_implied_delta(
@@ -1100,7 +1639,7 @@ class ResidualEngine:
                         implied_fn=spec.get("implied_fn"),
                     )
                     if arr is not None:
-                        out[f"{name}/implied_delta"] = jnp.asarray(arr)
+                        out[f"{base}/implied_delta"] = jnp.asarray(arr)
 
                 if predicted_spatial and output_key is not None:
                     spatial_axes = list(spec.get("chain_spatial_axes") or ["x"])
@@ -1119,6 +1658,7 @@ class ResidualEngine:
                                 predicted_varying=predicted_spatial,
                                 deriv=spatial_axis,
                                 weight_key=quadrature_weights.get(spatial_axis),
+                                chain_output=chain_out,
                             )
                             _maybe_log_infer(
                                 f"{category}:{name} using weak {chain_key}"
@@ -1133,9 +1673,10 @@ class ResidualEngine:
                                 constants=self.constants,
                                 predicted_varying=predicted_spatial,
                                 deriv=spatial_axis,
+                                chain_output=chain_out,
                             )
                         if arr is not None:
-                            out[f"{name}/{chain_key}"] = jnp.asarray(arr)
+                            out[f"{base}/{chain_key}"] = jnp.asarray(arr)
 
                 if predicted_temporal and output_key is not None:
                     if closure_mode == "weak":
@@ -1149,6 +1690,7 @@ class ResidualEngine:
                             predicted_varying=predicted_temporal,
                             deriv="t",
                             weight_key=quadrature_weights.get("t"),
+                            chain_output=chain_out,
                         )
                         _maybe_log_infer(f"{category}:{name} using weak chain_dt")
                     else:
@@ -1161,9 +1703,10 @@ class ResidualEngine:
                             constants=self.constants,
                             predicted_varying=predicted_temporal,
                             deriv="t",
+                            chain_output=chain_out,
                         )
                     if arr is not None:
-                        out[f"{name}/chain_dt"] = jnp.asarray(arr)
+                        out[f"{base}/chain_dt"] = jnp.asarray(arr)
 
             return out
 
@@ -1238,13 +1781,13 @@ class ResidualEngine:
                     flat_pi = f"{name}/pi_constant"
                     s[flat_pi] = r_pi
                     scale_key = f"scaling/{flat_pi}"
-                    mean_abs = float(jax.device_get(jnp.mean(stacked_abs)))
+                    mean_abs = float(jax.device_get(jnp.nanmean(stacked_abs)))
                     pi_constant_scales[scale_key] = float(_SCALE_EPS + mean_abs)
             if s:
                 residuals["scaling"] = s
 
         if state_ref is not None:
-            state_ref_built = self._state_builder(state_ref)
+            state_ref_built = self._state_builder(_state_ref_raw_after_derived(state_ref))
             common = set(state_pred_built.keys()) & set(state_ref_built.keys())
             residuals["data"] = {
                 k: jnp.asarray(state_ref_built[k]) - jnp.asarray(state_pred_built[k])
@@ -1255,7 +1798,7 @@ class ResidualEngine:
         rms_per_key = _rms_per_key(flat, to_python=log_to_python)
         state_ref_built_for_scale = None
         if state_ref is not None:
-            state_ref_built_for_scale = self._state_builder(state_ref)
+            state_ref_built_for_scale = self._state_builder(_state_ref_raw_after_derived(state_ref))
         scale_per_key = _state_derived_scale_per_key(
             flat.keys(),
             merged,
@@ -1301,6 +1844,8 @@ class ResidualEngine:
                 ivk = spec.get("implied_value_key")
                 if ivk:
                     keys.add(ivk)
+        keys |= all_ref_keys_from_chain(self.derived_state_chain)
+        keys -= keys_produced_by_chain(self.derived_state_chain)
         return keys
 
     def required_derivative_keys(self) -> Set[str]:

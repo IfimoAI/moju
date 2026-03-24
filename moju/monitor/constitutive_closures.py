@@ -94,6 +94,47 @@ def _closure_kinematic_viscosity(state: Dict, constants: Dict) -> Optional[Any]:
     )
 
 
+def _closure_mass_diffusivity(state: Dict, constants: Dict) -> Optional[Any]:
+    if not _all_present(state, constants, ("D", "fo_mass", "t", "L")):
+        return None
+    return _val(state, constants, "D") - Models.mass_diffusivity(
+        _val(state, constants, "fo_mass"),
+        _val(state, constants, "t"),
+        _val(state, constants, "L"),
+    )
+
+
+def _closure_wave_speed_from_st(state: Dict, constants: Dict) -> Optional[Any]:
+    if not _all_present(state, constants, ("c", "omega", "L", "st_wave")):
+        return None
+    return _val(state, constants, "c") - Models.wave_speed_from_st(
+        _val(state, constants, "omega"),
+        _val(state, constants, "L"),
+        _val(state, constants, "st_wave"),
+    )
+
+
+def _closure_dynamic_viscosity_from_re(state: Dict, constants: Dict) -> Optional[Any]:
+    if not _all_present(state, constants, ("mu", "rho", "u", "L", "re")):
+        return None
+    return _val(state, constants, "mu") - Models.dynamic_viscosity_from_re(
+        _val(state, constants, "rho"),
+        _val(state, constants, "u"),
+        _val(state, constants, "L"),
+        _val(state, constants, "re"),
+    )
+
+
+def _closure_scalar_diffusivity_from_pe(state: Dict, constants: Dict) -> Optional[Any]:
+    if not _all_present(state, constants, ("kappa", "u", "L", "pe")):
+        return None
+    return _val(state, constants, "kappa") - Models.scalar_diffusivity_from_pe(
+        _val(state, constants, "u"),
+        _val(state, constants, "L"),
+        _val(state, constants, "pe"),
+    )
+
+
 def _closure_power_law_mu(state: Dict, constants: Dict) -> Optional[Any]:
     """mu_pred vs K * gamma_dot^(n-1). State: mu_pred (key mu_pl), gamma_dot, K, n."""
     if not _all_present(state, constants, ("mu_pl", "gamma_dot", "K", "n")):
@@ -167,6 +208,10 @@ CONSTITUTIVE_REGISTRY: Dict[str, List[Tuple[str, Callable[[Dict, Dict], Any]]]] 
     "boussinesq_rho": [("direct_rho", _closure_boussinesq_rho)],
     "thermal_diffusivity": [("direct_alpha", _closure_thermal_diffusivity)],
     "kinematic_viscosity": [("direct_nu", _closure_kinematic_viscosity)],
+    "mass_diffusivity": [("direct_D", _closure_mass_diffusivity)],
+    "wave_speed_from_st": [("direct_c", _closure_wave_speed_from_st)],
+    "dynamic_viscosity_from_re": [("direct_mu", _closure_dynamic_viscosity_from_re)],
+    "scalar_diffusivity_from_pe": [("direct_kappa", _closure_scalar_diffusivity_from_pe)],
     "power_law_mu": [("direct_mu_pl", _closure_power_law_mu)],
     "arrhenius_rate": [("direct_k_rate", _closure_arrhenius)],
     "stefan_boltzmann_flux": [("direct_q_rad", _closure_stefan_boltzmann)],

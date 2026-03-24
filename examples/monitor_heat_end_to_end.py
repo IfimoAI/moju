@@ -5,7 +5,8 @@ End-to-end monitor example: 1D heat diffusion with NN T(t,x).
 Shows:
   - Path A style state building (compute T, T_t, T_xx from the NN)
   - Laws.fourier_conduction residual + build_loss
-  - Model/Group chain audits (fo, bi, thermal_diffusivity) with both chain_dx and chain_dt
+  - Law-linked implied audit: ``thermal_diffusivity`` vs α implied from T_t / T_laplacian (automatic)
+  - Optional chain audits on ``fo`` / ``bi`` (spatial/temporal consistency)
   - Required keys introspection
   - audit() PDF export when moju[report] installed
 """
@@ -137,15 +138,7 @@ def main():
             {"name": "fo", "state_map": {"alpha": "alpha", "t": "t", "L": "L"}, "output_key": "Fo", "fn": Groups.fo},
             {"name": "bi", "state_map": {"h": "h", "L": "L", "k_solid": "kappa"}, "output_key": "Bi", "fn": Groups.bi},
         ],
-        constitutive_audit=[
-            {
-                "name": "thermal_diffusivity",
-                "output_key": "alpha",
-                "state_map": {"k": "k", "rho": "rho", "cp": "cp"},
-                "predicted_spatial": ["k", "rho"],
-                "predicted_temporal": ["k", "rho"],
-            }
-        ],
+        # thermal_diffusivity implied_delta is prepended from fourier_conduction (law_implied_audits=True).
         scaling_audit=[
             {"name": "fo", "output_key": "Fo", "state_map": {"alpha": "alpha", "t": "t", "L": "L"}, "predicted_spatial": ["alpha"], "predicted_temporal": ["alpha", "t"]},
             {"name": "bi", "output_key": "Bi", "state_map": {"h": "h", "L": "L", "k_solid": "kappa"}, "predicted_spatial": ["kappa"], "predicted_temporal": ["kappa"]},

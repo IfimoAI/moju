@@ -13,7 +13,12 @@ if str(_ROOT) not in sys.path:
 
 import streamlit as st
 
+from apps.moju_studio.studio_streamlit_extras import studio_sidebar_branding_and_nav
+
 st.set_page_config(page_title="Moju Studio — Help", layout="wide", page_icon="❓")
+
+with st.sidebar:
+    studio_sidebar_branding_and_nav()
 
 st.title("Help and Streamlit UX")
 st.markdown(
@@ -30,7 +35,7 @@ This app uses several Streamlit patterns (requires **streamlit >= 1.33** in `moj
 | **`@st.fragment`** | **Spatial / time** plots and **Redraw dashboard** update locally. |
 | **`st.column_config`** | RMS table: formatted numeric column + wide text for residual keys. |
 | **`on_select` on `st.plotly_chart`** | When supported, point/lasso selection triggers a targeted rerun. |
-| **`.streamlit/config.toml`** (repo root) | Theme, `maxUploadSize`, `fastReruns`. |
+| **`.streamlit/config.toml`** (repo root) | Theme, `maxUploadSize`, `fastReruns`, `showSidebarNavigation` (custom nav). |
 
 ### Tips
 
@@ -44,10 +49,3 @@ This app uses several Streamlit patterns (requires **streamlit >= 1.33** in `moj
 - Streamlit Cloud + JAX may need extra setup; local or VM is recommended.
 """
 )
-
-try:
-    st.page_link("Home.py", label="Home", icon="🏠")
-    st.page_link("pages/1_Audit.py", label="Audit", icon="🔬")
-    st.page_link("pages/2_Quick_start.py", label="Quick start", icon="📘")
-except Exception:  # noqa: BLE001
-    pass

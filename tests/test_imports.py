@@ -60,10 +60,21 @@ def test_monitor_module_has_all():
         "AuditSpec",
         "MonitorConfig",
         "audit_spec_to_engine_dict",
+        "apply_derived_state_chain",
+        "eval_derived_expr",
+        "all_ref_keys_from_chain",
+        "keys_produced_by_chain",
         "PathBGridConfig",
         "fill_path_b_derivatives",
         "fill_law_fd_from_primitives",
         "list_law_fd_supported_laws",
+        "effective_audit_specs_for_fragment",
+        "law_implied_unsupported_reasons",
+        "list_laws_with_implied_diagnostics",
+        "merge_law_implied_audit_specs",
+        "merge_fragment_law_implied_audit_specs",
+        "pretty_residual_key",
+        "pretty_category_name",
     }
 
 

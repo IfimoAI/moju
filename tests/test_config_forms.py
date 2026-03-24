@@ -1,5 +1,7 @@
 """Tests for Moju Studio config_forms (no Streamlit)."""
 
+import json
+
 from apps.moju_studio.config_forms import (
     build_audit_spec_dict,
     build_law_spec,
@@ -56,6 +58,15 @@ def test_merge_simple_override_primary_fields():
     simple = {"laws": [], "primary_fields": ["T"]}
     out = merge_simple_config_with_json_override(simple, '{"primary_fields": ["u", "v"]}')
     assert out["primary_fields"] == ["u", "v"]
+
+
+def test_merge_simple_override_derived_state_chain():
+    simple = {"laws": [], "derived_state_chain": []}
+    chain = [{"output_key": "kappa", "expr": {"op": "ref", "key": "T"}}]
+    out = merge_simple_config_with_json_override(
+        simple, json.dumps({"derived_state_chain": chain})
+    )
+    assert out["derived_state_chain"] == chain
 
 
 def test_path_b_grid_from_options():

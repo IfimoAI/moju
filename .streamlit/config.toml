@@ -14,5 +14,9 @@ enableXsrfProtection = true
 [browser]
 gatherUsageStats = false
 
+[client]
+# Custom sidebar nav in Moju Studio (see studio_streamlit_extras.studio_sidebar_branding_and_nav).
+showSidebarNavigation = false
+
 [runner]
 fastReruns = true

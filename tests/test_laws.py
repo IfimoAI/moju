@@ -57,6 +57,27 @@ class TestLawsLaplaceAndWave:
         assert jnp.allclose(residual, 0.0, rtol=rtol, atol=atol)
 
 
+class TestLawsFourierConduction:
+    """Fourier conduction: T_t - alpha * T_laplacian with optional grid broadcasting."""
+
+    def test_broadcasts_alpha_when_t_1d_and_fields_2d(self, rtol, atol):
+        """Mesh time ``t(n_t,)`` with ``T_t``, ``T_laplacian`` (n_t, n_x) — alpha must broadcast."""
+        nt, nx = 4, 5
+        T_t = jnp.ones((nt, nx))
+        T_laplacian = jnp.ones((nt, nx))
+        t = jnp.linspace(0.5, 2.0, nt)
+        fo = jnp.array(0.1)
+        L = jnp.array(1.0)
+        out = Laws.fourier_conduction(T_t, T_laplacian, fo, t, L)
+        assert out.shape == (nt, nx)
+        alpha = fo * (L**2) / t
+        alpha2 = jnp.broadcast_to(
+            alpha.reshape(nt, 1), (nt, nx)
+        )
+        assert jnp.allclose(out, T_t - alpha2 * T_laplacian, rtol=rtol, atol=atol)
+        assert jnp.all(jnp.isfinite(out))
+
+
 class TestLawsStokesFlow:
     """Stokes flow residual: grad p - (1/Re) Laplacian(u) = 0."""
 

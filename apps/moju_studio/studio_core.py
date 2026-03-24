@@ -147,14 +147,61 @@ def preflight_engine(
     state_keys: Set[str],
 ) -> Tuple[List[str], List[str]]:
     """
-    Return (missing_state_keys, missing_derivative_keys) relative to uploaded state keys.
-    Does not include group-generated keys.
+    Return (missing_state_keys, missing_derivative_keys) relative to ``state_keys``.
+
+    **Note:** This is a **naive** diff against the given key set (historically NPZ-only in Studio).
+    For Path B runs, prefer :func:`apps.moju_studio.studio_dependency_planner.plan_dependencies`
+    (or :func:`dependency_plan_for_path_b_run`) — it merges **Constants**, **aliases**, **group
+    outputs**, and **law-FD derivables** so preflight matches what ``compute_residuals`` can fill.
     """
     req_s = engine.required_state_keys()
     req_d = engine.required_derivative_keys()
     miss_s = sorted(k for k in req_s if k not in state_keys)
     miss_d = sorted(k for k in req_d if k not in state_keys)
     return miss_s, miss_d
+
+
+def preflight_engine_with_available_keys(
+    engine: ResidualEngine,
+    available_keys: Set[str],
+) -> Tuple[List[str], List[str]]:
+    """
+    Same as :func:`preflight_engine` but compares against an expanded *available* key set
+    (e.g. ``DependencyPlan.effective_available_keys``). Still does **not** subtract group-built
+    or FD-filled tensors — use the dependency planner for that.
+    """
+    return preflight_engine(engine, available_keys)
+
+
+def dependency_plan_for_path_b_run(
+    cfg: MonitorConfig,
+    pred_keys: Set[str],
+    *,
+    auto_path_b_derivatives: bool,
+    fill_law_fd: bool,
+    path_b_grid: Optional[Any] = None,
+) -> Any:
+    """
+    Build a :class:`DependencyPlan` for the current MonitorConfig and uploaded keys.
+
+    ``path_b_grid`` should be a :class:`moju.monitor.path_b_derivatives.PathBGridConfig`
+    when the user customizes the Run grid; otherwise pass ``None`` for defaults.
+    """
+    from moju.monitor.path_b_derivatives import PathBGridConfig
+
+    from apps.moju_studio.studio_dependency_planner import plan_dependencies
+
+    d = cfg.to_dict()
+    ck = set((d.get("constants") or {}).keys())
+    grid = path_b_grid if path_b_grid is not None else PathBGridConfig()
+    return plan_dependencies(
+        d,
+        pred_keys=set(pred_keys),
+        constant_keys=ck,
+        auto_path_b_derivatives=bool(auto_path_b_derivatives),
+        fill_law_fd=bool(fill_law_fd),
+        path_b_grid=grid,
+    )
 
 
 def audit_report_to_jsonable(report: Dict[str, Any]) -> Dict[str, Any]:

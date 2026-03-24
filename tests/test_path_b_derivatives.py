@@ -175,8 +175,10 @@ class TestAuditSpecChainSpatialAxes:
         )
         d = s.to_dict()
         assert d["chain_spatial_axes"] == ["x", "y"]
+        assert d.get("chain_output") == "state_derivative"
         s2 = AuditSpec.from_dict(d)
         assert list(s2.chain_spatial_axes) == ["x", "y"]
+        assert s2.chain_output == "state_derivative"
 
 
 class TestResidualEngineMultiAxis:

@@ -1,5 +1,5 @@
 """
-Upload state, configure audits via forms or JSON, run residuals + audit + visualize.
+Upload state, configure physics via Studio allowlists (or expert JSON), run audit + visualize.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 _ROOT = Path(__file__).resolve().parents[3]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -20,35 +21,41 @@ import streamlit as st
 
 from apps.moju_studio.studio_streamlit_extras import (
     as_fragment,
-    cached_registry_names,
     pipeline_status,
     status_complete,
     status_update,
+    studio_sidebar_branding_and_nav,
     toast,
 )
 from apps.moju_studio.config_forms import (
-    build_audit_spec_dict,
-    build_group_spec,
-    build_law_spec,
-    group_parameter_names,
-    law_parameter_names,
     merge_simple_config_with_json_override,
-    model_parameter_names,
     path_b_grid_from_options,
-    preflight_checklist_text,
+    preflight_checklist_with_dependency_plan,
     reindex_log_entries,
-    scaling_fn_parameter_names,
 )
+from apps.moju_studio.studio_auto_config import (
+    STUDIO_GROUP_NAMES_EFFECTIVE,
+    STUDIO_LAW_NAMES,
+    STUDIO_MODEL_NAMES,
+    build_studio_auto_fragment,
+)
+from apps.moju_studio.studio_law_fd_hints import format_laws_fd_help
 from apps.moju_studio.studio_core import (
     audit_report_to_jsonable,
+    dependency_plan_for_path_b_run,
     flatten_residuals,
     generate_python_snippet,
     list_registered_law_names,
     make_session_state_builder,
     monitor_config_from_merged_dict,
-    preflight_engine,
     validate_studio_pi_gating,
 )
+from apps.moju_studio.studio_dependency_planner import (
+    format_planner_preflight_warning,
+    plan_markdown_for_display,
+)
+from apps.moju_studio.studio_model_derived_registry import enrich_fragment_from_model_audits
+from moju.monitor.path_b_derivatives import PathBGridConfig
 from apps.moju_studio.studio_io import (
     constants_json_to_dict,
     load_state_bundle_bytes,
@@ -60,7 +67,148 @@ from apps.moju_studio.studio_io import (
 _STATE_UPLOAD_TYPES = ["npz", "npy", "h5", "hdf5", "nc", "nc4"]
 from apps.moju_studio.studio_plots import plotly_pred_minus_ref, plotly_residual_or_state
 from moju.monitor import ResidualEngine, audit, visualize
-from moju.monitor.pi_constant_recipes import list_pi_constant_group_names
+
+# Sidebar → Path B finite-difference grid (shared by Run tab and Config dependency preview).
+_FD_SPATIAL_OPTIONS = ["Auto (infer from arrays)", "1D", "2D", "3D"]
+_FD_SPATIAL_LABEL_TO_SD: Dict[str, Any] = {
+    "Auto (infer from arrays)": "auto",
+    "1D": 1,
+    "2D": 2,
+    "3D": 3,
+}
+
+_STUDIO_HEATMAP_COLORSCALES = ("Jet", "Turbo", "Viridis")
+
+
+def _fd_grid_kw_from_sidebar_session() -> Dict[str, Any]:
+    lab = st.session_state.get("studio_fd_spatial_label", _FD_SPATIAL_OPTIONS[0])
+    sd = _FD_SPATIAL_LABEL_TO_SD.get(lab, "auto")
+    steady = st.session_state.get("studio_fd_time_label", "Steady") == "Steady"
+    layout = st.session_state.get("studio_fd_layout", "meshgrid")
+    if layout not in ("meshgrid", "separable"):
+        layout = "meshgrid"
+    return {"spatial_dimension": sd, "steady": steady, "layout": layout}
+
+
+def _fd_expected_field_shapes_md() -> str:
+    """
+    Human-readable expected shapes for a scalar field ``T`` and coords, from sidebar FD settings.
+    Matches Path B / ``PathBGridConfig`` conventions for FD + law fill.
+    """
+    lab = st.session_state.get("studio_fd_spatial_label", _FD_SPATIAL_OPTIONS[0])
+    sd = _FD_SPATIAL_LABEL_TO_SD.get(lab, "auto")
+    steady = st.session_state.get("studio_fd_time_label", "Steady") == "Steady"
+    layout = str(st.session_state.get("studio_fd_layout", "meshgrid"))
+    if layout not in ("meshgrid", "separable"):
+        layout = "meshgrid"
+    time_lbl = "Steady" if steady else "Transient"
+    lay_lbl = "Meshgrid" if layout == "meshgrid" else "Separable"
+
+    lines: List[str] = [
+        f"**Sidebar:** *{lab}* · *{time_lbl}* · *{lay_lbl}*  ",
+        "",
+        "Suggested layouts for a **scalar** field **`T`** (e.g. Fourier conduction) and coords:",
+    ]
+
+    def add_block(dim_name: str, d: int) -> None:
+        if steady:
+            if layout == "separable":
+                if d == 1:
+                    lines.append(
+                        f"- **{dim_name}:** `T(n_x)` · `x(n_x)` — 1D coord vector (not `(n_x,1)`)."
+                    )
+                elif d == 2:
+                    lines.append(
+                        f"- **{dim_name}:** `T(n_x, n_y)` · `x(n_x)` · `y(n_y)`."
+                    )
+                else:
+                    lines.append(
+                        f"- **{dim_name}:** `T(n_x, n_y, n_z)` · `x(n_x)` · `y(n_y)` · `z(n_z)`."
+                    )
+            else:
+                if d == 1:
+                    lines.append(
+                        f"- **{dim_name}:** `T(n_x)` · `x` same shape as `T` **or** same **total size** "
+                        f"(e.g. `x(n_x, 1)`)."
+                    )
+                elif d == 2:
+                    lines.append(
+                        f"- **{dim_name}:** `T(n_x, n_y)` · `x`,`y` same shape as `T` (or rectilinear rules in engine)."
+                    )
+                else:
+                    lines.append(
+                        f"- **{dim_name}:** `T(n_x, n_y, n_z)` · `x`,`y`,`z` same shape as `T` when full mesh arrays."
+                    )
+        else:
+            if layout == "separable":
+                if d == 1:
+                    lines.append(
+                        f"- **{dim_name}:** **`T(n_t, n_x)`** · **`t(n_t)`** · **`x(n_x)`** — time is the **leading** axis."
+                    )
+                elif d == 2:
+                    lines.append(
+                        f"- **{dim_name}:** **`T(n_t, n_x, n_y)`** · **`t(n_t)`** · **`x(n_x)`** · **`y(n_y)`**."
+                    )
+                else:
+                    lines.append(
+                        f"- **{dim_name}:** **`T(n_t, n_x, n_y, n_z)`** · **`t(n_t)`** · **`x(n_x)`** · **`y(n_y)`** · **`z(n_z)`**."
+                    )
+            else:
+                if d == 1:
+                    lines.append(
+                        f"- **{dim_name}:** **`T(n_t, n_x)`** · **`t(n_t)`** · `x` length `n_x` or aligned with each row `T[i, :]`."
+                    )
+                elif d == 2:
+                    lines.append(
+                        f"- **{dim_name}:** **`T(n_t, n_x, n_y)`** · **`t(n_t)`** · spatial coords match `T[0, …]` shape."
+                    )
+                else:
+                    lines.append(
+                        f"- **{dim_name}:** **`T(n_t, n_x, n_y, n_z)`** · **`t(n_t)`** · coords match spatial slice."
+                    )
+
+    if sd == "auto":
+        lines.append(
+            "- **Auto (spatial):** Moju infers dimension from `T`. Examples: steady 1D-style `T(n_x)`, `(n_x,1)`, `(1,n_x)`; "
+            "for **Transient**, use explicit **1D / 2D / 3D** if `T` is flat — you usually need **`T(n_t, n_x, …)`** with **`t(n_t)`**, not one long `(N,)` vector."
+        )
+        lines.append("")
+        lines.append("*If you treat the grid as 1D:*")
+        add_block("1D", 1)
+    elif sd == 1:
+        add_block("1D", 1)
+    elif sd == 2:
+        add_block("2D", 2)
+    else:
+        add_block("3D", 3)
+
+    lines.append("")
+    lines.append(
+        "**Vector fields** (e.g. `u`): same leading layout + trailing axis `[…, d]` for components."
+    )
+    return "\n".join(lines)
+
+
+def _fd_expected_field_one_liner() -> str:
+    """Short hint for captions (scalar T)."""
+    lab = st.session_state.get("studio_fd_spatial_label", _FD_SPATIAL_OPTIONS[0])
+    sd = _FD_SPATIAL_LABEL_TO_SD.get(lab, "auto")
+    steady = st.session_state.get("studio_fd_time_label", "Steady") == "Steady"
+    layout = str(st.session_state.get("studio_fd_layout", "meshgrid"))
+    if layout not in ("meshgrid", "separable"):
+        layout = "meshgrid"
+    if not steady:
+        if sd == 1:
+            return "**Heads-up:** Transient **1D** → use **`T(n_t, n_x)`**, **`t(n_t)`**, **`x(n_x)`** (not a single flat `(N,)`). Open expander above for full detail."
+        if sd == 2:
+            return "**Heads-up:** Transient **2D** → **`T(n_t, n_x, n_y)`**, **`t(n_t)`**, coords per layout. See expander above."
+        if sd == 3:
+            return "**Heads-up:** Transient **3D** → **`T(n_t, n_x, n_y, n_z)`**, **`t(n_t)`**, … See expander above."
+        return "**Heads-up:** **Transient** → time is the **first** axis of `T`; use **`t(n_t)`**. Pick **1D/2D/3D** and see expander above."
+    if sd == 1 and layout == "separable":
+        return "**Heads-up:** Separable **1D** → **`T(n_x)`**, **`x(n_x)`** (1D vector). See expander above."
+    return "Expected **`T`** / coord shapes follow **sidebar → Path B — FD grid**. Open the expander above."
+
 
 st.set_page_config(page_title="Moju Studio — Audit", layout="wide", page_icon="🔬")
 
@@ -80,14 +228,45 @@ def _dialog_clear_viz_log() -> None:
 
 
 with st.sidebar:
-    st.markdown("### Moju Studio")
-    try:
-        st.page_link("Home.py", label="Home", icon="🏠")
-        st.page_link("pages/1_Audit.py", label="Audit", icon="🔬")
-        st.page_link("pages/2_Quick_start.py", label="Quick start", icon="📘")
-        st.page_link("pages/3_Help.py", label="Help and UX", icon="❓")
-    except Exception:  # noqa: BLE001
-        st.caption("Use the app **pages** menu to navigate.")
+    studio_sidebar_branding_and_nav()
+    st.divider()
+    st.markdown("##### Path B — FD grid")
+    st.caption(
+        "Finite differences (**auto_path_b_derivatives**) and **Dependency preview** use these settings."
+    )
+    st.selectbox(
+        "Spatial data",
+        options=_FD_SPATIAL_OPTIONS,
+        index=0,
+        key="studio_fd_spatial_label",
+        help="Which mesh coordinates NPZ should include for spatial FD hints (e.g. 1D+Steady: `x` only; 3D adds `y`,`z`).",
+    )
+    st.radio(
+        "Time",
+        options=["Steady", "Transient"],
+        horizontal=True,
+        index=0,
+        key="studio_fd_time_label",
+        help="Transient: `t` is required when filling ∂/∂t-style law inputs or time stacks per engine rules.",
+    )
+    _fd_layout_labels = {
+        "meshgrid": "Meshgrid (coords same shape as fields)",
+        "separable": "Separable (1D x / y / z vectors)",
+    }
+    st.selectbox(
+        "Grid layout",
+        options=["meshgrid", "separable"],
+        index=0,
+        key="studio_fd_layout",
+        format_func=lambda v: _fd_layout_labels.get(str(v), str(v)),
+        help="Meshgrid: each coord array matches field shape (e.g. T and x both (nx,) or (nx,ny)). "
+        "Separable: x length nx, field (nx,), (nx,ny), or (nx,ny,nz); spacing via 1D coords.",
+    )
+    st.caption(
+        "**Laplacian / FD:** For 1D data use **Spatial data → 1D** (or Auto with `(N,)` / `(N,1)` / `(1,N)` fields). "
+        "**Meshgrid:** `T` and `x` same shape *or* same total size. **Separable:** 1D `x` length `nx` and `T` shape `(nx,)`, "
+        "`(nx,ny)`, … After **Run**, open **Path B FD messages** if `T_laplacian` is missing or laws fail."
+    )
     st.divider()
     st.checkbox(
         "Append next run to session log",
@@ -96,13 +275,29 @@ with st.sidebar:
     )
     if st.button("Clear session log…"):
         _dialog_clear_viz_log()
+    st.selectbox(
+        "Heatmap colorscale (monitor dashboard)",
+        options=list(_STUDIO_HEATMAP_COLORSCALES),
+        index=0,
+        key="sb_heatmap_cs",
+        help="Applied to governing-law and constitutive R_norm heatmaps in the Plotly monitor dashboard.",
+    )
+    st.selectbox(
+        "Spatial heatmap axis",
+        options=["x", "y", "z"],
+        index=0,
+        key="sb_spatial_axis",
+        help="Coordinate for spatial R_norm slices (requires that key in state_pred, e.g. y for 2D/3D).",
+    )
 
 
 DEFAULT_CONFIG_FRAGMENT = """{
   "laws": [],
   "groups": [],
+  "law_implied_audits": true,
   "constitutive_audit": [],
-  "scaling_audit": []
+  "scaling_audit": [],
+  "derived_state_chain": []
 }
 """
 
@@ -116,15 +311,15 @@ DEMO_LAPLACE = """{
     }
   ],
   "groups": [],
+  "law_implied_audits": true,
   "constitutive_audit": [],
-  "scaling_audit": []
+  "scaling_audit": [],
+  "derived_state_chain": []
 }
 """
 
 DEMO_CONSTANTS = """{}
 """
-
-DEFAULT_PRIMARY = ["T", "u", "v", "w", "p", "rho"]
 
 
 def _apply_pi_c_to_scaling_audit_dict(d: Dict[str, Any], c: float) -> Dict[str, Any]:
@@ -152,184 +347,125 @@ def _parse_float_dict(raw: str, label: str) -> Dict[str, float]:
     return out
 
 
-def _key_options(pred: Dict[str, Any], constants: Dict[str, Any]) -> List[str]:
-    return sorted(set(pred.keys()) | set(constants.keys()))
+def _per_key_scale_flat(
+    flat_key: str,
+    *,
+    log_entry: Optional[Dict[str, Any]],
+    first_rms: Optional[Dict[str, Any]],
+    r_ref: Optional[Dict[str, float]],
+) -> float:
+    """Scalar scale for R_norm-style normalization (matches audit log rules)."""
+    if log_entry is None:
+        return 1.0
+    rms = log_entry.get("rms") or {}
+    entry_scale = log_entry.get("scale") or {}
+    fr = first_rms or {}
+    ref = r_ref or {}
+    if flat_key in ref and ref[flat_key] is not None and float(ref[flat_key]) > 0:
+        return float(ref[flat_key])
+    if flat_key in entry_scale and entry_scale[flat_key] is not None and float(entry_scale[flat_key]) > 0:
+        return float(entry_scale[flat_key])
+    if flat_key in fr and fr[flat_key] is not None and float(fr[flat_key]) > 0:
+        return float(fr[flat_key])
+    return 1.0
 
 
-def _collect_simple_fragment() -> Dict[str, Any]:
-    """Read form widgets from st.session_state (must match keys used in Config tab)."""
-    laws: List[Dict[str, Any]] = []
-    n_laws = int(st.session_state.get("sf_n_laws", 0))
-    for i in range(n_laws):
-        nm = st.session_state.get(f"sf_law_name_{i}")
-        if not nm:
-            continue
-        try:
-            args = law_parameter_names(str(nm))
-        except Exception:  # noqa: BLE001
-            continue
-        sm: Dict[str, str] = {}
-        ok = True
-        for a in args:
-            v = st.session_state.get(f"sf_law_{i}_{a}")
-            if v is None:
-                ok = False
-                break
-            sm[a] = str(v)
-        if ok and sm:
-            laws.append(build_law_spec(str(nm), sm))
+def _spatial_slice_vs_coord(
+    arr: Any,
+    pred: Dict[str, Any],
+    *,
+    coord_key: str,
+    prefer_last_t: bool,
+) -> Optional[np.ndarray]:
+    """Best-effort 1D slice along coord (x, y, or z) for spatial heatmap rows."""
+    coord = pred.get(coord_key)
+    if coord is None:
+        return None
+    c_arr = np.asarray(jnp.asarray(coord)).ravel()
+    nc = int(c_arr.shape[0])
+    a = np.asarray(jnp.asarray(arr), dtype=float)
+    if a.ndim == 0:
+        return None
+    t = pred.get("t")
+    if prefer_last_t and t is not None and a.ndim >= 2:
+        nt = int(np.asarray(jnp.asarray(t)).reshape(-1).shape[0])
+        if a.shape[0] == nt:
+            a = a[-1]
+    while a.ndim > 1 and a.shape[0] == 1:
+        a = a[0]
+    if a.ndim == 1 and a.shape[0] == nc:
+        return a
+    if a.ndim >= 2 and a.shape[-1] == nc:
+        flat = np.reshape(a, (-1, nc))
+        return np.nanmean(flat, axis=0)
+    if a.ndim >= 2 and a.shape[0] == nc:
+        flat = np.reshape(np.moveaxis(a, 0, -1), (-1, nc))
+        return np.nanmean(flat, axis=0)
+    return None
 
-    groups: List[Dict[str, Any]] = []
-    n_grp = int(st.session_state.get("sf_n_groups", 0))
-    for i in range(n_grp):
-        nm = st.session_state.get(f"sf_grp_name_{i}")
-        out_k = st.session_state.get(f"sf_grp_out_{i}")
-        if not nm or not out_k:
-            continue
-        try:
-            args = group_parameter_names(str(nm))
-        except Exception:  # noqa: BLE001
-            continue
-        sm = {}
-        ok = True
-        for a in args:
-            v = st.session_state.get(f"sf_grp_{i}_{a}")
-            if v is None:
-                ok = False
-                break
-            sm[a] = str(v)
-        if ok and sm:
-            groups.append(build_group_spec(str(nm), str(out_k), sm))
 
-    ca: List[Dict[str, Any]] = []
-    n_c = int(st.session_state.get("sf_n_caudit", 0))
-    for i in range(n_c):
-        nm = st.session_state.get(f"sf_ca_name_{i}")
-        out_k = st.session_state.get(f"sf_ca_out_{i}")
-        if not nm or not out_k:
-            continue
-        try:
-            args = model_parameter_names(str(nm))
-        except Exception:  # noqa: BLE001
-            continue
-        sm = {}
-        ok = True
-        for a in args:
-            v = st.session_state.get(f"sf_ca_{i}_{a}")
-            if v is None:
-                ok = False
-                break
-            sm[a] = str(v)
-        if not (ok and sm):
-            continue
-        ps = st.session_state.get(f"sf_ca_ps_{i}") or []
-        pt = st.session_state.get(f"sf_ca_pt_{i}") or []
-        if isinstance(ps, str):
-            ps = [ps] if ps else []
-        if isinstance(pt, str):
-            pt = [pt] if pt else []
-        cm = st.session_state.get(f"sf_ca_cm_{i}") or "pointwise"
-        axes = st.session_state.get(f"sf_ca_axes_{i}") or ["x"]
-        if isinstance(axes, str):
-            axes = [axes]
-        ivk = st.session_state.get(f"sf_ca_ivk_{i}") or ""
-        ivk = str(ivk).strip() or None
-        qw_raw = (st.session_state.get(f"sf_ca_qw_{i}") or "").strip()
-        qw: Dict[str, str] = {}
-        if qw_raw:
-            qobj = json.loads(qw_raw)
-            if isinstance(qobj, dict):
-                qw = {str(k): str(v) for k, v in qobj.items()}
-        ca.append(
-            build_audit_spec_dict(
-                category="constitutive",
-                name=str(nm),
-                output_key=str(out_k),
-                state_map=sm,
-                predicted_spatial=list(ps),
-                predicted_temporal=list(pt),
-                closure_mode=str(cm),
-                quadrature_weights=qw,
-                chain_spatial_axes=list(axes),
-                implied_value_key=ivk,
-            )
-        )
+def _build_spatial_panels_from_last_run(
+    residuals: Optional[Dict[str, Any]],
+    pred: Dict[str, Any],
+    *,
+    coord_key: str,
+    prefer_last_t: bool,
+    log_entry: Optional[Dict[str, Any]] = None,
+    first_rms: Optional[Dict[str, Any]] = None,
+    r_ref: Optional[Dict[str, float]] = None,
+) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Law and constitutive spatial panels (R_norm-style) along ``coord_key``."""
+    if residuals is None:
+        return None, None
+    coord = pred.get(coord_key)
+    if coord is None:
+        return None, None
+    coord_arr = np.asarray(jnp.asarray(coord), dtype=float).ravel()
+    flat = flatten_residuals(residuals)
 
-    sa: List[Dict[str, Any]] = []
-    n_s = int(st.session_state.get("sf_n_saudit", 0))
-    pi_names = set(list_pi_constant_group_names())
-    for i in range(n_s):
-        nm = st.session_state.get(f"sf_sa_name_{i}")
-        out_k = st.session_state.get(f"sf_sa_out_{i}")
-        if not nm or not out_k:
+    law_values: Dict[str, np.ndarray] = {}
+    const_values: Dict[str, np.ndarray] = {}
+    for k, v in sorted(flat.items()):
+        sl = _spatial_slice_vs_coord(v, pred, coord_key=coord_key, prefer_last_t=prefer_last_t)
+        if sl is None:
             continue
-        try:
-            args = scaling_fn_parameter_names(str(nm))
-        except Exception:  # noqa: BLE001
-            continue
-        sm = {}
-        ok = True
-        for a in args:
-            v = st.session_state.get(f"sf_sa_{i}_{a}")
-            if v is None:
-                ok = False
-                break
-            sm[a] = str(v)
-        if not (ok and sm):
-            continue
-        ps = st.session_state.get(f"sf_sa_ps_{i}") or []
-        pt = st.session_state.get(f"sf_sa_pt_{i}") or []
-        if isinstance(ps, str):
-            ps = [ps] if ps else []
-        if isinstance(pt, str):
-            pt = [pt] if pt else []
-        cm = st.session_state.get(f"sf_sa_cm_{i}") or "pointwise"
-        axes = st.session_state.get(f"sf_sa_axes_{i}") or ["x"]
-        if isinstance(axes, str):
-            axes = [axes]
-        ivk = st.session_state.get(f"sf_sa_ivk_{i}") or ""
-        ivk = str(ivk).strip() or None
-        qw_raw = (st.session_state.get(f"sf_sa_qw_{i}") or "").strip()
-        qw = {}
-        if qw_raw:
-            qobj = json.loads(qw_raw)
-            if isinstance(qobj, dict):
-                qw = {str(k): str(v) for k, v in qobj.items()}
-        use_pi = bool(st.session_state.get(f"sf_sa_pi_{i}", False)) and str(nm) in pi_names
-        cmp_keys = st.session_state.get(f"sf_sa_cmp_{i}") or []
-        if isinstance(cmp_keys, str):
-            cmp_keys = [cmp_keys] if cmp_keys else []
-        sa.append(
-            build_audit_spec_dict(
-                category="scaling",
-                name=str(nm),
-                output_key=str(out_k),
-                state_map=sm,
-                predicted_spatial=list(ps),
-                predicted_temporal=list(pt),
-                closure_mode=str(cm),
-                quadrature_weights=qw,
-                chain_spatial_axes=list(axes),
-                implied_value_key=ivk,
-                invariance_pi_constant=use_pi,
-                invariance_compare_keys=list(cmp_keys) if use_pi else [],
-                invariance_scale_c=float(st.session_state.get("sf_pi_c_global", 10.0)),
-            )
-        )
+        scale_k = _per_key_scale_flat(k, log_entry=log_entry, first_rms=first_rms, r_ref=r_ref)
+        denom = max(float(scale_k), 1e-30)
+        row = np.abs(sl) / denom
+        if k.startswith("laws/") and len(law_values) < 12:
+            law_values[k] = row
+        elif k.startswith("constitutive/") and len(const_values) < 12:
+            const_values[k] = row
+        if len(law_values) >= 12 and len(const_values) >= 12:
+            break
 
-    pf = st.session_state.get("sf_primary_fields")
-    if pf is None:
-        pf = list(DEFAULT_PRIMARY)
-    if isinstance(pf, str):
-        pf = [pf]
+    pos = {"position_axis": coord_key}
+    law_panel = {**pos, "x": coord_arr, "values": law_values} if law_values else None
+    const_panel = {**pos, "x": coord_arr, "values": const_values} if const_values else None
+    return law_panel, const_panel
 
-    return {
-        "laws": laws,
-        "groups": groups,
-        "constitutive_audit": ca,
-        "scaling_audit": sa,
-        "primary_fields": list(pf),
-    }
+
+def _studio_monitor_spatial_bundle() -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], str]:
+    """Spatial panels + Plotly heatmap colorscale from sidebar session state."""
+    eng = st.session_state.get("last_engine")
+    log_entry = eng.log[-1] if eng and getattr(eng, "log", None) else None
+    first_rms = (eng.log[0].get("rms") if eng and eng.log else None) or {}
+    coord = str(st.session_state.get("sb_spatial_axis", "x"))
+    prefer_last_t = st.session_state.get("studio_fd_time_label", "Steady") != "Steady"
+    r_ref = st.session_state.get("last_r_ref") or {}
+    if not isinstance(r_ref, dict):
+        r_ref = {}
+    law_panel, const_panel = _build_spatial_panels_from_last_run(
+        st.session_state.get("last_residuals"),
+        st.session_state.get("state_pred") or {},
+        coord_key=coord,
+        prefer_last_t=prefer_last_t,
+        log_entry=log_entry,
+        first_rms=first_rms,
+        r_ref=r_ref,
+    )
+    cs = str(st.session_state.get("sb_heatmap_cs", "Jet"))
+    return law_panel, const_panel, cs
 
 
 @as_fragment
@@ -345,12 +481,17 @@ def studio_redraw_plotly_fragment() -> None:
         )
         if st.button("Redraw dashboard", key="viz_redraw_btn"):
             try:
+                _law_panel, _rnorm_panel, _hm_cs = _studio_monitor_spatial_bundle()
                 fig2 = visualize(
                     st.session_state.get("viz_log") or [],
                     keys=list(vk) if vk else None,
                     backend="plotly",
                     r_ref=st.session_state.get("last_r_ref") or None,
                     max_legend_keys=int(st.session_state.get("last_max_leg", 16)),
+                    mode="training",
+                    spatial_law_panel=_law_panel,
+                    spatial_rnorm_panel=_rnorm_panel,
+                    spatial_heatmap_colorscale=_hm_cs,
                 )
                 if fig2 is not None:
                     try:
@@ -368,6 +509,13 @@ def studio_redraw_plotly_fragment() -> None:
                 st.warning(str(ex))
 
 
+_SPATIAL_VIEW_OPTIONS: Dict[str, str] = {
+    "Auto (line / heatmap / histogram)": "auto",
+    "3D surface (2D field + x, y)": "surface3d",
+    "3D volume (3D field + x, y, z)": "volume3d",
+}
+
+
 @as_fragment
 def studio_spatial_fragment() -> None:
     st.subheader("Explore a residual or state array")
@@ -379,6 +527,16 @@ def studio_spatial_fragment() -> None:
         return
     flat = flatten_residuals(res) if res else {}
     keys = sorted(set(flat.keys()) | set((pred or {}).keys()))
+    _hm_sp = str(st.session_state.get("sb_heatmap_cs", "Jet"))
+    _sv_label = st.selectbox(
+        "Spatial plot type",
+        options=list(_SPATIAL_VIEW_OPTIONS.keys()),
+        index=0,
+        key="sp_spatial_view_label",
+        help="3D surface: 2D slice (after time index) with 1D x and y in state_pred. "
+        "3D volume: 3D array with shape (len(x), len(y), len(z)) and 1D coords.",
+    )
+    _spatial_view = _SPATIAL_VIEW_OPTIONS[_sv_label]
     mode = st.radio("View", ["Single array", "pred − ref (shared keys)"], horizontal=True, key="sp_mode")
     if mode.startswith("pred"):
         if not ref:
@@ -394,14 +552,23 @@ def studio_spatial_fragment() -> None:
                 ra = jnp.asarray(ref[choice])
                 shape = tuple(int(x) for x in pa.shape)
                 st.caption(f"shape pred = {shape}, ref = {tuple(int(x) for x in ra.shape)}")
-                if len(shape) >= 1 and shape[0] > 1:
-                    t_idx = st.slider("Time / leading-axis index", 0, shape[0] - 1, 0, key="sp_t2")
+                t_arr = (pred or {}).get("t")
+                if len(shape) >= 1 and shape[0] > 1 and t_arr is not None:
+                    t_idx = st.slider("Time index (pred-ref)", 0, shape[0] - 1, shape[0] - 1, key="sp_t2")
+                x_arr = (pred or {}).get("x")
+                y_arr = (pred or {}).get("y")
+                z_arr = (pred or {}).get("z")
                 fig = plotly_pred_minus_ref(
                     pa,
                     ra,
                     title=choice,
                     time_index=t_idx,
                     time_axis=0,
+                    heatmap_colorscale=_hm_sp,
+                    spatial_view=_spatial_view,  # type: ignore[arg-type]
+                    x=np.asarray(jnp.asarray(x_arr)).ravel() if x_arr is not None else None,
+                    y=np.asarray(jnp.asarray(y_arr)).ravel() if y_arr is not None else None,
+                    z_coord=np.asarray(jnp.asarray(z_arr)).ravel() if z_arr is not None else None,
                 )
                 _pc_spatial(fig, "plotly_spatial_pr")
     else:
@@ -413,9 +580,23 @@ def studio_spatial_fragment() -> None:
             shape = tuple(int(x) for x in jnp.asarray(arr).shape)
             st.caption(f"shape = {shape}")
             t_idx = None
-            if len(shape) >= 1 and shape[0] > 1:
-                t_idx = st.slider("Time / leading-axis index", 0, shape[0] - 1, 0, key="sp_t1")
-            fig = plotly_residual_or_state(arr, title=choice, time_index=t_idx, time_axis=0)
+            t_arr = (pred or {}).get("t")
+            if len(shape) >= 1 and shape[0] > 1 and t_arr is not None:
+                t_idx = st.slider("Time index", 0, shape[0] - 1, shape[0] - 1, key="sp_t1")
+            x_arr = (pred or {}).get("x")
+            y_arr = (pred or {}).get("y")
+            z_arr = (pred or {}).get("z")
+            fig = plotly_residual_or_state(
+                arr,
+                title=choice,
+                x=np.asarray(jnp.asarray(x_arr)).ravel() if x_arr is not None else None,
+                y=np.asarray(jnp.asarray(y_arr)).ravel() if y_arr is not None else None,
+                z_coord=np.asarray(jnp.asarray(z_arr)).ravel() if z_arr is not None else None,
+                time_index=t_idx,
+                time_axis=0,
+                heatmap_colorscale=_hm_sp,
+                spatial_view=_spatial_view,  # type: ignore[arg-type]
+            )
             _pc_spatial(fig, "plotly_spatial_single")
 
 
@@ -440,6 +621,9 @@ tab_data, tab_cfg, tab_run, tab_space, tab_export = st.tabs(
 
 with tab_data:
     st.subheader("State prediction (`state_pred`)")
+    with st.expander("Expected shapes for `T` and coords (from sidebar **Path B — FD grid**)", expanded=False):
+        st.markdown(_fd_expected_field_shapes_md())
+    st.caption(_fd_expected_field_one_liner())
     st.caption(
         "Formats: **.npz** (multi-key), **.npy** (single array — set key name below), "
         "**.h5** / **.hdf5**, **.nc** / **.nc4** (install `moju[studio-science]` for HDF5/NetCDF)."
@@ -481,6 +665,22 @@ with tab_data:
     else:
         st.warning("Upload a state file to define `state_pred`.")
 
+    _pred_view = st.session_state.get("state_pred") or {}
+    if _pred_view:
+        rows = []
+        for k in sorted(_pred_view.keys()):
+            v = _pred_view[k]
+            sh = getattr(v, "shape", None)
+            dt = getattr(v, "dtype", None)
+            rows.append(
+                {
+                    "key": k,
+                    "shape": str(tuple(sh)) if sh is not None else "",
+                    "dtype": str(dt) if dt is not None else "",
+                }
+            )
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
     st.subheader("Optional reference (`state_ref`)")
     ref_npy_key = st.text_input(
         "NPY key for `state_ref` (only for `.npy`)",
@@ -521,191 +721,184 @@ with tab_data:
         st.error(f"Invalid JSON: {e}")
 
 with tab_cfg:
-    law_names_t, models_t, gnames_t = cached_registry_names()
-    law_names, models, gnames = list(law_names_t), list(models_t), list(gnames_t)
-
-    use_simple = st.checkbox(
-        "Use simple (form) builder for laws / groups / audits",
-        value=True,
-        key="cfg_use_simple",
+    st.markdown(
+        "### Simplified physics setup\n"
+        "- Name **`state_pred`** keys to match **law / model / group argument names** "
+        "(e.g. `k_solid`, `T`, `rho`). Constants go in **Constants JSON**.\n"
+        "- **Models** → constitutive audits; **Groups** → both `groups` and scaling audits (auto).\n"
+        "- **Finite differences** default **on** on the Run tab (grid coords `x`… in `state_pred`)."
     )
-
-    pred = st.session_state.get("state_pred") or {}
-    cdict = st.session_state.get("constants_dict") or {}
-    opts = _key_options(pred, {k: None for k in cdict.keys()})
 
     st.subheader("Constants")
     cjson = st.text_area("Constants JSON (merged into config)", value=DEMO_CONSTANTS, height=100)
     try:
         st.session_state["constants_dict"] = constants_json_to_dict(cjson)
-        cdict = st.session_state["constants_dict"]
-        opts = _key_options(pred, {k: None for k in cdict.keys()})
     except (json.JSONDecodeError, ValueError) as e:
         st.error(str(e))
         st.session_state["constants_dict"] = {}
 
-    opts_pf = sorted(set(DEFAULT_PRIMARY) | set(opts))
-    default_pf = [x for x in DEFAULT_PRIMARY if x in opts_pf] or opts_pf[: min(6, len(opts_pf))]
-    st.multiselect(
-        "primary_fields (monitor inference hints)",
-        options=opts_pf,
-        default=default_pf,
-        key="sf_primary_fields",
+    expert = st.checkbox(
+        "Expert: edit full MonitorConfig JSON (disables auto builder below)",
+        value=False,
+        key="cfg_expert_mode",
     )
 
-    st.subheader("π-constant scale `c`")
-    st.caption("Applied to every scaling audit with π enabled (Path A only).")
-    st.slider(
-        "invariance_scale_c",
-        min_value=1.01,
-        max_value=100.0,
-        value=10.0,
-        step=0.01,
-        key="sf_pi_c_global",
-    )
-    pi_c = float(st.session_state.get("sf_pi_c_global", 10.0))
-
-    if use_simple:
-        st.subheader("Laws")
-        st.number_input("Number of laws", 0, 8, 0, step=1, key="sf_n_laws")
-        n_laws = int(st.session_state.get("sf_n_laws", 0))
-        for i in range(n_laws):
-            st.markdown(f"**Law {i + 1}**")
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                st.selectbox("name", law_names, key=f"sf_law_name_{i}")
-            nm = st.session_state.get(f"sf_law_name_{i}", law_names[0] if law_names else "")
-            if nm and opts:
-                for a in law_parameter_names(str(nm)):
-                    st.selectbox(f"state key for `{a}`", opts, key=f"sf_law_{i}_{a}")
-
-        st.subheader("Groups (dimensionless helpers)")
-        st.number_input("Number of group specs", 0, 8, 0, step=1, key="sf_n_groups")
-        n_grp = int(st.session_state.get("sf_n_groups", 0))
-        for i in range(n_grp):
-            st.markdown(f"**Group {i + 1}**")
-            st.selectbox("Groups.* name", gnames, key=f"sf_grp_name_{i}")
-            st.text_input("output_key (state field name)", value="Re", key=f"sf_grp_out_{i}")
-            nm = st.session_state.get(f"sf_grp_name_{i}", gnames[0] if gnames else "")
-            if nm and opts:
-                for a in group_parameter_names(str(nm)):
-                    st.selectbox(f"state key for `{a}`", opts, key=f"sf_grp_{i}_{a}")
-
-        st.subheader("Constitutive audits")
-        st.number_input("Number of constitutive audits", 0, 8, 0, step=1, key="sf_n_caudit")
-        n_c = int(st.session_state.get("sf_n_caudit", 0))
-        for i in range(n_c):
-            st.markdown(f"**Constitutive audit {i + 1}**")
-            st.selectbox("Models.* name", models, key=f"sf_ca_name_{i}")
-            st.text_input("output_key", value="out", key=f"sf_ca_out_{i}")
-            nm = st.session_state.get(f"sf_ca_name_{i}", models[0] if models else "")
-            if nm and opts:
-                for a in model_parameter_names(str(nm)):
-                    st.selectbox(f"state key for `{a}`", opts, key=f"sf_ca_{i}_{a}")
-            st.multiselect("predicted_spatial (state keys)", opts, key=f"sf_ca_ps_{i}")
-            st.multiselect("predicted_temporal (state keys)", opts, key=f"sf_ca_pt_{i}")
-            st.radio("closure_mode", ["pointwise", "weak"], horizontal=True, key=f"sf_ca_cm_{i}")
-            st.multiselect("chain_spatial_axes", ["x", "y", "z"], default=["x"], key=f"sf_ca_axes_{i}")
-            st.text_input("implied_value_key (optional)", value="", key=f"sf_ca_ivk_{i}")
-            st.text_input('quadrature_weights JSON e.g. {"x":"w_x"}', value="", key=f"sf_ca_qw_{i}")
-
-        st.subheader("Scaling audits")
-        st.number_input("Number of scaling audits", 0, 8, 0, step=1, key="sf_n_saudit")
-        n_s = int(st.session_state.get("sf_n_saudit", 0))
-        for i in range(n_s):
-            st.markdown(f"**Scaling audit {i + 1}**")
-            st.selectbox("Groups.* name", gnames, key=f"sf_sa_name_{i}")
-            st.text_input("output_key", value="Re", key=f"sf_sa_out_{i}")
-            nm = st.session_state.get(f"sf_sa_name_{i}", gnames[0] if gnames else "")
-            if nm and opts:
-                for a in scaling_fn_parameter_names(str(nm)):
-                    st.selectbox(f"state key for `{a}`", opts, key=f"sf_sa_{i}_{a}")
-            st.multiselect("predicted_spatial", opts, key=f"sf_sa_ps_{i}")
-            st.multiselect("predicted_temporal", opts, key=f"sf_sa_pt_{i}")
-            st.radio("closure_mode", ["pointwise", "weak"], horizontal=True, key=f"sf_sa_cm_{i}", index=0)
-            st.multiselect("chain_spatial_axes", ["x", "y", "z"], default=["x"], key=f"sf_sa_axes_{i}")
-            st.text_input("implied_value_key (optional)", value="", key=f"sf_sa_ivk_{i}")
-            st.text_input('quadrature_weights JSON', value="", key=f"sf_sa_qw_{i}")
-            pi_ok = str(nm) in set(list_pi_constant_group_names())
-            st.checkbox(
-                "Enable π-constant invariance (Path A only; needs recipe + compare keys)",
-                value=False,
-                key=f"sf_sa_pi_{i}",
-                disabled=not pi_ok,
-            )
-            if pi_ok:
-                st.multiselect(
-                    "invariance_compare_keys",
-                    opts,
-                    key=f"sf_sa_cmp_{i}",
-                )
-
-        st.subheader("Optional JSON override")
-        st.caption("Non-empty lists in this JSON replace the corresponding form section.")
-        st.text_area(
-            "Override JSON (laws, groups, constitutive_audit, scaling_audit, primary_fields, constants)",
-            value="{}",
-            height=120,
-            key="sf_json_override",
-        )
-    else:
+    if expert:
         preset = st.selectbox(
-            "Config template",
-            ["Custom only", "Empty audits", "Demo: Laplace law (needs phi_laplacian in NPZ)"],
+            "Template",
+            ["Empty audits", "Demo: Laplace law (needs phi_laplacian in NPZ)"],
+            key="cfg_expert_preset",
         )
-        base_json = DEFAULT_CONFIG_FRAGMENT
-        if preset == "Empty audits":
-            base_json = DEFAULT_CONFIG_FRAGMENT
-        elif preset == "Demo: Laplace law (needs phi_laplacian in NPZ)":
-            base_json = DEMO_LAPLACE
+        base_json = DEMO_LAPLACE if preset.startswith("Demo") else DEFAULT_CONFIG_FRAGMENT
         st.text_area(
             "MonitorConfig fragment (JSON)",
             value=base_json,
-            height=220,
+            height=260,
             key="config_fragment_raw",
         )
+        st.caption(
+            "Law FD: derived inputs (e.g. `T_laplacian`) need **primitives** + **x** (… in `state_pred`) "
+            "with Run tab **auto_path_b_derivatives** + **fill_law_fd**. See `moju.monitor.law_fd_recipes`. "
+            "**Fourier / `fo`:** implied **`Groups.fo`** needs **`alpha`**, **`t`**, **`L`**. **`t`** = mesh **time coordinate** in "
+            "**`state_pred`** (match sidebar **Path B — FD grid** `key_t`, default `t`; aliases `time`/`coords_t`), not Constants unless you want a scalar broadcast. "
+            "**`thermal_diffusivity`** auto-fills **`alpha`** from `k`,`rho`,`cp` when selected. README → Fourier."
+        )
+    else:
+        st.multiselect(
+            "Laws (FD-supported subset)",
+            options=list(STUDIO_LAW_NAMES),
+            default=[],
+            key="st_auto_laws",
+            help="Governing laws; arguments use identity state_map (NPZ key = law argument name).",
+        )
+        st.multiselect(
+            "Models → constitutive audits",
+            options=list(STUDIO_MODEL_NAMES),
+            default=[],
+            key="st_auto_models",
+            help="Each model becomes one constitutive_audit row with automatic chain keys from your NPZ.",
+        )
+        st.multiselect(
+            "Groups → dimensionless groups + scaling audits",
+            options=list(STUDIO_GROUP_NAMES_EFFECTIVE),
+            default=[],
+            key="st_auto_groups",
+            help="Each group builds a `groups` entry and a matching `scaling_audit` entry.",
+        )
+        st.text_area(
+            "Optional JSON override (merge into auto fragment: laws, groups, audits, primary_fields, derived_state_chain)",
+            value="{}",
+            height=100,
+            key="sf_json_override",
+        )
+        st.caption(
+            "**Fourier:** **`t`** = time coord array in NPZ (`key_t`), not Constants by default. **thermal_diffusivity** fills **`alpha`** from `k`,`rho`,`cp`. Registry: `studio_model_derived_registry.py`. README § Fourier."
+        )
 
-    with st.expander("Registry hints"):
+        _laws_sel = st.session_state.get("st_auto_laws") or []
+        if _laws_sel:
+            with st.expander("Law FD prerequisites (selected laws)", expanded=False):
+                st.markdown(format_laws_fd_help(list(_laws_sel)))
+
+    with st.expander("Dependency preview (NPZ + constants + FD)", expanded=False):
+        pred_keys_preview = set((st.session_state.get("state_pred") or {}).keys())
+        cdict = st.session_state.get("constants_dict") or {}
+        ck = set(cdict.keys())
+        try:
+            if expert:
+                fr = parse_monitor_config_json(st.session_state.get("config_fragment_raw") or "{}")
+            else:
+                fr = build_studio_auto_fragment(
+                    law_names=list(st.session_state.get("st_auto_laws") or []),
+                    model_names=list(st.session_state.get("st_auto_models") or []),
+                    group_names=list(st.session_state.get("st_auto_groups") or []),
+                    pred_keys=pred_keys_preview,
+                    constant_keys=ck,
+                )
+                override = st.session_state.get("sf_json_override") or "{}"
+                fr = merge_simple_config_with_json_override(fr, override)
+            fr = merge_monitor_config_fragment(fr, {"constants": cdict})
+            fr = enrich_fragment_from_model_audits(fr)
+            preview_grid_kw = dict(_fd_grid_kw_from_sidebar_session())
+            if st.session_state.get("run_fd_customize"):
+                preview_grid_kw["key_x"] = st.session_state.get("run_grid_key_x", "x")
+                preview_grid_kw["key_y"] = st.session_state.get("run_grid_key_y", "y")
+                preview_grid_kw["key_z"] = st.session_state.get("run_grid_key_z", "z")
+                preview_grid_kw["key_t"] = st.session_state.get("run_grid_key_t", "t")
+            preview_grid = path_b_grid_from_options(**preview_grid_kw)
+            st.caption(
+                "Assumes **auto_path_b_derivatives** and **fill_law_fd** ON. "
+                "Spatial data, time (steady/transient), and grid layout match the **sidebar** (*Path B — FD grid*). "
+                "Built-in **aliases** (e.g. temperature→T) are noted when relevant."
+            )
+            st.markdown(
+                plan_markdown_for_display(
+                    fr,
+                    pred_keys=pred_keys_preview,
+                    constant_keys=ck,
+                    auto_path_b_derivatives=True,
+                    fill_law_fd=True,
+                    path_b_grid=preview_grid,
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            st.warning(str(e))
+
+    with st.expander("Studio allowlists (reference)"):
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.text_area("Laws", "\n".join(law_names_t[:50]), height=160, disabled=True)
+            st.text_area("Laws", "\n".join(STUDIO_LAW_NAMES), height=200, disabled=True)
         with c2:
-            st.text_area("Models", "\n".join(models_t[:50]), height=160, disabled=True)
+            st.text_area("Models", "\n".join(STUDIO_MODEL_NAMES), height=200, disabled=True)
         with c3:
-            st.text_area("Groups", "\n".join(gnames_t[:50]), height=160, disabled=True)
+            st.text_area("Groups", "\n".join(STUDIO_GROUP_NAMES_EFFECTIVE), height=200, disabled=True)
 
 with tab_run:
     st.caption(
-        "Use the **sidebar** for session log append/clear. Submit the form below to run the pipeline "
-        "(single batch update)."
+        "Use the **sidebar** for **Path B — FD grid** (spatial dimension, time, layout), session log, and dashboard mode. "
+        "Submit the form below to run the pipeline (single batch update)."
     )
     with st.form("audit_run_form"):
         path_mode = st.radio(
             "Execution path",
             [
-                "Path B — pass uploaded `state_pred`",
-                "Path A — shim (default NPZ `state_builder`; π-constant needs a recomputing builder)",
+                "Path B — pass uploaded `state_pred` (default)",
+                "Path A — NPZ `state_builder` shim (π-constant needs a recomputing builder)",
             ],
             horizontal=True,
+            index=0,
         )
         path_b = path_mode.startswith("Path B")
         cfd1, cfd2 = st.columns(2)
         with cfd1:
-            auto_fd = st.checkbox("auto_path_b_derivatives", value=False)
+            auto_fd = st.checkbox(
+                "auto_path_b_derivatives (finite differences for d_* keys)",
+                value=True,
+            )
         with cfd2:
-            fill_law = st.checkbox("fill_law_fd (needs auto_path_b_derivatives)", value=False)
-        use_custom_grid = st.checkbox("Customize PathBGridConfig", value=False)
+            fill_law = st.checkbox(
+                "fill_law_fd (needs auto_path_b_derivatives; fills law inputs on grid)",
+                value=True,
+            )
+        st.caption(
+            "**Spatial data**, **Time**, and **Grid layout** are in the **sidebar** (*Path B — FD grid*). "
+            "Example: **1D + Steady + Meshgrid** → NPZ needs `x` (and fields like `T`); `y`/`z`/`t` not required for spatial FD hints. "
+            "**Separable** uses 1D `x` (and `y`/`z`) vectors vs field shape `(nx,)`, `(nx,ny)`, …"
+        )
+        use_custom_grid = st.checkbox(
+            "Customize coordinate key names (PathBGridConfig key_x / key_y / key_z / key_t)",
+            value=False,
+            key="run_fd_customize",
+        )
         grid_kw: Dict[str, Any] = {}
+        if auto_fd:
+            grid_kw.update(_fd_grid_kw_from_sidebar_session())
         if auto_fd and use_custom_grid:
-            st.caption("Path B grid")
-            grid_kw["layout"] = st.selectbox("layout", ["meshgrid", "separable"], index=0)
-            sd = st.selectbox("spatial_dimension", ["auto", "1", "2", "3"], index=0)
-            grid_kw["spatial_dimension"] = "auto" if sd == "auto" else int(sd)
-            grid_kw["steady"] = st.checkbox("steady", value=True)
-            grid_kw["key_x"] = st.text_input("key_x", value="x")
-            grid_kw["key_y"] = st.text_input("key_y", value="y")
-            grid_kw["key_z"] = st.text_input("key_z", value="z")
-            grid_kw["key_t"] = st.text_input("key_t", value="t")
+            st.caption("Override NPZ axis names if your mesh uses other keys (defaults: `x`,`y`,`z`,`t`).")
+            grid_kw["key_x"] = st.text_input("key_x", value="x", key="run_grid_key_x")
+            grid_kw["key_y"] = st.text_input("key_y", value="y", key="run_grid_key_y")
+            grid_kw["key_z"] = st.text_input("key_z", value="z", key="run_grid_key_z")
+            grid_kw["key_t"] = st.text_input("key_t", value="t", key="run_grid_key_t")
 
         st.subheader("Audit / visualize options")
         r_ref_json = st.text_area(
@@ -715,6 +908,15 @@ with tab_run:
             "Optional audit weights (JSON object: key → float)", value="", height=60, key="form_weights"
         )
         max_leg = st.number_input("visualize max_legend_keys", min_value=1, max_value=64, value=16)
+        with st.expander("Advanced (π-constant scale)"):
+            st.slider(
+                "invariance_scale_c (scaling audits with π enabled in expert JSON)",
+                min_value=1.01,
+                max_value=100.0,
+                value=10.0,
+                step=0.01,
+                key="sf_pi_c_global",
+            )
         run_clicked = st.form_submit_button("Run compute_residuals + audit", type="primary")
 
     if run_clicked:
@@ -730,24 +932,45 @@ with tab_run:
                 st.error(str(e))
                 st.stop()
 
-            use_simple_cfg = bool(st.session_state.get("cfg_use_simple", True))
+            if fill_law and not auto_fd:
+                st.error("fill_law_fd requires auto_path_b_derivatives (enable FD or turn off fill_law_fd).")
+                st.stop()
+
+            expert_cfg = bool(st.session_state.get("cfg_expert_mode", False))
             pi_c_run = float(st.session_state.get("sf_pi_c_global", 10.0))
             append_log = bool(st.session_state.get("sb_append_log", False))
 
             try:
                 with pipeline_status("Running Moju audit pipeline…") as pstat:
                     status_update(pstat, "Building MonitorConfig…")
-                    if use_simple_cfg:
-                        simple = _collect_simple_fragment()
-                        override = st.session_state.get("sf_json_override") or "{}"
-                        frag_d = merge_simple_config_with_json_override(simple, override)
-                    else:
+                    if expert_cfg:
                         frag_d = parse_monitor_config_json(st.session_state.get("config_fragment_raw") or "{}")
+                    else:
+                        pred_keys = set((pred or {}).keys())
+                        cdict_run = st.session_state.get("constants_dict") or {}
+                        const_keys = set(cdict_run.keys())
+                        laws_sel = list(st.session_state.get("st_auto_laws") or [])
+                        models_sel = list(st.session_state.get("st_auto_models") or [])
+                        groups_sel = list(st.session_state.get("st_auto_groups") or [])
+                        try:
+                            frag_d = build_studio_auto_fragment(
+                                law_names=laws_sel,
+                                model_names=models_sel,
+                                group_names=groups_sel,
+                                pred_keys=pred_keys,
+                                constant_keys=const_keys,
+                            )
+                        except ValueError as e:
+                            st.error(str(e))
+                            st.stop()
+                        override = st.session_state.get("sf_json_override") or "{}"
+                        frag_d = merge_simple_config_with_json_override(frag_d, override)
 
                     frag_d = merge_monitor_config_fragment(
                         frag_d, {"constants": st.session_state.get("constants_dict") or {}}
                     )
                     frag_d = _apply_pi_c_to_scaling_audit_dict(frag_d, pi_c_run)
+                    frag_d = enrich_fragment_from_model_audits(frag_d)
                     sb = None
                     if not path_b:
                         custom_sb = st.session_state.get("studio_recomputing_state_builder")
@@ -769,14 +992,32 @@ with tab_run:
                     cfg = monitor_config_from_merged_dict(frag_d, state_builder=sb)
 
                     fd_arg: Any = False
+                    plan_grid_for_plan = PathBGridConfig()
                     if auto_fd:
-                        fd_arg = path_b_grid_from_options(**grid_kw) if use_custom_grid else True
+                        fd_arg = path_b_grid_from_options(**grid_kw)
+                        plan_grid_for_plan = fd_arg
+                    pred_keys_run = set((pred or {}).keys())
+                    dep_plan = dependency_plan_for_path_b_run(
+                        cfg,
+                        pred_keys_run,
+                        auto_path_b_derivatives=bool(auto_fd),
+                        fill_law_fd=bool(fill_law),
+                        path_b_grid=plan_grid_for_plan,
+                    )
 
                     status_update(pstat, "Computing residuals…")
                     t0 = time.perf_counter()
                     engine = ResidualEngine(config=cfg)
                     ref = st.session_state.get("state_ref")
                     col = st.session_state.get("collocation") or {}
+
+                    if path_b and pred is not None and dep_plan.has_blocking_gaps():
+                        st.warning(
+                            "**Preflight (dependency planner)**\n\n"
+                            + format_planner_preflight_warning(dep_plan)
+                        )
+                        with st.expander("Dependency detail", expanded=False):
+                            st.markdown(dep_plan.to_markdown())
 
                     if path_b:
                         residuals = engine.compute_residuals(
@@ -823,16 +1064,31 @@ with tab_run:
                     rms_keys = sorted((engine.log[-1].get("rms") or {}).keys())
                     st.session_state["viz_rms_keys"] = rms_keys
 
-                    miss_s, miss_d = preflight_engine(engine, set(pred.keys()))
                     req_s = sorted(engine.required_state_keys())
                     req_d = sorted(engine.required_derivative_keys())
-                    chk = preflight_checklist_text(req_s, req_d, pred.keys())
+                    pred_k_list = list((pred or {}).keys())
+                    chk = preflight_checklist_with_dependency_plan(
+                        req_s,
+                        req_d,
+                        pred_k_list,
+                        dep_plan.to_markdown(),
+                        available_keys=sorted(dep_plan.effective_available_keys),
+                    )
                     st.session_state["last_preflight_text"] = chk
                     st.session_state["last_omitted"] = engine.log[-1].get("omitted") or []
                     st.session_state["last_inferred"] = engine.log[-1].get("inferred") or []
-                    st.session_state["last_miss_s"] = miss_s
-                    st.session_state["last_miss_d"] = miss_d
+                    st.session_state["last_preflight_planner_blocking"] = dep_plan.has_blocking_gaps()
+                    st.session_state["last_preflight_planner_summary"] = (
+                        format_planner_preflight_warning(dep_plan)
+                        if dep_plan.has_blocking_gaps()
+                        else ""
+                    )
+                    st.session_state["last_preflight_derivable_law_fd"] = list(
+                        dep_plan.derivable_law_fd_if_enabled
+                    )
                     st.session_state["last_preflight_chk"] = chk
+                    st.session_state["last_dep_plan_blocking"] = dep_plan.has_blocking_gaps()
+                    st.session_state["last_dep_plan_md"] = dep_plan.to_markdown()
 
                     status_complete(pstat, f"Done in {elapsed:.3f}s — log steps: {len(viz_log)}")
 
@@ -856,23 +1112,45 @@ with tab_run:
             mime="text/plain",
             key="dl_preflight_persistent",
         )
-        miss_s = st.session_state.get("last_miss_s") or []
-        miss_d = st.session_state.get("last_miss_d") or []
-        if miss_s or miss_d:
+        dep_blk = bool(st.session_state.get("last_dep_plan_blocking"))
+        plan_summary = st.session_state.get("last_preflight_planner_summary") or ""
+        if dep_blk and plan_summary:
             st.warning(
-                "Preflight: missing keys vs engine requirements "
-                f"(state: {miss_s or 'none'}; derivatives: {miss_d or 'none'}). "
-                "Closures may be omitted — check log `omitted` / `inferred`."
+                "**Preflight (dependency planner)**\n\n"
+                + plan_summary
+                + " Closures may be omitted — check log `omitted` / `inferred`."
+            )
+        elif dep_blk:
+            st.warning(
+                "Preflight: dependency planner reports blocking gaps — open **Required keys detail** "
+                "or **Last run — dependency planner**. Closures may be omitted — check log `omitted` / `inferred`."
             )
         with st.expander("Required keys detail"):
             st.text(chk)
+        dep_md = st.session_state.get("last_dep_plan_md")
+        if dep_md:
+            with st.expander("Last run — dependency planner", expanded=False):
+                st.markdown(dep_md)
 
         om = st.session_state.get("last_omitted") or []
         inf = st.session_state.get("last_inferred") or []
         if om:
             st.info("Omitted: " + "; ".join(om[:12]))
         if inf:
-            st.info("Inferred: " + "; ".join(inf[:12]))
+            laplace_hints = [s for s in inf if "laplacian" in s.lower() or "law_fd" in s.lower()]
+            if laplace_hints:
+                st.warning(
+                    "**Laplacian / law-FD:** some fills may have failed — check **Path B FD messages** below "
+                    f"({len(laplace_hints)} related line(s))."
+                )
+            st.info("Inferred (first 12): " + "; ".join(inf[:12]))
+            with st.expander("Path B FD messages (full log)", expanded=bool(laplace_hints)):
+                st.caption(
+                    "From `compute_residuals` (finite differences + law recipe fill). "
+                    "Typical Laplacian fixes: match **sidebar** 1D/2D/3D to data, use **Meshgrid** unless data is separable, "
+                    "align `T`/`x` shapes or sizes."
+                )
+                st.markdown("\n".join(f"- `{s}`" for s in inf))
 
         st.subheader("Admissibility")
         st.json(
@@ -905,12 +1183,17 @@ with tab_run:
 
         st.subheader("Monitor dashboard (Plotly)")
         try:
+            _law_panel_main, _rnorm_panel_main, _hm_cs_main = _studio_monitor_spatial_bundle()
             fig = visualize(
                 st.session_state.get("viz_log") or [],
                 keys=None,
                 backend="plotly",
                 r_ref=st.session_state.get("last_r_ref") or None,
                 max_legend_keys=int(st.session_state.get("last_max_leg", 16)),
+                mode="training",
+                spatial_law_panel=_law_panel_main,
+                spatial_rnorm_panel=_rnorm_panel_main,
+                spatial_heatmap_colorscale=_hm_cs_main,
             )
             if fig is not None:
                 try:

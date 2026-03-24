@@ -15,6 +15,7 @@ from moju.monitor import (
     list_scaling_closure_ids,
     visualize,
 )
+from moju.monitor.auditor import DEFAULT_VISUALIZE_TITLE_TEST, DEFAULT_VISUALIZE_TITLE_TRAINING
 from moju.monitor.closure_registry import MODEL_FNS, compute_implied_delta
 from moju.piratio.models import Models
 
@@ -29,6 +30,60 @@ class TestAdmissibilityLevel:
         assert admissibility_level(0.89) == "Moderate Admissibility"
         assert admissibility_level(0.90) == "High Admissibility"
         assert admissibility_level(1.0) == "High Admissibility"
+
+    def test_non_finite_unknown(self):
+        assert admissibility_level(float("nan")) == "Unknown"
+        assert admissibility_level(float("inf")) == "Unknown"
+
+
+class TestNanTolerantAuditMetrics:
+    def test_compute_log_step_metrics_geometric_mean_ignores_nan_keys(self):
+        import math
+
+        from moju.monitor.auditor import _compute_log_step_metrics
+
+        log = [
+            {
+                "index": 0,
+                "rms": {
+                    "constitutive/a/implied_delta": 1.0,
+                    "constitutive/b/implied_delta": float("nan"),
+                },
+                "scale": {
+                    "constitutive/a/implied_delta": 1.0,
+                    "constitutive/b/implied_delta": 1.0,
+                },
+            }
+        ]
+        m = _compute_log_step_metrics(log)
+        assert math.isclose(m[0]["category_admissibility_score"]["constitutive"], 0.5, rel_tol=1e-9)
+        assert "laws" not in m[0]["category_admissibility_score"]
+        assert math.isclose(m[0]["overall_admissibility_score"], 0.5, rel_tol=1e-9)
+
+    def test_compute_log_step_metrics_omits_category_when_all_nan(self):
+        from moju.monitor.auditor import _compute_log_step_metrics
+
+        log = [
+            {
+                "index": 0,
+                "rms": {"constitutive/x/implied_delta": float("nan")},
+                "scale": {"constitutive/x/implied_delta": 1.0},
+            }
+        ]
+        m = _compute_log_step_metrics(log)
+        assert "constitutive" not in m[0]["category_admissibility_score"]
+        import math
+
+        assert math.isnan(m[0]["overall_admissibility_score"])
+
+    def test_rms_scalar_uses_nanmean(self):
+        import math
+
+        from moju.monitor.auditor import _rms_scalar
+
+        x = jnp.array([1.0, jnp.nan, 3.0])
+        r = float(_rms_scalar(x))
+        assert math.isclose(r, math.sqrt(5.0), rel_tol=1e-5)
 
 
 class TestResidualEngineResidualDict:
@@ -54,6 +109,20 @@ class TestResidualEngineResidualDict:
         core.compute_residuals(state_pred)
         assert len(core.log) == 2
         assert "laws/laplace_equation" in core.log[0]["rms"]
+
+    def test_clear_log_resets_entries_and_index(self):
+        core = ResidualEngine(
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
+        )
+        state_pred = {"phi_laplacian": jnp.array(1.0)}
+        core.compute_residuals(state_pred)
+        core.compute_residuals(state_pred)
+        assert len(core.log) == 2
+        core.clear_log()
+        assert len(core.log) == 0
+        core.compute_residuals(state_pred)
+        assert len(core.log) == 1
+        assert core.log[0].get("index") == 0
 
     def test_constitutive_sutherland_closure(self, rtol, atol):
         core = ResidualEngine(
@@ -303,9 +372,86 @@ class TestVisualize:
                 "scale": {},
             },
         ]
-        fig = visualize(log, backend="matplotlib")
+        fig = visualize(log, backend="matplotlib", mode="training")
         assert fig is not None
-        assert len(fig.axes) >= 8
+        # Training: overall + category admissibility bars + 2 category R_norm axes (laws/constitutive)
+        assert len(fig.axes) >= 4
+        from matplotlib.projections.polar import PolarAxes
+
+        assert not any(isinstance(ax, PolarAxes) for ax in fig.axes)
+
+    def test_visualize_r_norm_scale_linear(self):
+        pytest.importorskip("matplotlib")
+        log = [
+            {
+                "index": 0,
+                "rms": {
+                    "laws/a": 1.0,
+                    "constitutive/m/chain_dx": 0.5,
+                    "scaling/pe/chain_dx": 0.1,
+                },
+                "scale": {},
+            },
+            {
+                "index": 1,
+                "rms": {
+                    "laws/a": 0.5,
+                    "constitutive/m/chain_dx": 0.25,
+                    "scaling/pe/chain_dx": 0.05,
+                },
+                "scale": {},
+            },
+        ]
+        fig = visualize(log, backend="matplotlib", mode="training", r_norm_scale="linear")
+        assert fig is not None
+        pytest.importorskip("plotly")
+        fig_p = visualize(log, backend="plotly", mode="training", r_norm_scale="linear")
+        assert fig_p is not None
+
+    def test_visualize_test_mode_uses_last_log_entry(self):
+        pytest.importorskip("matplotlib")
+        log = [
+            {"index": 0, "rms": {"laws/a": 10.0}, "scale": {"laws/a": 1.0}},
+            {"index": 1, "rms": {"laws/a": 0.1}, "scale": {"laws/a": 1.0}},
+        ]
+        fig = visualize(log, backend="matplotlib", mode="test")
+        assert fig is not None
+
+    def test_visualize_spatial_law_panel_matplotlib(self):
+        pytest.importorskip("matplotlib")
+        import numpy as np
+
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0}, "scale": {"laws/a": 1.0}},
+            {"index": 1, "rms": {"laws/a": 0.5}, "scale": {"laws/a": 1.0}},
+        ]
+        x = np.linspace(0, 1, 5)
+        fig = visualize(
+            log,
+            backend="matplotlib",
+            mode="training",
+            spatial_law_panel={"x": x, "values": {"a": np.ones(5) * 0.2}},
+        )
+        assert fig is not None
+        assert len(fig.axes) >= 5
+
+    def test_build_visualize_bundle_category_training(self):
+        from moju.monitor.auditor import _build_visualize_bundle
+
+        log = [
+            {"index": 0, "rms": {"laws/x": 1.0, "constitutive/a/b": 0.5, "scaling/y/z": 0.2}, "scale": {}},
+            {"index": 1, "rms": {"laws/x": 0.5, "constitutive/a/b": 0.25, "scaling/y/z": 0.1}, "scale": {}},
+        ]
+        b = _build_visualize_bundle(log, None, None, 8, spatial_parsed=None, mode="training")
+        assert b is not None
+        ct = b["category_training"]
+        assert "laws/x" in ct["laws"]["keys"]
+        assert "constitutive/a/b" in ct["constitutive"]["keys"]
+        assert "scaling" not in ct
+
+    def test_visualize_invalid_mode_raises(self):
+        with pytest.raises(ValueError, match="mode"):
+            visualize([{"index": 0, "rms": {"k": 1.0}, "scale": {}}], mode="invalid")
 
     def test_visualize_plotly_returns_figure(self):
         pytest.importorskip("plotly")
@@ -333,10 +479,46 @@ class TestVisualize:
                 "scale": {},
             },
         ]
-        fig = visualize(log, backend="plotly")
+        fig = visualize(log, backend="plotly", mode="training")
         assert fig is not None
         assert hasattr(fig, "data")
-        assert len(fig.data) >= 1
+        assert len(fig.data) >= 4
+
+    def test_visualize_plotly_default_titles(self):
+        pytest.importorskip("plotly")
+        log = [
+            {
+                "index": 0,
+                "rms": {
+                    "laws/a": 1.0,
+                    "constitutive/m/chain_dx": 0.5,
+                    "scaling/pe/chain_dx": 0.1,
+                },
+                "scale": {},
+            },
+            {
+                "index": 1,
+                "rms": {
+                    "laws/a": 0.5,
+                    "constitutive/m/chain_dx": 0.25,
+                    "scaling/pe/chain_dx": 0.05,
+                },
+                "scale": {},
+            },
+        ]
+        fig_tr = visualize(log, backend="plotly", mode="training")
+        assert DEFAULT_VISUALIZE_TITLE_TRAINING in (fig_tr.layout.title.text or "")
+        fig_te = visualize(log, backend="plotly", mode="test")
+        assert DEFAULT_VISUALIZE_TITLE_TEST in (fig_te.layout.title.text or "")
+
+    def test_visualize_plotly_figure_title_override(self):
+        pytest.importorskip("plotly")
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25}, "scale": {}},
+        ]
+        fig = visualize(log, backend="plotly", mode="training", figure_title="Custom dashboard title")
+        assert "Custom dashboard title" in (fig.layout.title.text or "")
 
     def test_compute_log_step_metrics_includes_data_category(self):
         log = [
@@ -495,6 +677,39 @@ class TestImpliedDeltaClosure:
                     }
                 ],
             )
+
+    def test_law_linked_implied_contributes_to_audit_scoring(self):
+        """Law-linked implied rows are included in constitutive category/overall scoring."""
+        engine = ResidualEngine(
+            laws=[
+                {
+                    "name": "fourier_conduction",
+                    "state_map": {
+                        "T_t": "T_t",
+                        "T_laplacian": "T_laplacian",
+                        "fo": "fo",
+                        "t": "t",
+                        "L": "L",
+                    },
+                }
+            ],
+            groups=[{"name": "fo", "output_key": "fo", "state_map": {"alpha": "alpha", "t": "t", "L": "L"}}],
+            law_implied_audits=True,
+        )
+        state_pred = {
+            "T_t": jnp.array([1.0]),
+            "T_laplacian": jnp.array([1.0]),
+            "alpha": jnp.array([1.0]),
+            "t": jnp.array([1.0]),
+            "L": jnp.array([1.0]),
+            "k": jnp.array([1.0]),
+            "rho": jnp.array([1.0]),
+            "cp": jnp.array([1.0]),
+        }
+        _ = engine.compute_residuals(state_pred)
+        rep = audit(engine.log)
+        assert "constitutive" in rep["per_category"]
+        assert rep["per_category"]["constitutive"] >= 0.0
 
 
 class TestRegistryHelpers:
@@ -707,3 +922,50 @@ class TestAuditSpecPiFieldsRoundtrip:
         assert s2.invariance_pi_constant is True
         assert s2.invariance_compare_keys == ["out"]
         assert s2.invariance_scale_c == 7.0
+
+
+class TestKwargsFromStateLawHint:
+    def test_missing_derived_key_includes_fd_hint(self):
+        from moju.monitor.auditor import _kwargs_from_state
+
+        with pytest.raises(KeyError, match="fill_law_fd"):
+            _kwargs_from_state(
+                {},
+                {},
+                {"T_laplacian": "T_laplacian"},
+                law_context="fourier_conduction",
+            )
+
+    def test_missing_non_derived_key_omits_fd_sentence(self):
+        from moju.monitor.auditor import _kwargs_from_state
+
+        with pytest.raises(KeyError) as ei:
+            _kwargs_from_state(
+                {},
+                {},
+                {"Fo": "Fo"},
+                law_context="fourier_conduction",
+            )
+        assert "fill_law_fd" not in str(ei.value)
+
+    def test_placeholder_string_for_derived_key_treated_as_missing(self):
+        from moju.monitor.auditor import _kwargs_from_state
+
+        with pytest.raises(KeyError, match="fill_law_fd"):
+            _kwargs_from_state(
+                {},
+                {"T_laplacian": "T_laplacian"},
+                {"T_laplacian": "T_laplacian"},
+                law_context="fourier_conduction",
+            )
+
+    def test_non_placeholder_string_raises_clear_type_error(self):
+        from moju.monitor.auditor import _kwargs_from_state
+
+        with pytest.raises(TypeError, match="resolved to string value"):
+            _kwargs_from_state(
+                {},
+                {"T_laplacian": "oops"},
+                {"T_laplacian": "T_laplacian"},
+                law_context="fourier_conduction",
+            )
