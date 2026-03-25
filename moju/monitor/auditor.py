@@ -40,7 +40,13 @@ from moju.monitor.law_implied_diagnostics import (
     merge_fragment_law_implied_audit_specs,
     merge_law_implied_audit_specs,
 )
-from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
+from moju.monitor.visualize_labels import (
+    category_adm_bar_x_range,
+    format_admissibility_pct,
+    pretty_category_name,
+    pretty_residual_key,
+    truncate_display_label,
+)
 
 DEFAULT_VISUALIZE_TITLE_TRAINING = "Physics admissibility audit (model training)"
 DEFAULT_VISUALIZE_TITLE_TEST = "State prediction audit (physics residuals)"
@@ -772,6 +778,8 @@ def _category_three_pillar_scores(metrics: List[Dict[str, Any]]) -> tuple[List[s
 
 def _matplotlib_draw_category_adm_three_pillar(ax: Any, metrics: List[Dict[str, Any]], np: Any) -> None:
     """Horizontal bar chart for laws/constitutive pillars (matplotlib)."""
+    from matplotlib.ticker import PercentFormatter
+
     clabels, cvals = _category_three_pillar_scores(metrics)
     y_pos = np.arange(len(clabels))
     colors_b = [_category_adm_bar_color(v) for v in cvals]
@@ -786,18 +794,53 @@ def _matplotlib_draw_category_adm_three_pillar(ax: Any, metrics: List[Dict[str, 
     )
     ax.set_yticks(y_pos)
     ax.set_yticklabels(clabels, fontsize=10)
-    ax.set_xlim(0, 1.12)
+    x0, x1 = category_adm_bar_x_range(list(cvals))
+    ax.set_xlim(x0, x1)
     ax.set_xlabel("Admissibility", fontsize=10)
     ax.set_title("Category admissibility (final step)", fontsize=11, fontweight="600")
     for i, v in enumerate(cvals):
         if math.isfinite(v):
-            ax.text(min(v + 0.02, 1.04), i, f"{v:.3f}", va="center", fontsize=9, fontweight="600")
+            tx = min(v + 0.02 * max(x1 - x0, 1e-6), x1 - 1e-6)
+            ax.text(tx, i, format_admissibility_pct(v), va="center", fontsize=9, fontweight="600")
         else:
-            ax.text(0.02, i, "N/A", va="center", fontsize=9, color="#666666")
+            ax.text(x0 + 0.02 * (x1 - x0), i, "N/A", va="center", fontsize=9, color="#666666")
     ax.grid(True, axis="x", alpha=0.35)
     ax.set_axisbelow(True)
+    ax.xaxis.set_major_formatter(PercentFormatter(1.0))
     for spine in ax.spines.values():
         spine.set_linewidth(1.05)
+
+
+def build_monitor_visualize_bundle(
+    log: List[Dict[str, Any]],
+    keys: Optional[List[str]] = None,
+    r_ref: Optional[Dict[str, float]] = None,
+    max_legend_keys: int = 16,
+    *,
+    spatial_law_panel: Optional[Dict[str, Any]] = None,
+    spatial_rnorm_panel: Optional[Dict[str, Any]] = None,
+    mode: str = "training",
+) -> Optional[Dict[str, Any]]:
+    """
+    Build the internal visualization bundle (same as :func:`visualize` uses for Plotly).
+
+    Intended for Studio and other callers that want several small Plotly figures instead of
+    one combined subplot grid.
+    """
+    work_log = list(log)
+    if mode == "test" and len(work_log) > 1:
+        work_log = work_log[-1:]
+    spatial_parsed = _parse_spatial_law_panel(spatial_law_panel)
+    spatial_rnorm_parsed = _parse_spatial_rnorm_panel(spatial_rnorm_panel)
+    return _build_visualize_bundle(
+        work_log,
+        keys,
+        r_ref,
+        max_legend_keys,
+        spatial_parsed=spatial_parsed,
+        spatial_rnorm_parsed=spatial_rnorm_parsed,
+        mode=mode,
+    )
 
 
 def visualize(
@@ -828,8 +871,9 @@ def visualize(
       final step). **Second row:** two panels — :math:`R_{\\mathrm{norm}}` vs
       step for **governing laws** and **constitutive** (``data/`` and ``scaling/`` omitted);
       **y-axis** is ``log10(R_{\\mathrm{norm}} + \\varepsilon)`` by default, or linear if
-      ``r_norm_scale="linear"``. **Optional third row:** spatial law heatmap when
-      third row is used when ``spatial_law_panel`` or ``spatial_rnorm_panel`` is set.
+      ``r_norm_scale="linear"``. **Third row:** ``R_{\\mathrm{norm}}`` heatmaps vs step
+      for laws and constitutive (Jet colormap). **Optional fourth row:** spatial heatmaps
+      when ``spatial_law_panel`` or ``spatial_rnorm_panel`` is set.
     - ``training`` (single log entry) — horizontal bars for normalized residuals, category
       admissibility bars, optional spatial panel (compact layout).
     - ``test`` — Uses the **last** log entry only: horizontal bar chart of normalized
@@ -932,6 +976,7 @@ def visualize(
 
     try:
         import matplotlib.pyplot as plt
+        from matplotlib.ticker import PercentFormatter
     except ImportError:
         return None
 
@@ -958,13 +1003,13 @@ def visualize(
     style = _apply_visualize_style_actionable()
     with plt.rc_context(rc=style):
         if mode_eff == "training" and not use_bar_chart:
-            fig_h = 11.5 if (has_spatial or has_spatial_rnorm) else 9.0
-            fig = plt.figure(figsize=(14.0, fig_h), constrained_layout=True)
-            n_outer = 3 if (has_spatial or has_spatial_rnorm) else 2
-            hratios = [1.05, 1.12, 1.05] if (has_spatial or has_spatial_rnorm) else [1.05, 1.2]
+            fig_h = 14.5 if (has_spatial or has_spatial_rnorm) else 12.5
+            fig = plt.figure(figsize=(15.0, fig_h), constrained_layout=True)
+            n_outer = 4 if (has_spatial or has_spatial_rnorm) else 3
+            hratios = [1.0, 1.12, 1.06, 1.06] if (has_spatial or has_spatial_rnorm) else [1.0, 1.12, 1.06]
             outer = fig.add_gridspec(n_outer, 1, height_ratios=hratios)
 
-            g_top = outer[0].subgridspec(1, 2, wspace=0.24)
+            g_top = outer[0].subgridspec(1, 2, wspace=0.30)
             ax_overall = fig.add_subplot(g_top[0, 0])
             ax_cat = fig.add_subplot(g_top[0, 1])
             last_ov = float(overall_adm[-1]) if len(overall_adm) else float("nan")
@@ -992,7 +1037,7 @@ def visualize(
                         linewidths=1.6,
                     )
                     ax_overall.annotate(
-                        f"{last_ov:.4f}",
+                        format_admissibility_pct(last_ov),
                         xy=(lix, last_ov),
                         xytext=(10, 4),
                         textcoords="offset points",
@@ -1001,7 +1046,8 @@ def visualize(
                         color="#2c3e50",
                     )
             ax_overall.set_xlabel(step_label)
-            ax_overall.set_ylabel("Admissibility")
+            ax_overall.set_ylabel("Admissibility (%)")
+            ax_overall.yaxis.set_major_formatter(PercentFormatter(1.0))
             ax_overall.set_title("Overall admissibility", fontweight="600")
             ax_overall.grid(True, alpha=0.4)
             for spine in ax_overall.spines.values():
@@ -1016,7 +1062,7 @@ def visualize(
 
             _matplotlib_draw_category_adm_three_pillar(ax_cat, metrics, np)
 
-            g_cat = outer[1].subgridspec(1, 2, wspace=0.45)
+            g_cat = outer[1].subgridspec(1, 2, wspace=0.52)
             ax_laws = fig.add_subplot(g_cat[0, 0])
             ax_const = fig.add_subplot(g_cat[0, 1], sharex=ax_laws, sharey=ax_laws)
             palette = plt.cm.tab10(np.linspace(0, 0.9, 10))
@@ -1043,6 +1089,12 @@ def visualize(
                         fontsize=10,
                         color="#666666",
                     )
+                    if ax_i == 0:
+                        ax_c.set_xlabel(step_label)
+                        ax_c.set_ylabel(rnorm_ylabel)
+                    else:
+                        ax_c.set_xlabel("")
+                        plt.setp(ax_c.get_yticklabels(), visible=False)
                 else:
                     for i, _kk in enumerate(ckeys):
                         ys = mat[i, :]
@@ -1057,26 +1109,72 @@ def visualize(
                                 linewidth=1.8,
                             )
                     ax_c.legend(
-                        loc="center left",
-                        bbox_to_anchor=(1.02, 0.5),
-                        borderaxespad=0.0,
+                        loc="upper right",
                         framealpha=0.92,
                         fontsize=7,
-                        labelspacing=0.35,
-                        handlelength=1.2,
+                        labelspacing=0.28,
+                        handlelength=1.05,
+                        borderpad=0.35,
                     )
                 ax_c.set_title(title_c, fontsize=11, fontweight="600")
                 ax_c.grid(True, alpha=0.4)
-                ax_c.set_xlabel(step_label)
                 for spine in ax_c.spines.values():
                     spine.set_linewidth(1.05)
                 if ax_i == 0:
+                    ax_c.set_xlabel(step_label)
                     ax_c.set_ylabel(rnorm_ylabel)
                 else:
+                    ax_c.set_xlabel("")
                     plt.setp(ax_c.get_yticklabels(), visible=False)
+                if ckeys and n > 15:
+                    plt.setp(ax_c.get_xticklabels(), rotation=35, ha="right", fontsize=8.5)
 
+            g_hm = outer[2].subgridspec(1, 2, wspace=0.50)
+            ax_law_hm = fig.add_subplot(g_hm[0, 0])
+            ax_const_hm = fig.add_subplot(g_hm[0, 1])
+            for ax_hm, cat, title_hm in (
+                (ax_law_hm, "laws", "Governing laws R_norm (vs step)"),
+                (ax_const_hm, "constitutive", "Constitutive R_norm (vs step)"),
+            ):
+                info_h = category_training.get(cat, {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))})
+                ckeys_h = info_h["keys"]
+                displays_h = info_h["displays"]
+                mat_h = np.asarray(info_h["r_norm_mat"], dtype=float)
+                ax_hm.set_title(title_hm, fontsize=11, fontweight="600")
+                if not ckeys_h or mat_h.size == 0:
+                    ax_hm.text(
+                        0.5,
+                        0.5,
+                        "No keys in this category",
+                        ha="center",
+                        va="center",
+                        transform=ax_hm.transAxes,
+                        fontsize=10,
+                        color="#666666",
+                    )
+                    ax_hm.set_axis_off()
+                else:
+                    zplot = _transform_r_norm_y(mat_h, np, use_log_rnorm)
+                    imh = ax_hm.imshow(
+                        zplot,
+                        aspect="auto",
+                        cmap="jet",
+                        interpolation="nearest",
+                        origin="upper",
+                    )
+                    ax_hm.set_xlabel(step_label, labelpad=6)
+                    ax_hm.set_xticks(range(n))
+                    ax_hm.set_yticks(range(len(displays_h)))
+                    disp_hm = [truncate_display_label(d, 34) for d in displays_h]
+                    ax_hm.set_yticklabels(disp_hm, fontsize=7.5)
+                    ax_hm.tick_params(axis="y", pad=5)
+                    fig.colorbar(imh, ax=ax_hm, fraction=0.034, pad=0.058, label=rnorm_ylabel)
+                    if n > 12:
+                        plt.setp(ax_hm.get_xticklabels(), rotation=40, ha="right", fontsize=8)
+
+            ax_sp = None
             if has_spatial or has_spatial_rnorm:
-                g_sp = outer[2].subgridspec(1, 2 if (has_spatial and has_spatial_rnorm) else 1, wspace=0.25)
+                g_sp = outer[3].subgridspec(1, 2 if (has_spatial and has_spatial_rnorm) else 1, wspace=0.38)
                 ax_idx = 0
                 if has_spatial:
                     ax_sp = fig.add_subplot(g_sp[0, ax_idx])
@@ -1084,6 +1182,7 @@ def visualize(
                     Z = spatial["Z"]
                     x_sp = spatial["x"]
                     row_labels = spatial["row_labels"]
+                    pos_ax = spatial.get("position_axis") or "x"
                     im = ax_sp.imshow(
                         Z,
                         aspect="auto",
@@ -1092,15 +1191,18 @@ def visualize(
                         interpolation="nearest",
                     )
                     ax_sp.set_yticks(range(len(row_labels)))
-                    ax_sp.set_yticklabels(row_labels, fontsize=8)
-                    ax_sp.set_xlabel("Position x")
-                    ax_sp.set_title("Law Residuals Along x (User Slice)")
-                    fig.colorbar(im, ax=ax_sp, fraction=0.03, pad=0.03, label="R norm")
+                    rl_t = [truncate_display_label(lb, 34) for lb in row_labels]
+                    ax_sp.set_yticklabels(rl_t, fontsize=7.5)
+                    ax_sp.tick_params(axis="y", pad=5)
+                    ax_sp.set_xlabel(f"Position {pos_ax}", labelpad=7)
+                    ax_sp.set_title("Law residuals (spatial slice)", fontsize=11, fontweight="600")
+                    fig.colorbar(im, ax=ax_sp, fraction=0.032, pad=0.055, label="R norm")
                 if has_spatial_rnorm:
                     ax_rn = fig.add_subplot(g_sp[0, ax_idx])
                     Zr = spatial_rnorm["Z"]
                     xr = spatial_rnorm["x"]
                     rl = spatial_rnorm["row_labels"]
+                    pos_ax_r = spatial_rnorm.get("position_axis") or "x"
                     imr = ax_rn.imshow(
                         Zr,
                         aspect="auto",
@@ -1109,31 +1211,46 @@ def visualize(
                         interpolation="nearest",
                     )
                     ax_rn.set_yticks(range(len(rl)))
-                    ax_rn.set_yticklabels(rl, fontsize=8)
-                    ax_rn.set_xlabel("Position x")
-                    ax_rn.set_title("R_norm Along x (User Slice)")
-                    fig.colorbar(imr, ax=ax_rn, fraction=0.03, pad=0.03, label="R norm")
+                    rl_rt = [truncate_display_label(lb, 34) for lb in rl]
+                    ax_rn.set_yticklabels(rl_rt, fontsize=7.5)
+                    ax_rn.tick_params(axis="y", pad=5)
+                    ax_rn.set_xlabel(f"Position {pos_ax_r}", labelpad=7)
+                    ax_rn.set_title("Implied constitutive R_norm (spatial slice)", fontsize=11, fontweight="600")
+                    fig.colorbar(imr, ax=ax_rn, fraction=0.032, pad=0.055, label="R norm")
 
-            fig.suptitle(resolved_title, fontsize=18, fontweight="700", y=1.01)
+            left_for_align = [ax_laws, ax_law_hm]
+            if ax_sp is not None:
+                left_for_align.append(ax_sp)
+            fig.align_ylabels(left_for_align)
+
+            fig.suptitle(resolved_title, fontsize=17, fontweight="700", y=0.978)
             if math.isfinite(last_ov):
                 fig.text(
                     0.5,
-                    0.945,
-                    f"Overall admissibility (final): {last_ov:.4f} — {status_hml}",
+                    0.922,
+                    f"Overall admissibility (final): {format_admissibility_pct(last_ov)} — {status_hml}",
                     ha="center",
-                    fontsize=12,
-                    fontweight="700",
+                    fontsize=11,
+                    fontweight="600",
                     color="#1a1a1a",
                     transform=fig.transFigure,
                 )
-            fig.set_constrained_layout_pads(w_pad=0.06, h_pad=0.06, hspace=0.08, wspace=0.08)
+            _le = fig.get_layout_engine()
+            if _le is not None and hasattr(_le, "set"):
+                _le.set(
+                    h_pad=0.04,
+                    w_pad=0.06,
+                    hspace=0.09,
+                    wspace=0.06,
+                    rect=[0.07, 0.055, 0.97, 0.88],
+                )
             return fig
 
-        fig_h = 8.5 if has_spatial else 6.5
+        fig_h = 9.2 if has_spatial else 7.0
         nrows = 2
-        fig = plt.figure(figsize=(10.0, fig_h), constrained_layout=True)
-        height_ratios = [1.15, 1.05]
-        gs = fig.add_gridspec(nrows, 2, height_ratios=height_ratios)
+        fig = plt.figure(figsize=(10.5, fig_h), constrained_layout=True)
+        height_ratios = [1.18, 1.08]
+        gs = fig.add_gridspec(nrows, 2, height_ratios=height_ratios, wspace=0.34)
 
         ax0 = fig.add_subplot(gs[0, :])
         valid = np.isfinite(bar_values)
@@ -1148,10 +1265,7 @@ def visualize(
                 linewidth=0.5,
             )
             ax0.set_yticks(y_pos)
-            ax0.set_yticklabels(
-                [d if len(d) < 46 else d[:43] + "…" for d in bar_display],
-                fontsize=8,
-            )
+            ax0.set_yticklabels([truncate_display_label(d, 44) for d in bar_display], fontsize=8)
             ax0.invert_yaxis()
         ax0.set_xlabel("Normalized residual (R norm)")
         ax0.set_title("Normalized Residuals")
@@ -1181,10 +1295,12 @@ def visualize(
                     interpolation="nearest",
                 )
                 ax_sp.set_yticks(range(len(row_labels)))
-                ax_sp.set_yticklabels(row_labels, fontsize=8)
-                ax_sp.set_xlabel("Position x")
-                ax_sp.set_title("Law Residuals Along x (User Slice)")
-                fig.colorbar(im, ax=ax_sp, fraction=0.046, pad=0.04, label="R norm")
+                pos_ax_c = spatial.get("position_axis") or "x"
+                ax_sp.set_yticklabels([truncate_display_label(lb, 34) for lb in row_labels], fontsize=7.5)
+                ax_sp.tick_params(axis="y", pad=5)
+                ax_sp.set_xlabel(f"Position {pos_ax_c}", labelpad=7)
+                ax_sp.set_title("Law residuals (spatial slice)", fontsize=11, fontweight="600")
+                fig.colorbar(im, ax=ax_sp, fraction=0.034, pad=0.055, label="R norm")
             else:
                 ax_sp.text(
                     0.5,
@@ -1198,18 +1314,27 @@ def visualize(
                 )
                 ax_sp.set_axis_off()
 
-        fig.suptitle(resolved_title, fontsize=18, fontweight="700")
+        fig.suptitle(resolved_title, fontsize=17, fontweight="700", y=0.975)
         last_ov_c = float(overall_adm[-1]) if len(overall_adm) else float("nan")
         if math.isfinite(last_ov_c):
             fig.text(
                 0.5,
-                0.93,
-                f"Overall admissibility (final): {last_ov_c:.4f} — {_admissibility_status_hml(last_ov_c)}",
+                0.918,
+                f"Overall admissibility (final): {format_admissibility_pct(last_ov_c)} — {_admissibility_status_hml(last_ov_c)}",
                 ha="center",
-                fontsize=11,
-                fontweight="700",
+                fontsize=10.5,
+                fontweight="600",
                 color="#1a1a1a",
                 transform=fig.transFigure,
+            )
+        _le2 = fig.get_layout_engine()
+        if _le2 is not None and hasattr(_le2, "set"):
+            _le2.set(
+                h_pad=0.04,
+                w_pad=0.06,
+                hspace=0.08,
+                wspace=0.06,
+                rect=[0.08, 0.08, 0.96, 0.86],
             )
 
     return fig

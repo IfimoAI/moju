@@ -8,6 +8,59 @@ import jax.numpy as jnp
 import numpy as np
 
 SpatialViewMode = Literal["auto", "surface3d", "volume3d"]
+ArrayPlotMode = Literal["auto", "line", "heatmap2d"]
+
+_ENTERPRISE_MARGIN = dict(l=82, r=98, t=104, b=86, pad=6)
+
+
+def _apply_enterprise_margins(fig: Any) -> None:
+    fig.update_layout(
+        margin=dict(_ENTERPRISE_MARGIN),
+        template="plotly_white",
+        font=dict(family="Arial, sans-serif", size=11, color="#222222"),
+    )
+
+
+def _colorbar_value() -> dict:
+    return dict(title=dict(text="value", side="right"), len=0.62, xpad=14, thickness=12)
+
+
+def _squeeze_to_2d_for_heatmap(a: np.ndarray) -> Optional[np.ndarray]:
+    """Squeeze leading/trailing singleton dims until 2D or give up."""
+    b = np.asarray(a, dtype=float)
+    b = _squeeze_leading_ones(b)
+    while b.ndim > 2 and b.shape[-1] == 1:
+        b = b[..., 0]
+    while b.ndim > 2 and b.shape[0] == 1:
+        b = b[0]
+    if b.ndim != 2:
+        return None
+    return b
+
+
+def _axes_for_heatmap2d(
+    a: np.ndarray,
+    x: Optional[np.ndarray],
+    y: Optional[np.ndarray],
+    t_coord: Optional[np.ndarray],
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray], str, str]:
+    nt, nx = int(a.shape[0]), int(a.shape[1])
+    tx = np.asarray(x, dtype=float).ravel() if x is not None else None
+    ty = np.asarray(y, dtype=float).ravel() if y is not None else None
+    tt = np.asarray(t_coord, dtype=float).ravel() if t_coord is not None else None
+    x_out: Optional[np.ndarray] = None
+    y_out: Optional[np.ndarray] = None
+    xlab, ylab = "index (column)", "index (row)"
+    if tx is not None and tx.shape[0] == nx:
+        x_out = tx
+        xlab = "x"
+    if ty is not None and ty.shape[0] == nt:
+        y_out = ty
+        ylab = "y"
+    elif tt is not None and tt.shape[0] == nt:
+        y_out = tt
+        ylab = "t"
+    return x_out, y_out, xlab, ylab
 
 
 def _squeeze_leading_ones(a: np.ndarray) -> np.ndarray:
@@ -68,7 +121,17 @@ def _empty_fig(title: str, message: str) -> Any:
     import plotly.graph_objects as go
 
     fig = go.Figure()
-    fig.update_layout(title=title, annotations=[dict(text=message, showarrow=False)])
+    fig.update_layout(
+        title=dict(
+            text=title,
+            x=0.5,
+            xanchor="center",
+            font=dict(size=15, family="Arial, sans-serif"),
+            pad=dict(t=8, b=6),
+        ),
+        annotations=[dict(text=message, showarrow=False, font=dict(size=12))],
+    )
+    _apply_enterprise_margins(fig)
     return fig
 
 
@@ -107,10 +170,24 @@ def plotly_surface_3d(
         ]
     )
     fig.update_layout(
-        title=title,
-        scene=dict(xaxis_title="x", yaxis_title="y", zaxis_title="value", aspectmode="data"),
-        margin=dict(l=0, r=0, t=50, b=0),
+        title=dict(
+            text=title,
+            x=0.5,
+            xanchor="center",
+            font=dict(size=15, family="Arial, sans-serif"),
+            pad=dict(t=8, b=4),
+        ),
+        scene=dict(
+            xaxis_title="x",
+            yaxis_title="y",
+            zaxis_title="value",
+            aspectmode="data",
+            xaxis=dict(title_font=dict(size=12)),
+            yaxis=dict(title_font=dict(size=12)),
+            zaxis=dict(title_font=dict(size=12)),
+        ),
     )
+    _apply_enterprise_margins(fig)
     return fig
 
 
@@ -172,10 +249,24 @@ def plotly_volume_3d(
         ]
     )
     fig.update_layout(
-        title=title,
-        scene=dict(xaxis_title="x", yaxis_title="y", zaxis_title="z", aspectmode="data"),
-        margin=dict(l=0, r=0, t=50, b=0),
+        title=dict(
+            text=title,
+            x=0.5,
+            xanchor="center",
+            font=dict(size=15, family="Arial, sans-serif"),
+            pad=dict(t=8, b=4),
+        ),
+        scene=dict(
+            xaxis_title="x",
+            yaxis_title="y",
+            zaxis_title="z",
+            aspectmode="data",
+            xaxis=dict(title_font=dict(size=12)),
+            yaxis=dict(title_font=dict(size=12)),
+            zaxis=dict(title_font=dict(size=12)),
+        ),
     )
+    _apply_enterprise_margins(fig)
     return fig
 
 
@@ -188,14 +279,16 @@ def plotly_residual_or_state(
     z_coord: Optional[np.ndarray] = None,
     time_index: Optional[int] = None,
     time_axis: int = 0,
+    t_coord: Optional[np.ndarray] = None,
     heatmap_colorscale: str = "Jet",
     spatial_view: SpatialViewMode = "auto",
+    array_plot: ArrayPlotMode = "auto",
 ) -> Any:
     """Build plotly figure: 1D line, 2D heatmap, 3D surface/volume, or histogram for high-D."""
     import plotly.graph_objects as go
 
-    a = np.asarray(jnp.asarray(z), dtype=float)
-    if a.size == 0:
+    a0 = np.asarray(jnp.asarray(z), dtype=float)
+    if a0.size == 0:
         return _empty_fig(title, "Empty array")
 
     if spatial_view == "surface3d":
@@ -225,37 +318,105 @@ def plotly_residual_or_state(
             time_axis=time_axis,
         )
 
-    a = _apply_time_slice_arr(a, time_index=time_index, time_axis=time_axis)
+    if array_plot == "heatmap2d":
+        hm = _squeeze_to_2d_for_heatmap(a0)
+        if hm is None:
+            return _empty_fig(title, "Heatmap (2D) needs a 2D array after squeezing singleton dimensions.")
+        xa, ya, xlab, ylab = _axes_for_heatmap2d(hm, x, y, t_coord)
+        fig = go.Figure(
+            data=[
+                go.Heatmap(
+                    z=hm,
+                    x=xa,
+                    y=ya,
+                    colorscale=heatmap_colorscale,
+                    colorbar=_colorbar_value(),
+                ),
+            ],
+        )
+        fig.update_layout(
+            title=dict(
+                text=title,
+                x=0.5,
+                xanchor="center",
+                font=dict(size=15, family="Arial, sans-serif"),
+                pad=dict(t=10, b=8),
+            ),
+            xaxis=dict(title=xlab, title_standoff=10, tickangle=-35 if hm.shape[1] > 14 else 0),
+            yaxis=dict(title=ylab, title_standoff=10),
+        )
+        _apply_enterprise_margins(fig)
+        return fig
+
+    slice_idx = time_index if array_plot in ("auto", "line") else None
+    a = _apply_time_slice_arr(a0, time_index=slice_idx, time_axis=time_axis)
 
     if a.ndim == 1:
         xs = np.asarray(x) if x is not None else np.arange(a.shape[0])
         if xs.shape[0] != a.shape[0]:
             xs = np.arange(a.shape[0])
         fig = go.Figure(data=[go.Scatter(x=xs, y=a, mode="lines", name="value")])
-        fig.update_layout(title=title, xaxis_title="x / index", yaxis_title="value")
+        fig.update_layout(
+            title=dict(
+                text=title,
+                x=0.5,
+                xanchor="center",
+                font=dict(size=15, family="Arial, sans-serif"),
+                pad=dict(t=10, b=8),
+            ),
+            xaxis=dict(
+                title="x / index",
+                title_standoff=8,
+                tickangle=-35 if len(xs) > 18 else 0,
+            ),
+            yaxis=dict(title="value", title_standoff=8),
+        )
+        _apply_enterprise_margins(fig)
         return fig
 
     if a.ndim == 2:
         x_axis = np.asarray(x) if x is not None else None
         y_axis = np.asarray(y) if y is not None else None
+        nx_ax = int(a.shape[1])
+        ny_ax = int(a.shape[0])
         fig = go.Figure(
             data=go.Heatmap(
                 z=a,
                 x=x_axis if x_axis is not None and x_axis.shape[0] == a.shape[1] else None,
                 y=y_axis if y_axis is not None and y_axis.shape[0] == a.shape[0] else None,
                 colorscale=heatmap_colorscale,
-                colorbar=dict(title="value"),
+                colorbar=_colorbar_value(),
             ),
         )
+        xlab = "x" if x_axis is not None and x_axis.shape[0] == a.shape[1] else "index j"
+        ylab = "y" if y_axis is not None and y_axis.shape[0] == a.shape[0] else "index i"
         fig.update_layout(
-            title=title,
-            xaxis_title="x" if x_axis is not None and x_axis.shape[0] == a.shape[1] else "index j",
-            yaxis_title="y" if y_axis is not None and y_axis.shape[0] == a.shape[0] else "index i",
+            title=dict(
+                text=title,
+                x=0.5,
+                xanchor="center",
+                font=dict(size=15, family="Arial, sans-serif"),
+                pad=dict(t=10, b=8),
+            ),
+            xaxis=dict(title=xlab, title_standoff=10, tickangle=-38 if nx_ax > 12 else 0),
+            yaxis=dict(title=ylab, title_standoff=10, tickangle=-22 if ny_ax > 10 else 0),
         )
+        _apply_enterprise_margins(fig)
         return fig
 
     fig = go.Figure(data=[go.Histogram(x=a.ravel(), nbinsx=80)])
-    fig.update_layout(title=f"{title} (histogram, ndim={a.ndim})", xaxis_title="value", yaxis_title="count")
+    fig.update_layout(
+        title=dict(
+            text=f"{title} (histogram, ndim={a.ndim})",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=15, family="Arial, sans-serif"),
+            pad=dict(t=10, b=8),
+        ),
+        xaxis=dict(title="value", title_standoff=8),
+        yaxis=dict(title="count", title_standoff=8),
+    )
+    _apply_enterprise_margins(fig)
     return fig
 
 
@@ -271,6 +432,8 @@ def plotly_pred_minus_ref(
     x: Optional[np.ndarray] = None,
     y: Optional[np.ndarray] = None,
     z_coord: Optional[np.ndarray] = None,
+    t_coord: Optional[np.ndarray] = None,
+    array_plot: ArrayPlotMode = "auto",
 ) -> Any:
     """Difference pred - ref with broadcasting where shapes match."""
     import plotly.graph_objects as go
@@ -282,9 +445,16 @@ def plotly_pred_minus_ref(
     except Exception:  # noqa: BLE001
         fig = go.Figure()
         fig.update_layout(
-            title=title,
-            annotations=[dict(text="Shape mismatch for pred - ref", showarrow=False)],
+            title=dict(
+                text=title,
+                x=0.5,
+                xanchor="center",
+                font=dict(size=15, family="Arial, sans-serif"),
+                pad=dict(t=8, b=6),
+            ),
+            annotations=[dict(text="Shape mismatch for pred − ref", showarrow=False, font=dict(size=12))],
         )
+        _apply_enterprise_margins(fig)
         return fig
     return plotly_residual_or_state(
         d,
@@ -294,6 +464,8 @@ def plotly_pred_minus_ref(
         z_coord=z_coord,
         time_index=time_index,
         time_axis=time_axis,
+        t_coord=t_coord,
         heatmap_colorscale=heatmap_colorscale,
         spatial_view=spatial_view,
+        array_plot=array_plot,
     )

@@ -66,7 +66,13 @@ from apps.moju_studio.studio_io import (
 
 _STATE_UPLOAD_TYPES = ["npz", "npy", "h5", "hdf5", "nc", "nc4"]
 from apps.moju_studio.studio_plots import plotly_pred_minus_ref, plotly_residual_or_state
-from moju.monitor import ResidualEngine, audit, visualize
+from moju.monitor import ResidualEngine, audit, build_monitor_visualize_bundle, visualize
+from moju.monitor.visualize_labels import format_admissibility_pct
+from moju.monitor.visualize_plotly import (
+    build_plotly_category_admissibility_bar_figure,
+    build_plotly_law_rnorm_final_bar_figure,
+    build_plotly_spatial_rnorm_heatmap_card,
+)
 
 # Sidebar → Path B finite-difference grid (shared by Run tab and Config dependency preview).
 _FD_SPATIAL_OPTIONS = ["Auto (infer from arrays)", "1D", "2D", "3D"]
@@ -232,7 +238,8 @@ with st.sidebar:
     st.divider()
     st.markdown("##### Path B — FD grid")
     st.caption(
-        "Finite differences (**auto_path_b_derivatives**) and **Dependency preview** use these settings."
+        "Finite differences (**Compute state derivatives (finite difference)** on Run) and **Dependency preview** use these settings. "
+        "*(API: `auto_path_b_derivatives`.)*"
     )
     st.selectbox(
         "Spatial data",
@@ -370,6 +377,17 @@ def _per_key_scale_flat(
     return 1.0
 
 
+def _is_law_linked_implied_constitutive_key(flat_key: str) -> bool:
+    """True for law-linked implied constitutive residuals (e.g. …/law_fourier/…/implied_delta)."""
+    k = str(flat_key)
+    if not k.startswith("constitutive/"):
+        return False
+    parts = k.split("/")
+    if "implied_delta" not in parts:
+        return False
+    return any(p.startswith("law_") for p in parts)
+
+
 def _spatial_slice_vs_coord(
     arr: Any,
     pred: Dict[str, Any],
@@ -424,7 +442,8 @@ def _build_spatial_panels_from_last_run(
     flat = flatten_residuals(residuals)
 
     law_values: Dict[str, np.ndarray] = {}
-    const_values: Dict[str, np.ndarray] = {}
+    implied_const_rows: List[tuple[str, np.ndarray]] = []
+    other_const_rows: List[tuple[str, np.ndarray]] = []
     for k, v in sorted(flat.items()):
         sl = _spatial_slice_vs_coord(v, pred, coord_key=coord_key, prefer_last_t=prefer_last_t)
         if sl is None:
@@ -434,15 +453,27 @@ def _build_spatial_panels_from_last_run(
         row = np.abs(sl) / denom
         if k.startswith("laws/") and len(law_values) < 12:
             law_values[k] = row
-        elif k.startswith("constitutive/") and len(const_values) < 12:
-            const_values[k] = row
-        if len(law_values) >= 12 and len(const_values) >= 12:
+        elif k.startswith("constitutive/"):
+            if _is_law_linked_implied_constitutive_key(k):
+                implied_const_rows.append((k, row))
+            else:
+                other_const_rows.append((k, row))
+
+    const_values: Dict[str, np.ndarray] = {}
+    for k, row in implied_const_rows:
+        if len(const_values) >= 12:
             break
+        const_values[k] = row
+    for k, row in other_const_rows:
+        if len(const_values) >= 12:
+            break
+        if k not in const_values:
+            const_values[k] = row
 
     pos = {"position_axis": coord_key}
     law_panel = {**pos, "x": coord_arr, "values": law_values} if law_values else None
-    const_panel = {**pos, "x": coord_arr, "values": const_values} if const_values else None
-    return law_panel, const_panel
+    implied_panel = {**pos, "x": coord_arr, "values": const_values} if const_values else None
+    return law_panel, implied_panel
 
 
 def _studio_monitor_spatial_bundle() -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], str]:
@@ -455,7 +486,7 @@ def _studio_monitor_spatial_bundle() -> tuple[Optional[Dict[str, Any]], Optional
     r_ref = st.session_state.get("last_r_ref") or {}
     if not isinstance(r_ref, dict):
         r_ref = {}
-    law_panel, const_panel = _build_spatial_panels_from_last_run(
+    law_panel, implied_panel = _build_spatial_panels_from_last_run(
         st.session_state.get("last_residuals"),
         st.session_state.get("state_pred") or {},
         coord_key=coord,
@@ -465,7 +496,7 @@ def _studio_monitor_spatial_bundle() -> tuple[Optional[Dict[str, Any]], Optional
         r_ref=r_ref,
     )
     cs = str(st.session_state.get("sb_heatmap_cs", "Jet"))
-    return law_panel, const_panel, cs
+    return law_panel, implied_panel, cs
 
 
 @as_fragment
@@ -515,6 +546,12 @@ _SPATIAL_VIEW_OPTIONS: Dict[str, str] = {
     "3D volume (3D field + x, y, z)": "volume3d",
 }
 
+_ARRAY_PLOT_OPTIONS: Dict[str, str] = {
+    "Auto": "auto",
+    "Line (time slice)": "line",
+    "Heatmap (2D)": "heatmap2d",
+}
+
 
 @as_fragment
 def studio_spatial_fragment() -> None:
@@ -523,7 +560,7 @@ def studio_spatial_fragment() -> None:
     pred = st.session_state.get("state_pred")
     ref = st.session_state.get("state_ref")
     if not res and not pred:
-        st.info("Run an audit on the **Run** tab first.")
+        st.info("Run an audit on the **Run** tab first, then use **Dashboard** for summaries.")
         return
     flat = flatten_residuals(res) if res else {}
     keys = sorted(set(flat.keys()) | set((pred or {}).keys()))
@@ -537,6 +574,14 @@ def studio_spatial_fragment() -> None:
         "3D volume: 3D array with shape (len(x), len(y), len(z)) and 1D coords.",
     )
     _spatial_view = _SPATIAL_VIEW_OPTIONS[_sv_label]
+    _ap_label = st.selectbox(
+        "Array plot (for 2D / time–space fields)",
+        options=list(_ARRAY_PLOT_OPTIONS.keys()),
+        index=0,
+        key="sp_array_plot_label",
+        help="**Heatmap (2D)** keeps the full 2D array (e.g. time × space) instead of slicing to a 1D line.",
+    )
+    _array_plot = _ARRAY_PLOT_OPTIONS[_ap_label]
     mode = st.radio("View", ["Single array", "pred − ref (shared keys)"], horizontal=True, key="sp_mode")
     if mode.startswith("pred"):
         if not ref:
@@ -553,19 +598,23 @@ def studio_spatial_fragment() -> None:
                 shape = tuple(int(x) for x in pa.shape)
                 st.caption(f"shape pred = {shape}, ref = {tuple(int(x) for x in ra.shape)}")
                 t_arr = (pred or {}).get("t")
-                if len(shape) >= 1 and shape[0] > 1 and t_arr is not None:
+                t_idx = None
+                if _array_plot != "heatmap2d" and len(shape) >= 1 and shape[0] > 1 and t_arr is not None:
                     t_idx = st.slider("Time index (pred-ref)", 0, shape[0] - 1, shape[0] - 1, key="sp_t2")
                 x_arr = (pred or {}).get("x")
                 y_arr = (pred or {}).get("y")
                 z_arr = (pred or {}).get("z")
+                t_flat = np.asarray(jnp.asarray(t_arr)).ravel() if t_arr is not None else None
                 fig = plotly_pred_minus_ref(
                     pa,
                     ra,
                     title=choice,
                     time_index=t_idx,
                     time_axis=0,
+                    t_coord=t_flat,
                     heatmap_colorscale=_hm_sp,
                     spatial_view=_spatial_view,  # type: ignore[arg-type]
+                    array_plot=_array_plot,  # type: ignore[arg-type]
                     x=np.asarray(jnp.asarray(x_arr)).ravel() if x_arr is not None else None,
                     y=np.asarray(jnp.asarray(y_arr)).ravel() if y_arr is not None else None,
                     z_coord=np.asarray(jnp.asarray(z_arr)).ravel() if z_arr is not None else None,
@@ -581,11 +630,12 @@ def studio_spatial_fragment() -> None:
             st.caption(f"shape = {shape}")
             t_idx = None
             t_arr = (pred or {}).get("t")
-            if len(shape) >= 1 and shape[0] > 1 and t_arr is not None:
+            if _array_plot != "heatmap2d" and len(shape) >= 1 and shape[0] > 1 and t_arr is not None:
                 t_idx = st.slider("Time index", 0, shape[0] - 1, shape[0] - 1, key="sp_t1")
             x_arr = (pred or {}).get("x")
             y_arr = (pred or {}).get("y")
             z_arr = (pred or {}).get("z")
+            t_flat = np.asarray(jnp.asarray(t_arr)).ravel() if t_arr is not None else None
             fig = plotly_residual_or_state(
                 arr,
                 title=choice,
@@ -594,8 +644,10 @@ def studio_spatial_fragment() -> None:
                 z_coord=np.asarray(jnp.asarray(z_arr)).ravel() if z_arr is not None else None,
                 time_index=t_idx,
                 time_axis=0,
+                t_coord=t_flat,
                 heatmap_colorscale=_hm_sp,
                 spatial_view=_spatial_view,  # type: ignore[arg-type]
+                array_plot=_array_plot,  # type: ignore[arg-type]
             )
             _pc_spatial(fig, "plotly_spatial_single")
 
@@ -614,9 +666,25 @@ def _pc_spatial(fig: Any, key: str) -> None:
         st.plotly_chart(fig, use_container_width=True, key=key)
 
 
+def _plotly_dashboard_card(fig: Any, key: str) -> None:
+    """Plotly chart for Dashboard cards (same interaction as spatial plots)."""
+    if fig is None:
+        return
+    try:
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key=key,
+            on_select="rerun",
+            selection_mode="points",
+        )
+    except TypeError:
+        st.plotly_chart(fig, use_container_width=True, key=key)
+
+
 st.title("Audit workspace")
-tab_data, tab_cfg, tab_run, tab_space, tab_export = st.tabs(
-    ["Data", "Config", "Run", "Spatial / time", "Export"]
+tab_data, tab_cfg, tab_run, tab_dash, tab_space, tab_export = st.tabs(
+    ["Data", "Config", "Run", "Dashboard", "Spatial / time", "Export"]
 )
 
 with tab_data:
@@ -726,7 +794,7 @@ with tab_cfg:
         "- Name **`state_pred`** keys to match **law / model / group argument names** "
         "(e.g. `k_solid`, `T`, `rho`). Constants go in **Constants JSON**.\n"
         "- **Models** → constitutive audits; **Groups** → both `groups` and scaling audits (auto).\n"
-        "- **Finite differences** default **on** on the Run tab (grid coords `x`… in `state_pred`)."
+        "- **Finite-difference options** default **on** on the Run tab (grid coords `x`… in `state_pred`)."
     )
 
     st.subheader("Constants")
@@ -758,7 +826,8 @@ with tab_cfg:
         )
         st.caption(
             "Law FD: derived inputs (e.g. `T_laplacian`) need **primitives** + **x** (… in `state_pred`) "
-            "with Run tab **auto_path_b_derivatives** + **fill_law_fd**. See `moju.monitor.law_fd_recipes`. "
+            "with Run tab **Compute state derivatives (finite difference)** + **Compute law derivatives (finite difference)**. "
+            "See `moju.monitor.law_fd_recipes`. *(API: `auto_path_b_derivatives`, `fill_law_fd`.)* "
             "**Fourier / `fo`:** implied **`Groups.fo`** needs **`alpha`**, **`t`**, **`L`**. **`t`** = mesh **time coordinate** in "
             "**`state_pred`** (match sidebar **Path B — FD grid** `key_t`, default `t`; aliases `time`/`coords_t`), not Constants unless you want a scalar broadcast. "
             "**`thermal_diffusivity`** auto-fills **`alpha`** from `k`,`rho`,`cp` when selected. README → Fourier."
@@ -827,9 +896,10 @@ with tab_cfg:
                 preview_grid_kw["key_t"] = st.session_state.get("run_grid_key_t", "t")
             preview_grid = path_b_grid_from_options(**preview_grid_kw)
             st.caption(
-                "Assumes **auto_path_b_derivatives** and **fill_law_fd** ON. "
+                "Assumes **Compute state derivatives (finite difference)** and **Compute law derivatives (finite difference)** are ON. "
                 "Spatial data, time (steady/transient), and grid layout match the **sidebar** (*Path B — FD grid*). "
-                "Built-in **aliases** (e.g. temperature→T) are noted when relevant."
+                "Built-in **aliases** (e.g. temperature→T) are noted when relevant. "
+                "*(API: `auto_path_b_derivatives`, `fill_law_fd`.)*"
             )
             st.markdown(
                 plan_markdown_for_display(
@@ -872,13 +942,17 @@ with tab_run:
         cfd1, cfd2 = st.columns(2)
         with cfd1:
             auto_fd = st.checkbox(
-                "auto_path_b_derivatives (finite differences for d_* keys)",
+                "Compute state derivatives (finite difference)",
                 value=True,
+                help="Fills missing audit d_* derivatives on the Path B grid (needs mesh coordinates in state_pred). "
+                "API: auto_path_b_derivatives.",
             )
         with cfd2:
             fill_law = st.checkbox(
-                "fill_law_fd (needs auto_path_b_derivatives; fills law inputs on grid)",
+                "Compute law derivatives (finite difference)",
                 value=True,
+                help="Requires state derivatives above; fills registered Laws.* inputs (e.g. Laplacians) on the grid. "
+                "API: fill_law_fd.",
             )
         st.caption(
             "**Spatial data**, **Time**, and **Grid layout** are in the **sidebar** (*Path B — FD grid*). "
@@ -900,23 +974,6 @@ with tab_run:
             grid_kw["key_z"] = st.text_input("key_z", value="z", key="run_grid_key_z")
             grid_kw["key_t"] = st.text_input("key_t", value="t", key="run_grid_key_t")
 
-        st.subheader("Audit / visualize options")
-        r_ref_json = st.text_area(
-            "Optional r_ref (JSON object: residual_key → float scale)", value="", height=60, key="form_r_ref"
-        )
-        weights_json = st.text_area(
-            "Optional audit weights (JSON object: key → float)", value="", height=60, key="form_weights"
-        )
-        max_leg = st.number_input("visualize max_legend_keys", min_value=1, max_value=64, value=16)
-        with st.expander("Advanced (π-constant scale)"):
-            st.slider(
-                "invariance_scale_c (scaling audits with π enabled in expert JSON)",
-                min_value=1.01,
-                max_value=100.0,
-                value=10.0,
-                step=0.01,
-                key="sf_pi_c_global",
-            )
         run_clicked = st.form_submit_button("Run compute_residuals + audit", type="primary")
 
     if run_clicked:
@@ -926,14 +983,22 @@ with tab_run:
             st.error(msg)
         else:
             try:
-                r_ref = _parse_float_dict(r_ref_json, "r_ref")
-                weights = _parse_float_dict(weights_json, "weights")
+                r_ref = _parse_float_dict(
+                    str(st.session_state.get("dashboard_r_ref_json", "")), "r_ref"
+                )
+                weights = _parse_float_dict(
+                    str(st.session_state.get("dashboard_weights_json", "")), "weights"
+                )
             except (json.JSONDecodeError, ValueError) as e:
                 st.error(str(e))
                 st.stop()
 
             if fill_law and not auto_fd:
-                st.error("fill_law_fd requires auto_path_b_derivatives (enable FD or turn off fill_law_fd).")
+                st.error(
+                    "Compute law derivatives (finite difference) requires Compute state derivatives "
+                    "(finite difference): enable state FD or turn off law FD. "
+                    "(API: fill_law_fd needs auto_path_b_derivatives.)"
+                )
                 st.stop()
 
             expert_cfg = bool(st.session_state.get("cfg_expert_mode", False))
@@ -1060,7 +1125,9 @@ with tab_run:
                     st.session_state["run_elapsed_s"] = elapsed
                     st.session_state["last_r_ref"] = r_ref or {}
                     st.session_state["last_weights"] = weights or {}
-                    st.session_state["last_max_leg"] = int(max_leg)
+                    st.session_state["last_max_leg"] = int(
+                        st.session_state.get("dashboard_max_leg", 16)
+                    )
                     rms_keys = sorted((engine.log[-1].get("rms") or {}).keys())
                     st.session_state["viz_rms_keys"] = rms_keys
 
@@ -1098,11 +1165,97 @@ with tab_run:
                 st.exception(ex)
 
     if st.session_state.get("last_report"):
+        st.caption("Latest run: open the **Dashboard** tab for charts, preflight download, and tables.")
+
+with tab_dash:
+    rep = st.session_state.get("last_report")
+    if rep:
+        _law_panel_main, _rnorm_panel_main, _hm_cs_main = _studio_monitor_spatial_bundle()
+        bundle = build_monitor_visualize_bundle(
+            st.session_state.get("viz_log") or [],
+            keys=None,
+            r_ref=st.session_state.get("last_r_ref") or None,
+            max_legend_keys=int(st.session_state.get("last_max_leg", 16)),
+            spatial_law_panel=_law_panel_main,
+            spatial_rnorm_panel=_rnorm_panel_main,
+            mode="training",
+        )
+        if bundle:
+            bc1, bc2 = st.columns(2)
+            with bc1:
+                with st.container(border=True):
+                    try:
+                        _plotly_dashboard_card(
+                            build_plotly_law_rnorm_final_bar_figure(bundle),
+                            "dash_card_law_rnorm",
+                        )
+                    except Exception as ex:  # noqa: BLE001
+                        st.warning(str(ex))
+            with bc2:
+                with st.container(border=True):
+                    try:
+                        _plotly_dashboard_card(
+                            build_plotly_category_admissibility_bar_figure(bundle),
+                            "dash_card_cat_adm",
+                        )
+                    except Exception as ex:  # noqa: BLE001
+                        st.warning(str(ex))
+            hc1, hc2 = st.columns(2)
+            with hc1:
+                with st.container(border=True):
+                    try:
+                        _plotly_dashboard_card(
+                            build_plotly_spatial_rnorm_heatmap_card(
+                                bundle.get("spatial"),
+                                colorscale=_hm_cs_main,
+                                card_title="Law R_norm (spatial)",
+                            ),
+                            "dash_card_law_hm",
+                        )
+                    except Exception as ex:  # noqa: BLE001
+                        st.warning(str(ex))
+            with hc2:
+                with st.container(border=True):
+                    try:
+                        _plotly_dashboard_card(
+                            build_plotly_spatial_rnorm_heatmap_card(
+                                bundle.get("spatial_rnorm"),
+                                colorscale=_hm_cs_main,
+                                card_title="Constitutive R_norm (spatial)",
+                            ),
+                            "dash_card_const_hm",
+                        )
+                    except Exception as ex:  # noqa: BLE001
+                        st.warning(str(ex))
+        else:
+            st.caption("No visualization bundle (empty session log).")
+
+        with st.expander("Combined multi-panel Plotly figure", expanded=False):
+            try:
+                fig_full = visualize(
+                    st.session_state.get("viz_log") or [],
+                    keys=None,
+                    backend="plotly",
+                    r_ref=st.session_state.get("last_r_ref") or None,
+                    max_legend_keys=int(st.session_state.get("last_max_leg", 16)),
+                    mode="training",
+                    spatial_law_panel=_law_panel_main,
+                    spatial_rnorm_panel=_rnorm_panel_main,
+                    spatial_heatmap_colorscale=_hm_cs_main,
+                )
+                if fig_full is not None:
+                    _plotly_dashboard_card(fig_full, "plotly_full_combo")
+                else:
+                    st.caption("Plotly not available or returned None.")
+            except Exception as ex:  # noqa: BLE001
+                st.warning(str(ex))
+    else:
+        st.info("Run **compute_residuals + audit** on the **Run** tab to load dashboard charts.")
+
+    if rep:
         st.divider()
         st.caption(f"Last run wall time: {st.session_state.get('run_elapsed_s', 0):.3f}s")
-        rep = st.session_state["last_report"]
         engine = st.session_state.get("last_engine")
-        pred = st.session_state.get("state_pred") or {}
 
         chk = st.session_state.get("last_preflight_chk", "")
         st.download_button(
@@ -1153,12 +1306,19 @@ with tab_run:
                 st.markdown("\n".join(f"- `{s}`" for s in inf))
 
         st.subheader("Admissibility")
-        st.json(
-            {
-                "overall": rep.get("overall_admissibility_score"),
-                "per_category": rep.get("per_category"),
-            }
-        )
+        ov = rep.get("overall_admissibility_score")
+        pc_raw = rep.get("per_category") or {}
+        pc_fmt: Dict[str, str] = {}
+        for k, v in pc_raw.items():
+            try:
+                pc_fmt[str(k)] = format_admissibility_pct(float(v))
+            except (TypeError, ValueError):
+                pc_fmt[str(k)] = "N/A"
+        try:
+            ov_s = format_admissibility_pct(float(ov)) if ov is not None else "N/A"
+        except (TypeError, ValueError):
+            ov_s = "N/A"
+        st.json({"overall": ov_s, "per_category": pc_fmt})
 
         st.subheader("RMS (last step)")
         rms = (engine.log[-1].get("rms") if engine else {}) or {}
@@ -1181,35 +1341,33 @@ with tab_run:
                 height=min(400, 40 + 28 * len(rms)),
             )
 
-        st.subheader("Monitor dashboard (Plotly)")
-        try:
-            _law_panel_main, _rnorm_panel_main, _hm_cs_main = _studio_monitor_spatial_bundle()
-            fig = visualize(
-                st.session_state.get("viz_log") or [],
-                keys=None,
-                backend="plotly",
-                r_ref=st.session_state.get("last_r_ref") or None,
-                max_legend_keys=int(st.session_state.get("last_max_leg", 16)),
-                mode="training",
-                spatial_law_panel=_law_panel_main,
-                spatial_rnorm_panel=_rnorm_panel_main,
-                spatial_heatmap_colorscale=_hm_cs_main,
-            )
-            if fig is not None:
-                try:
-                    st.plotly_chart(
-                        fig,
-                        use_container_width=True,
-                        key="plotly_main_dashboard",
-                        on_select="rerun",
-                        selection_mode="points",
-                    )
-                except TypeError:
-                    st.plotly_chart(fig, use_container_width=True, key="plotly_main_dashboard")
-            else:
-                st.caption("Plotly visualize returned None (install plotly).")
-        except Exception as ex:  # noqa: BLE001
-            st.warning(f"Plotly dashboard skipped: {ex}")
+    with st.container(border=True):
+        st.subheader("Audit / visualization options (next run)")
+        st.text_area(
+            "Optional r_ref (JSON object: residual_key → float scale)",
+            height=60,
+            key="dashboard_r_ref_json",
+        )
+        st.text_area(
+            "Optional audit weights (JSON object: key → float)",
+            height=60,
+            key="dashboard_weights_json",
+        )
+        st.number_input(
+            "visualize max_legend_keys",
+            min_value=1,
+            max_value=64,
+            value=16,
+            key="dashboard_max_leg",
+        )
+        st.slider(
+            "invariance_scale_c (scaling audits with π enabled in expert JSON)",
+            min_value=1.01,
+            max_value=100.0,
+            value=10.0,
+            step=0.01,
+            key="sf_pi_c_global",
+        )
 
     studio_redraw_plotly_fragment()
 
@@ -1223,7 +1381,7 @@ with tab_export:
     path_b = st.session_state.get("last_path_b", True)
     residuals = st.session_state.get("last_residuals")
     if rep is None:
-        st.info("Run an audit first.")
+        st.info("Run an audit on **Run** first; summaries and charts are on **Dashboard**.")
     else:
         j = audit_report_to_jsonable(rep)
         st.download_button(

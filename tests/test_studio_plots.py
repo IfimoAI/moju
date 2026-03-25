@@ -67,6 +67,26 @@ def test_plotly_pred_minus_ref_surface3d() -> None:
     assert fig.data[0].type == "surface"
 
 
+def test_plotly_residual_heatmap2d_time_space() -> None:
+    pytest.importorskip("plotly")
+    from apps.moju_studio.studio_plots import plotly_residual_or_state
+
+    nt, nx = 5, 8
+    a = np.random.default_rng(3).standard_normal((nt, nx))
+    t = np.linspace(0, 1, nt)
+    x = np.linspace(0, 1, nx)
+    fig = plotly_residual_or_state(
+        a,
+        title="field",
+        x=x,
+        t_coord=t,
+        array_plot="heatmap2d",
+        spatial_view="auto",
+    )
+    assert fig is not None
+    assert fig.data[0].type == "heatmap"
+
+
 def test_surface_misaligned_returns_message_figure() -> None:
     pytest.importorskip("plotly")
     from apps.moju_studio.studio_plots import plotly_surface_3d

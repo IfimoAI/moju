@@ -374,8 +374,8 @@ class TestVisualize:
         ]
         fig = visualize(log, backend="matplotlib", mode="training")
         assert fig is not None
-        # Training: overall + category admissibility bars + 2 category R_norm axes (laws/constitutive)
-        assert len(fig.axes) >= 4
+        # Training: top row + R_norm lines + R_norm heatmaps (+ colorbars) + optional spatial
+        assert len(fig.axes) >= 6
         from matplotlib.projections.polar import PolarAxes
 
         assert not any(isinstance(ax, PolarAxes) for ax in fig.axes)
@@ -408,6 +408,56 @@ class TestVisualize:
         fig_p = visualize(log, backend="plotly", mode="training", r_norm_scale="linear")
         assert fig_p is not None
 
+    def test_build_monitor_visualize_bundle_and_studio_plotly_cards(self):
+        pytest.importorskip("plotly")
+        import numpy as np
+
+        from moju.monitor.auditor import build_monitor_visualize_bundle
+        from moju.monitor.visualize_plotly import (
+            build_plotly_category_admissibility_bar_figure,
+            build_plotly_law_rnorm_final_bar_figure,
+            build_plotly_spatial_rnorm_heatmap_card,
+        )
+
+        log = [
+            {
+                "index": 0,
+                "rms": {
+                    "laws/a": 1.0,
+                    "constitutive/m/chain_dx": 0.5,
+                    "scaling/pe/chain_dx": 0.1,
+                },
+                "scale": {},
+            },
+            {
+                "index": 1,
+                "rms": {
+                    "laws/a": 0.5,
+                    "constitutive/m/chain_dx": 0.25,
+                    "scaling/pe/chain_dx": 0.05,
+                },
+                "scale": {},
+            },
+        ]
+        x = np.linspace(0, 1, 5)
+        spatial_law = {"x": x, "values": {"laws/a": np.ones(5) * 0.2}}
+        spatial_c = {"x": x, "values": {"constitutive/m/chain_dx": np.ones(5) * 0.1}}
+        bundle = build_monitor_visualize_bundle(
+            log,
+            r_ref=None,
+            max_legend_keys=16,
+            spatial_law_panel=spatial_law,
+            spatial_rnorm_panel=spatial_c,
+            mode="training",
+        )
+        assert bundle is not None
+        f1 = build_plotly_law_rnorm_final_bar_figure(bundle)
+        f2 = build_plotly_category_admissibility_bar_figure(bundle)
+        assert f1 is not None and f2 is not None
+        f3 = build_plotly_spatial_rnorm_heatmap_card(bundle["spatial"], colorscale="Jet")
+        f4 = build_plotly_spatial_rnorm_heatmap_card(bundle["spatial_rnorm"], colorscale="Jet")
+        assert f3 is not None and f4 is not None
+
     def test_visualize_test_mode_uses_last_log_entry(self):
         pytest.importorskip("matplotlib")
         log = [
@@ -433,7 +483,51 @@ class TestVisualize:
             spatial_law_panel={"x": x, "values": {"a": np.ones(5) * 0.2}},
         )
         assert fig is not None
-        assert len(fig.axes) >= 5
+        assert len(fig.axes) >= 7
+
+    def test_visualize_matplotlib_training_top_axes_below_title_band(self):
+        """Reserved layout rect should keep the top row of axes out of the title strip."""
+        pytest.importorskip("matplotlib")
+        log = [
+            {
+                "index": 0,
+                "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5},
+                "scale": {},
+            },
+            {
+                "index": 1,
+                "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25},
+                "scale": {},
+            },
+        ]
+        fig = visualize(log, backend="matplotlib", mode="training")
+        assert fig is not None
+        assert fig.axes
+        max_y1 = max(ax.get_position().y1 for ax in fig.axes)
+        assert max_y1 < 0.94, f"expected axes below title band, got max y1={max_y1}"
+
+    def test_visualize_matplotlib_category_adm_bar_autoscale(self):
+        pytest.importorskip("matplotlib")
+        log = [
+            {
+                "index": 0,
+                "rms": {"laws/a": 0.0196, "constitutive/b": 0.0198},
+                "scale": {"laws/a": 1.0, "constitutive/b": 1.0},
+            },
+            {
+                "index": 1,
+                "rms": {"laws/a": 0.0196, "constitutive/b": 0.0198},
+                "scale": {"laws/a": 1.0, "constitutive/b": 1.0},
+            },
+        ]
+        fig = visualize(log, backend="matplotlib", mode="training")
+        assert fig is not None
+        ax_cat = next(
+            ax for ax in fig.axes if ax.get_title() and "Category admissibility" in ax.get_title()
+        )
+        x0, x1 = ax_cat.get_xlim()
+        assert x1 - x0 < 0.5
+        assert x1 <= 1.0 + 1e-6
 
     def test_build_visualize_bundle_category_training(self):
         from moju.monitor.auditor import _build_visualize_bundle
@@ -482,7 +576,9 @@ class TestVisualize:
         fig = visualize(log, backend="plotly", mode="training")
         assert fig is not None
         assert hasattr(fig, "data")
-        assert len(fig.data) >= 4
+        assert len(fig.data) >= 7
+        hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
+        assert len(hm) >= 2
 
     def test_visualize_plotly_default_titles(self):
         pytest.importorskip("plotly")

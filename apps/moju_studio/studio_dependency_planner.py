@@ -247,7 +247,9 @@ class DependencyPlan:
                 lines.append("")
         if self.derivable_law_fd_if_enabled:
             lines.append(
-                "**Law inputs derivable** if **auto_path_b_derivatives** + **fill_law_fd** are on (add primitives + coords if listed):"
+                "**Law inputs derivable** if **Compute state derivatives (finite difference)** + "
+                "**Compute law derivatives (finite difference)** are on (add primitives + coords if listed). "
+                "*(API: `auto_path_b_derivatives`, `fill_law_fd`.)*"
             )
             for k in self.derivable_law_fd_if_enabled:
                 lines.append(f"- `{k}`")
@@ -263,7 +265,10 @@ class DependencyPlan:
                 lines.append(f"- `{k}`")
             lines.append("")
         if self.derivable_audit_if_auto_fd:
-            lines.append("**Audit derivatives computable** if **auto_path_b_derivatives** is on (need base field + coords):")
+            lines.append(
+                "**Audit derivatives computable** if **Compute state derivatives (finite difference)** is on "
+                "(need base field + coords). *(API: `auto_path_b_derivatives`.)*"
+            )
             for k in self.derivable_audit_if_auto_fd:
                 lines.append(f"- `{k}`")
             lines.append("")
@@ -374,7 +379,8 @@ def plan_dependencies(
             blocked_law.append(f"`{k}` ({req.law_name}): need " + ", ".join(parts))
         else:
             blocked_law.append(
-                f"`{k}` ({req.law_name}): enable auto_path_b_derivatives + fill_law_fd, "
+                f"`{k}` ({req.law_name}): enable **Compute state derivatives (finite difference)** + "
+                f"**Compute law derivatives (finite difference)** (API: `auto_path_b_derivatives` + `fill_law_fd`), "
                 f"or provide `{k}` in NPZ/constants"
             )
 

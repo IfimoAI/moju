@@ -6,6 +6,8 @@ import datetime
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
+from moju.monitor.visualize_labels import format_admissibility_pct, pretty_residual_key
+
 
 try:
     from reportlab.lib import colors
@@ -39,10 +41,9 @@ def _group_keys_by_category(per_key: Dict[str, Any]) -> List[Tuple[str, List[Tup
     }
     for key, data in per_key.items():
         if "/" in key:
-            prefix, rest = key.split("/", 1)
+            prefix, _rest = key.split("/", 1)
             if prefix in buckets:
-                label = rest.replace("_", " ").replace("/", " — ").title()
-                buckets[prefix].append((label, data))
+                buckets[prefix].append((pretty_residual_key(key), data))
     order = ("laws", "constitutive", "scaling", "data", "groups", "models")
     result: List[Tuple[str, List[Tuple[str, Any]]]] = []
     for cat in order:
@@ -176,7 +177,7 @@ def write_audit_pdf(
 
     # Overall score and level
     story.append(Paragraph("Overall", heading_style))
-    score_text = f"Admissibility score: {overall_score:.2f} &nbsp; — &nbsp; {overall_level}"
+    score_text = f"Admissibility score: {format_admissibility_pct(float(overall_score))} &nbsp; — &nbsp; {overall_level}"
     story.append(Paragraph(score_text, body_style))
     story.append(Spacer(1, 16))
 
@@ -185,7 +186,7 @@ def write_audit_pdf(
         table_data = [["Category", "Score"]]
         for key, label in (("laws", "Governing laws"), ("constitutive", "Constitutive"), ("scaling", "Scaling/similarity")):
             if key in per_category:
-                table_data.append([label, f"{float(per_category[key]):.2f}"])
+                table_data.append([label, format_admissibility_pct(float(per_category[key]))])
         t = Table(table_data, colWidths=[3.0 * inch, 1.2 * inch])
         t.setStyle(
             TableStyle(
@@ -218,7 +219,7 @@ def write_audit_pdf(
         for label, data in items:
             score = data.get("admissibility_score", 0.0)
             level = data.get("admissibility_level", "Non-Admissible")
-            table_data.append([label, f"{score:.2f}", level])
+            table_data.append([label, format_admissibility_pct(float(score)), level])
         t = Table(table_data, colWidths=[2.5 * inch, 1 * inch, 2.2 * inch])
         t.setStyle(
             TableStyle(

@@ -39,23 +39,25 @@ st.markdown(
 st.divider()
 c1, c2 = st.columns(2)
 with c1:
-    st.markdown(
-        """
+    with st.container(border=True):
+        st.markdown(
+            """
 **Setup**
 
 - `pip install -e ".[studio,viz]"` from the **repository root**
 - Streamlit **≥ 1.33**
 - Run: `streamlit run apps/moju_studio/Home.py`
 """
-    )
+        )
 with c2:
-    st.markdown(
-        """
+    with st.container(border=True):
+        st.markdown(
+            """
 **Start here**
 
-- Open **Audit** in the sidebar: upload data, configure laws/models, run Path A or B
+- Open **Audit** in the sidebar: upload data, configure laws/models, **Run** then **Dashboard**
 - **Quick start** — minimal Path B workflow
 - **Help** — Streamlit patterns used in this app
 """
-    )
+        )
 st.caption("Theme and server options: `.streamlit/config.toml` at the repo root when you start Streamlit there.")

@@ -34,11 +34,13 @@ def test_import_monitor_all():
         admissibility_level,
         build_loss,
         audit,
+        build_monitor_visualize_bundle,
         visualize,
         list_constitutive_models,
         list_scaling_closure_ids,
         list_pi_constant_group_names,
     )
+    assert callable(build_monitor_visualize_bundle)
     assert ResidualEngine is not None
     assert callable(list_constitutive_models)
     assert callable(list_scaling_closure_ids)
@@ -53,6 +55,7 @@ def test_monitor_module_has_all():
         "admissibility_level",
         "build_loss",
         "audit",
+        "build_monitor_visualize_bundle",
         "visualize",
         "list_constitutive_models",
         "list_scaling_closure_ids",
