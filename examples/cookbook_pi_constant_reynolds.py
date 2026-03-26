@@ -12,7 +12,6 @@ metrics.
 Requirements: recipe arguments touched by the recipe must live in ``constants``;
 use Path A (``compute_residuals`` without passing ``state_pred``, with non-``None``
 ``model`` / ``params`` / ``collocation`` placeholders as required by the engine).
-Chain-rule closures (``chain_dx`` / ``chain_dt``) are optional for this check.
 """
 
 from __future__ import annotations

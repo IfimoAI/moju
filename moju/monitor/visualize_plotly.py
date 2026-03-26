@@ -18,6 +18,9 @@ from moju.monitor.visualize_labels import (
 
 R_NORM_LOG_EPS = 1e-12
 
+# Fixed height for Moju Studio Dashboard Plotly cards (law/adm bars + spatial heatmaps).
+MOJU_STUDIO_DASHBOARD_CARD_HEIGHT = 400
+
 
 def _adm_bar_color_plotly(score: float) -> str:
     if not math.isfinite(score):
@@ -50,6 +53,260 @@ def _admissibility_status_hml_plotly(score: float) -> str:
     return "LOW"
 
 
+def format_admissibility_status_label(score: float) -> str:
+    """Public alias for HIGH / MODERATE / LOW bands (same as Plotly dashboards)."""
+    return _admissibility_status_hml_plotly(score)
+
+
+def _plotly_layout_axis_domain(fig: Any, axis_ref: Optional[str]) -> Optional[Tuple[float, float]]:
+    """Return ``(lo, hi)`` paper-domain for a subplot axis (e.g. ``y3``, ``x``)."""
+    ref = (axis_ref or "y").strip()
+    try:
+        if ref in ("x", "y"):
+            ax_obj = getattr(fig.layout, f"{ref}axis", None)
+        elif len(ref) >= 2 and ref[0] in "xy" and ref[1:].isdigit():
+            ax_obj = getattr(fig.layout, f"{ref[0]}axis{ref[1:]}", None)
+        else:
+            ax_obj = getattr(fig.layout, f"{ref}axis", None)
+        if ax_obj is None:
+            return None
+        dom = getattr(ax_obj, "domain", None)
+        if dom is None or len(dom) < 2:
+            return None
+        return (float(dom[0]), float(dom[1]))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def align_heatmap_colorbars_to_subplot_domains(fig: Any) -> None:
+    """
+    Shrink and anchor each Heatmap colorbar to its subplot's y-domain and place it beside the heatmap x-domain.
+    Call after ``fig.update_layout`` so axis domains are finalized.
+    """
+    for tr in fig.data:
+        if getattr(tr, "type", None) != "heatmap":
+            continue
+        cb = getattr(tr, "colorbar", None)
+        if cb is None:
+            continue
+        yref = getattr(tr, "yaxis", None) or "y"
+        xref = getattr(tr, "xaxis", None) or "x"
+        ydom = _plotly_layout_axis_domain(fig, yref)
+        xdom = _plotly_layout_axis_domain(fig, xref)
+        if ydom is None or xdom is None:
+            continue
+        y0, y1 = ydom
+        x0, x1 = xdom
+        y_mid = 0.5 * (y0 + y1)
+        y_len = max(0.06, (y1 - y0) * 0.88)
+        x_cb = min(x1 + 0.02, 0.992)
+        thick = getattr(cb, "thickness", None)
+        if thick is None:
+            thick = 12
+        title = getattr(cb, "title", None)
+        title_dict: Dict[str, Any] = {}
+        if title is not None:
+            if getattr(title, "text", None):
+                title_dict["text"] = title.text
+            if getattr(title, "side", None):
+                title_dict["side"] = title.side
+            if getattr(title, "font", None) is not None:
+                title_dict["font"] = title.font
+        cb_kwargs: Dict[str, Any] = dict(
+            len=y_len,
+            y=y_mid,
+            yanchor="middle",
+            x=x_cb,
+            xanchor="left",
+            thickness=thick,
+            xpad=getattr(cb, "xpad", None) or 8,
+        )
+        if title_dict:
+            cb_kwargs["title"] = title_dict
+        tr.update(colorbar=cb_kwargs)
+
+
+def _spatial_log_step_suffix(spatial: Dict[str, Any]) -> str:
+    li = spatial.get("log_step_index")
+    if li is None:
+        return ""
+    try:
+        return f" — log step {int(li)}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _plotly_spatial_panel_title_with_subtitle(main: str, rnorm_y_title: str) -> str:
+    """Two-line subplot title: main + R_norm scale as smaller second line (HTML)."""
+    esc = (
+        str(rnorm_y_title)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    return f"{main}<br><span style='font-size:10px'>{esc}</span>"
+
+
+def _spatial_panel_subtitle(prefix: str, sp: Optional[Dict[str, Any]], default_axis: str) -> str:
+    if sp is None:
+        return f"{prefix} vs {default_axis}"
+    k = sp.get("kind", "1d")
+    if k == "1d":
+        ax = sp.get("position_axis") or default_axis
+        return f"{prefix} vs {ax}"
+    if k == "2d":
+        return f"{prefix} (x, y)"
+    if k == "3d":
+        return f"{prefix} (z-slice of volume)"
+    return prefix
+
+
+def _plotly_add_spatial_panel_to_subplot(
+    fig: Any,
+    *,
+    row: int,
+    col: int,
+    spatial: Dict[str, Any],
+    hm_cs: str,
+    mid: float,
+    colorbar_compact: bool,
+    use_log_rnorm: bool = True,
+    colorbar_title: str = "|residual|",
+) -> None:
+    """Add law or constitutive spatial trace (1D keys×x, 2D x×y, or 3D z-slice) to a subplot cell."""
+    import numpy as np
+    import plotly.graph_objects as go
+
+    kind = spatial.get("kind", "1d")
+    row_labels: List[str] = list(spatial["row_labels"])
+
+    cb_kw: Dict[str, Any] = dict(
+        title=dict(text=colorbar_title, side="right"),
+        len=0.38 if colorbar_compact else 0.36,
+        xpad=12,
+        thickness=14,
+    )
+    if not colorbar_compact:
+        cb_kw["x"] = 1.02
+        cb_kw["xpad"] = 14
+
+    def _z_display(z: Any) -> Any:
+        a = np.asarray(z, dtype=float)
+        if use_log_rnorm:
+            return np.log10(np.maximum(a, 0.0) + R_NORM_LOG_EPS)
+        return a
+
+    if kind == "1d":
+        Z = _z_display(spatial["Z"])
+        x_sp = spatial["x"]
+        pos_ax = spatial.get("position_axis") or "x"
+        li = spatial.get("log_step_index")
+        ht_1d = (
+            "x=%{x:.4g}<br>%{customdata}<br>log step "
+            + str(int(li))
+            + "<extra></extra>"
+            if li is not None
+            else "x=%{x:.4g}<br>%{customdata}<extra></extra>"
+        )
+        fig.add_trace(
+            go.Heatmap(
+                x=x_sp,
+                y=list(range(len(row_labels))),
+                z=Z,
+                colorscale=hm_cs,
+                colorbar=cb_kw,
+                hovertemplate=ht_1d,
+                customdata=np.broadcast_to(
+                    np.asarray(row_labels, dtype=object)[:, np.newaxis],
+                    (len(row_labels), len(x_sp)),
+                ),
+            ),
+            row=row,
+            col=col,
+        )
+        fig.update_yaxes(
+            showticklabels=False,
+            row=row,
+            col=col,
+            automargin=True,
+        )
+        fig.update_xaxes(
+            title_text=f"Position {pos_ax}",
+            row=row,
+            col=col,
+            automargin=True,
+        )
+        return
+
+    if kind == "2d":
+        Zs = np.asarray(spatial["Z"], dtype=float)
+        x_sp = np.asarray(spatial["x"], dtype=float)
+        y_sp = np.asarray(spatial["y"], dtype=float)
+        z0 = _z_display(Zs[0])
+        nk = int(Zs.shape[0])
+        hl = row_labels[0] if row_labels else ""
+        fig.add_trace(
+            go.Heatmap(
+                x=x_sp,
+                y=y_sp,
+                z=z0,
+                colorscale=hm_cs,
+                colorbar=cb_kw,
+                hovertemplate="x=%{x:.4g}<br>y=%{y:.4g}<br>display=%{z:.4g}<extra></extra>",
+                name=truncate_display_label(hl, 40) + (f" (+{nk - 1} more)" if nk > 1 else ""),
+            ),
+            row=row,
+            col=col,
+        )
+        fig.update_xaxes(title_text="x", row=row, col=col, automargin=True)
+        fig.update_yaxes(title_text="y", row=row, col=col, automargin=True)
+        return
+
+    if kind == "3d":
+        V = np.asarray(spatial["V"], dtype=float)
+        x_sp = np.asarray(spatial["x"], dtype=float)
+        y_sp = np.asarray(spatial["y"], dtype=float)
+        z_sp = np.asarray(spatial["z"], dtype=float)
+        vol = np.asarray(_z_display(V[0]), dtype=float)
+        nk = int(V.shape[0])
+        nz = vol.shape[2]
+        kz = max(0, nz // 2)
+        sl = vol[:, :, kz].T
+        zk = float(z_sp[kz])
+        fig.add_trace(
+            go.Heatmap(
+                x=x_sp,
+                y=y_sp,
+                z=sl,
+                colorscale=hm_cs,
+                colorbar=cb_kw,
+                hovertemplate="x=%{x:.4g}<br>y=%{y:.4g}<br>display=%{z:.4g}<extra></extra>",
+                name=f"z-slice z={zk:.4g}" + (f" (+{nk - 1} keys)" if nk > 1 else ""),
+            ),
+            row=row,
+            col=col,
+        )
+        fig.update_xaxes(title_text="x (z-slice)", row=row, col=col, automargin=True)
+        fig.update_yaxes(title_text="y (z-slice)", row=row, col=col, automargin=True)
+        return
+
+    fig.add_trace(
+        go.Scatter(
+            x=[mid],
+            y=[0.0],
+            mode="text",
+            text=["Unsupported spatial kind"],
+            textposition="middle center",
+            showlegend=False,
+            hoverinfo="skip",
+        ),
+        row=row,
+        col=col,
+    )
+    fig.update_xaxes(visible=False, row=row, col=col)
+    fig.update_yaxes(visible=False, row=row, col=col)
+
+
 def build_plotly_monitor_figure(
     bundle: Dict[str, Any],
     *,
@@ -70,6 +327,25 @@ def build_plotly_monitor_figure(
         raise ValueError("r_norm_scale must be 'log' or 'linear'")
     use_log_rnorm = r_norm_scale == "log"
     rnorm_y_title = "log10(R_norm + ε)" if use_log_rnorm else "Normalized residual (R norm)"
+    spatial_norm = bool(bundle.get("spatial_normalize", False))
+    spatial_z_title = (
+        rnorm_y_title
+        if spatial_norm
+        else ("log10(|residual| + ε)" if use_log_rnorm else "|residual|")
+    )
+    spatial_cb_title = "R_norm" if spatial_norm else "|residual|"
+    law_sp_label = "Governing laws R_norm" if spatial_norm else "Governing laws |residual|"
+    const_sp_label = "Implied constitutive R_norm" if spatial_norm else "Constitutive |residual|"
+    law_sp_full = (
+        "Governing laws R_norm (spatial, last step)"
+        if spatial_norm
+        else "Governing laws |residual| (spatial, last step)"
+    )
+    const_sp_full = (
+        "Constitutive R_norm (spatial, last step)"
+        if spatial_norm
+        else "Constitutive |residual| (spatial, last step)"
+    )
     hm_cs = spatial_heatmap_colorscale or "Jet"
 
     def _pos_axis_title(sp: Optional[Dict[str, Any]]) -> str:
@@ -77,6 +353,20 @@ def build_plotly_monitor_figure(
             return "Position x"
         ax = sp.get("position_axis") or "x"
         return f"Position {ax}"
+
+    def _spatial_rowkey_subtitle_if_1d(sp: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Return first key label as subplot subtitle for 1D heatmaps."""
+        if not sp:
+            return None
+        if sp.get("kind", "1d") != "1d":
+            return None
+        row_labels = list(sp.get("row_labels") or [])
+        if not row_labels:
+            return None
+        first = truncate_display_label(str(row_labels[0]), 34)
+        if len(row_labels) == 1:
+            return first
+        return f"{first} (+{len(row_labels) - 1} more)"
 
     n = bundle["n"]
     indices = list(range(n))
@@ -94,7 +384,7 @@ def build_plotly_monitor_figure(
     has_spatial = spatial is not None
     has_spatial_rnorm = spatial_rnorm is not None
     training_lines = mode_eff == "training" and not use_bar_chart
-    polar_full = mode_eff == "test" and not has_spatial
+    polar_full = mode_eff == "test" and not (has_spatial or has_spatial_rnorm)
 
     palette = [
         "#4e79a7",
@@ -127,7 +417,7 @@ def build_plotly_monitor_figure(
             None,
             None,
         ]
-        specs_row_hm = [
+        specs_row_spatial = [
             {"type": "xy", "colspan": 3},
             None,
             None,
@@ -135,41 +425,40 @@ def build_plotly_monitor_figure(
             None,
             None,
         ]
-        specs: List[List[Any]] = [specs_row_overall, specs_row_bars, specs_row_lines, specs_row_hm]
-        row_heights = [0.19, 0.19, 0.25, 0.25]
-        if has_spatial or has_spatial_rnorm:
-            specs.append(
-                [
-                    {"type": "xy", "colspan": 3},
-                    None,
-                    None,
-                    {"type": "xy", "colspan": 3},
-                    None,
-                    None,
-                ]
-            )
-            row_heights.append(0.28)
+        specs: List[List[Any]] = [specs_row_overall, specs_row_bars, specs_row_lines, specs_row_spatial]
+        row_heights = [0.19, 0.19, 0.25, 0.30]
 
         pos_ax_law = spatial.get("position_axis", "x") if spatial else "x"
         pos_ax_ic = (spatial_rnorm or {}).get("position_axis", "x")
+        law_main_title = _spatial_panel_subtitle(law_sp_label, spatial if has_spatial else None, pos_ax_law)
+        const_main_title = _spatial_panel_subtitle(
+            const_sp_label,
+            spatial_rnorm if has_spatial_rnorm else None,
+            pos_ax_ic,
+        )
+        law_key_sub = _spatial_rowkey_subtitle_if_1d(spatial if has_spatial else None) or spatial_z_title
+        const_key_sub = _spatial_rowkey_subtitle_if_1d(spatial_rnorm if has_spatial_rnorm else None) or spatial_z_title
         sub_titles = [
             "Overall admissibility",
             "Law R_norm (final step)",
             "Category admissibility (final step)",
             category_titles.get("laws", "Normalized Governing Laws Residuals"),
             category_titles.get("constitutive", "Normalized Constitutive Residuals"),
-            "Governing laws R_norm (vs step)",
-            "Constitutive R_norm (vs step)",
+            _plotly_spatial_panel_title_with_subtitle(
+                law_main_title,
+                law_key_sub,
+            ),
+            _plotly_spatial_panel_title_with_subtitle(
+                const_main_title,
+                const_key_sub,
+            ),
         ]
-        if has_spatial or has_spatial_rnorm:
-            sub_titles.append(f"Law R_norm vs {pos_ax_law}")
-            sub_titles.append(f"Implied constitutive R_norm vs {pos_ax_ic}")
 
         fig = make_subplots(
             rows=len(specs),
             cols=6,
             specs=specs,
-            vertical_spacing=0.145,
+            vertical_spacing=0.152,
             horizontal_spacing=0.115,
             row_heights=row_heights,
             subplot_titles=tuple(sub_titles),
@@ -393,198 +682,66 @@ def build_plotly_monitor_figure(
             fig.update_xaxes(tickangle=-35, row=line_row, col=1, automargin=True)
             fig.update_xaxes(tickangle=-35, row=line_row, col=4, automargin=True)
 
-        hm_row = 4
-        jet_timeline = "Jet"
-        hm_cb = rnorm_y_title
-        for ci, cat in enumerate(cat_order):
-            col = plot_cols[ci]
-            info = category_training.get(cat, {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))})
-            ckeys: List[str] = info["keys"]
-            displays: List[str] = info["displays"]
-            mat = np.asarray(info["r_norm_mat"], dtype=float)
-            if not ckeys or mat.size == 0:
-                fig.add_trace(
-                    go.Scatter(
-                        x=[indices[len(indices) // 2] if indices else 0],
-                        y=[0.0],
-                        mode="text",
-                        text=["No keys in this category"],
-                        textposition="middle center",
-                        showlegend=False,
-                        hoverinfo="skip",
-                    ),
-                    row=hm_row,
-                    col=col,
-                )
-            else:
-                z_hm = (
-                    np.log10(np.maximum(mat, 0.0) + R_NORM_LOG_EPS)
-                    if use_log_rnorm
-                    else mat
-                )
-                disp_short = [truncate_display_label(d, 34) for d in displays]
-                _cd_hm = np.broadcast_to(
-                    np.asarray(displays, dtype=object)[:, np.newaxis],
-                    (len(displays), n),
-                )
-                fig.add_trace(
-                    go.Heatmap(
-                        x=list(indices),
-                        y=list(range(len(displays))),
-                        z=z_hm,
-                        colorscale=jet_timeline,
-                        colorbar=dict(title=dict(text=hm_cb, side="right"), len=0.36, xpad=12, thickness=14),
-                        customdata=_cd_hm,
-                        hovertemplate=(
-                            f"{step_label}=%{{x}}<br>%{{customdata}}<br>value=%{{z:.4g}}<extra></extra>"
-                        ),
-                    ),
-                    row=hm_row,
-                    col=col,
-                )
-                fig.update_yaxes(
-                    tickmode="array",
-                    tickvals=list(range(len(displays))),
-                    ticktext=disp_short,
-                    tickangle=-25,
-                    row=hm_row,
-                    col=col,
-                    automargin=True,
-                )
-            fig.update_xaxes(
-                title_text=step_label,
-                row=hm_row,
-                col=col,
-                showline=True,
-                linewidth=1.2,
-                automargin=True,
+        spatial_row = 4
+        mid = indices[len(indices) // 2] if indices else 0
+
+        if has_spatial:
+            _plotly_add_spatial_panel_to_subplot(
+                fig,
+                row=spatial_row,
+                col=1,
+                spatial=spatial,
+                hm_cs=hm_cs,
+                mid=mid,
+                colorbar_compact=False,
+                use_log_rnorm=use_log_rnorm,
+                colorbar_title=law_main_title,
             )
+        else:
+            fig.add_trace(
+                go.Scatter(
+                    x=[mid],
+                    y=[0.0],
+                    mode="text",
+                    text=["No law spatial slice<br>(pass spatial_law_panel or residuals + state_pred)"],
+                    textposition="middle center",
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=spatial_row,
+                col=1,
+            )
+            fig.update_xaxes(visible=False, row=spatial_row, col=1)
+            fig.update_yaxes(visible=False, row=spatial_row, col=1)
 
-        if n > 12:
-            fig.update_xaxes(tickangle=-38, row=hm_row, col=1, automargin=True)
-            fig.update_xaxes(tickangle=-38, row=hm_row, col=4, automargin=True)
-
-        spatial_row = 5 if (has_spatial or has_spatial_rnorm) else None
-        if spatial_row is not None:
-            mid = indices[len(indices) // 2] if indices else 0
-
-            if has_spatial:
-                Z = spatial["Z"]
-                x_sp = spatial["x"]
-                row_labels = spatial["row_labels"]
-                rl_s = [truncate_display_label(lb, 34) for lb in row_labels]
-                fig.add_trace(
-                    go.Heatmap(
-                        x=x_sp,
-                        y=list(range(len(row_labels))),
-                        z=Z,
-                        colorscale=hm_cs,
-                        colorbar=dict(
-                            title=dict(text="R norm", side="right"),
-                            len=0.36,
-                            x=1.02,
-                            xpad=14,
-                            thickness=14,
-                        ),
-                        hovertemplate="x=%{x:.4g}<br>%{customdata}<extra></extra>",
-                        customdata=np.broadcast_to(
-                            np.asarray(row_labels, dtype=object)[:, np.newaxis],
-                            (len(row_labels), len(x_sp)),
-                        ),
-                    ),
-                    row=spatial_row,
-                    col=1,
-                )
-                fig.update_yaxes(
-                    tickmode="array",
-                    tickvals=list(range(len(row_labels))),
-                    ticktext=rl_s,
-                    tickangle=-20,
-                    row=spatial_row,
-                    col=1,
-                    automargin=True,
-                )
-                fig.update_xaxes(
-                    title_text=_pos_axis_title(spatial),
-                    row=spatial_row,
-                    col=1,
-                    automargin=True,
-                )
-            else:
-                fig.add_trace(
-                    go.Scatter(
-                        x=[mid],
-                        y=[0.0],
-                        mode="text",
-                        text=["No law spatial slice<br>(need coord in state_pred)"],
-                        textposition="middle center",
-                        showlegend=False,
-                        hoverinfo="skip",
-                    ),
-                    row=spatial_row,
-                    col=1,
-                )
-                fig.update_xaxes(visible=False, row=spatial_row, col=1)
-                fig.update_yaxes(visible=False, row=spatial_row, col=1)
-
-            if has_spatial_rnorm:
-                Zr = spatial_rnorm["Z"]
-                xr = spatial_rnorm["x"]
-                rlabels = spatial_rnorm["row_labels"]
-                rl2 = [truncate_display_label(lb, 34) for lb in rlabels]
-                fig.add_trace(
-                    go.Heatmap(
-                        x=xr,
-                        y=list(range(len(rlabels))),
-                        z=Zr,
-                        colorscale=hm_cs,
-                        colorbar=dict(
-                            title=dict(text="R norm", side="right"),
-                            len=0.36,
-                            x=1.02,
-                            xpad=14,
-                            thickness=14,
-                        ),
-                        hovertemplate="x=%{x:.4g}<br>%{customdata}<extra></extra>",
-                        customdata=np.broadcast_to(
-                            np.asarray(rlabels, dtype=object)[:, np.newaxis],
-                            (len(rlabels), len(xr)),
-                        ),
-                    ),
-                    row=spatial_row,
-                    col=4,
-                )
-                fig.update_yaxes(
-                    tickmode="array",
-                    tickvals=list(range(len(rlabels))),
-                    ticktext=rl2,
-                    tickangle=-20,
-                    row=spatial_row,
-                    col=4,
-                    automargin=True,
-                )
-                fig.update_xaxes(
-                    title_text=_pos_axis_title(spatial_rnorm),
-                    row=spatial_row,
-                    col=4,
-                    automargin=True,
-                )
-            else:
-                fig.add_trace(
-                    go.Scatter(
-                        x=[mid],
-                        y=[0.0],
-                        mode="text",
-                        text=["No implied constitutive<br>spatial rows"],
-                        textposition="middle center",
-                        showlegend=False,
-                        hoverinfo="skip",
-                    ),
-                    row=spatial_row,
-                    col=4,
-                )
-                fig.update_xaxes(visible=False, row=spatial_row, col=4)
-                fig.update_yaxes(visible=False, row=spatial_row, col=4)
+        if has_spatial_rnorm:
+            _plotly_add_spatial_panel_to_subplot(
+                fig,
+                row=spatial_row,
+                col=4,
+                spatial=spatial_rnorm,
+                hm_cs=hm_cs,
+                mid=mid,
+                colorbar_compact=False,
+                use_log_rnorm=use_log_rnorm,
+                colorbar_title=const_main_title,
+            )
+        else:
+            fig.add_trace(
+                go.Scatter(
+                    x=[mid],
+                    y=[0.0],
+                    mode="text",
+                    text=["No constitutive spatial<br>|residual| (pass panel or residuals + state_pred)"],
+                    textposition="middle center",
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=spatial_row,
+                col=4,
+            )
+            fig.update_xaxes(visible=False, row=spatial_row, col=4)
+            fig.update_yaxes(visible=False, row=spatial_row, col=4)
 
         title_base = figure_title or "Monitor visualization"
         status_line = ""
@@ -603,10 +760,10 @@ def build_plotly_monitor_figure(
                 text=title_text,
                 x=0.5,
                 xanchor="center",
-                pad=dict(t=16, b=10),
+                pad=dict(t=18, b=24),
                 font=dict(size=19, family="Arial, sans-serif"),
             ),
-            height=310 + 325 * n_rows,
+            height=330 + 325 * n_rows,
             showlegend=True,
             legend=dict(
                 orientation="h",
@@ -618,147 +775,274 @@ def build_plotly_monitor_figure(
                 tracegroupgap=10,
                 itemsizing="constant",
             ),
-            margin=dict(l=100, r=100, t=170, b=150),
+            margin=dict(l=100, r=100, t=205, b=150),
             hovermode="closest",
             template="plotly_white",
+            plot_bgcolor="#f7f8fa",
             font=dict(size=12, family="Arial, sans-serif"),
         )
+        align_heatmap_colorbars_to_subplot_domains(fig)
         return fig
 
     if polar_full:
+        st_law = _plotly_spatial_panel_title_with_subtitle(law_sp_full, spatial_z_title)
+        st_const = _plotly_spatial_panel_title_with_subtitle(const_sp_full, spatial_z_title)
         specs = [
-            [{"type": "xy", "colspan": 2}, None],
-            [{"type": "xy", "colspan": 2}, None],
-        ]
-        row_heights = [0.45, 0.55]
-    else:
-        specs = [
-            [{"type": "xy", "colspan": 2}, None],
             [{"type": "xy"}, {"type": "xy"}],
+            [{"type": "xy", "colspan": 2}, None],
+            [{"type": "xy", "colspan": 2}, None],
         ]
-        row_heights = [0.45, 0.55]
-
-    fig = make_subplots(
-        rows=len(specs),
-        cols=2,
-        specs=specs,
-        vertical_spacing=0.135,
-        row_heights=row_heights,
-    )
-    fig.update_annotations(font=dict(size=11, family="Arial, sans-serif", color="#1a1a1a"))
-
-    row = 1
-    if mode_eff == "test" or use_bar_chart:
-        y_labels = [truncate_display_label(d, 44) for d in bar_display]
-        fig.add_trace(
-            go.Bar(
-                x=np.where(np.isfinite(bar_values), bar_values, 0.0),
-                y=y_labels,
-                orientation="h",
-                marker_color="#6baed6",
-                showlegend=False,
-                hovertemplate="%{y}<br>R norm=%{x:.4g}<extra></extra>",
+        row_heights = [0.30, 0.38, 0.32]
+        fig = make_subplots(
+            rows=3,
+            cols=2,
+            specs=specs,
+            vertical_spacing=0.10,
+            row_heights=row_heights,
+            subplot_titles=(
+                st_law,
+                st_const,
+                "Normalized residuals (all keys)",
+                "",
+                "Category admissibility (final step)",
+                "",
             ),
-            row=row,
+        )
+        fig.update_annotations(font=dict(size=11, family="Arial, sans-serif", color="#1a1a1a"))
+
+        mid_pf = indices[len(indices) // 2] if indices else 0
+        fig.add_trace(
+            go.Scatter(
+                x=[mid_pf],
+                y=[0.0],
+                mode="text",
+                text=["No law spatial slice<br>(pass panel or residuals + state_pred)"],
+                textposition="middle center",
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            row=1,
             col=1,
         )
-        fig.update_xaxes(title_text="Normalized residual (R norm)", row=row, col=1, showline=True, linewidth=1.2)
-        fig.update_yaxes(title_text="", row=row, col=1)
-        row += 1
+        fig.update_xaxes(visible=False, row=1, col=1)
+        fig.update_yaxes(visible=False, row=1, col=1)
+        fig.add_trace(
+            go.Scatter(
+                x=[mid_pf],
+                y=[0.0],
+                mode="text",
+                text=["No constitutive spatial<br>|residual| rows"],
+                textposition="middle center",
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            row=1,
+            col=2,
+        )
+        fig.update_xaxes(visible=False, row=1, col=2)
+        fig.update_yaxes(visible=False, row=1, col=2)
 
-    polar_row = row
-    blabels, bvals = _three_pillar_labels_values(metrics)
-    bcolors = [_adm_bar_color_plotly(v) for v in bvals]
-    bx = [v if math.isfinite(v) else 0.0 for v in bvals]
-    btext = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for v in bvals]
-    fig.add_trace(
-        go.Bar(
-            x=bx,
-            y=blabels,
-            orientation="h",
-            marker=dict(color=bcolors, line=dict(color="#333333", width=1)),
-            text=btext,
-            textposition="outside",
-            cliponaxis=False,
-            showlegend=False,
-            customdata=btext,
-            hovertemplate="%{y}<br>admissibility=%{customdata}<extra></extra>",
-        ),
-        row=polar_row,
-        col=1,
-    )
-    _adm2_x0, _adm2_x1 = category_adm_bar_x_range(list(bvals))
-    fig.update_xaxes(
-        title_text="Admissibility (%)",
-        range=[_adm2_x0, _adm2_x1],
-        tickformat=".2f%",
-        row=polar_row,
-        col=1,
-        showline=True,
-        linewidth=1.2,
-        automargin=True,
-    )
-    fig.update_yaxes(row=polar_row, col=1, automargin=True)
-
-    if not polar_full:
-        if spatial is not None:
-            Z = spatial["Z"]
-            x_sp = spatial["x"]
-            row_labels = spatial["row_labels"]
-            rl_p = [truncate_display_label(lb, 34) for lb in row_labels]
+        row_bar = 2
+        if mode_eff == "test" or use_bar_chart:
+            y_labels = [truncate_display_label(d, 44) for d in bar_display]
             fig.add_trace(
-                go.Heatmap(
-                    x=x_sp,
-                    y=list(range(len(row_labels))),
-                    z=Z,
-                    colorscale=hm_cs,
-                    colorbar=dict(
-                        title=dict(text="R norm", side="right"),
-                        len=0.38,
-                        xpad=12,
-                        thickness=14,
-                    ),
-                    hovertemplate="x=%{x:.4g}<br>%{customdata}<extra></extra>",
-                    customdata=np.broadcast_to(
-                        np.asarray(row_labels, dtype=object)[:, np.newaxis],
-                        (len(row_labels), len(x_sp)),
-                    ),
+                go.Bar(
+                    x=np.where(np.isfinite(bar_values), bar_values, 0.0),
+                    y=y_labels,
+                    orientation="h",
+                    marker_color="#6baed6",
+                    showlegend=False,
+                    hovertemplate="%{y}<br>R norm=%{x:.4g}<extra></extra>",
                 ),
-                row=polar_row,
-                col=2,
-            )
-            fig.update_yaxes(
-                tickmode="array",
-                tickvals=list(range(len(row_labels))),
-                ticktext=rl_p,
-                tickangle=-18,
-                automargin=True,
-                row=polar_row,
-                col=2,
+                row=row_bar,
+                col=1,
             )
             fig.update_xaxes(
-                title_text=_pos_axis_title(spatial),
-                title_standoff=8,
-                automargin=True,
-                row=polar_row,
-                col=2,
+                title_text="Normalized residual (R norm)", row=row_bar, col=1, showline=True, linewidth=1.2
+            )
+            fig.update_yaxes(title_text="", row=row_bar, col=1)
+
+        polar_row = 3
+        blabels, bvals = _three_pillar_labels_values(metrics)
+        bcolors = [_adm_bar_color_plotly(v) for v in bvals]
+        bx = [v if math.isfinite(v) else 0.0 for v in bvals]
+        btext = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for v in bvals]
+        fig.add_trace(
+            go.Bar(
+                x=bx,
+                y=blabels,
+                orientation="h",
+                marker=dict(color=bcolors, line=dict(color="#333333", width=1)),
+                text=btext,
+                textposition="outside",
+                cliponaxis=False,
+                showlegend=False,
+                customdata=btext,
+                hovertemplate="%{y}<br>admissibility=%{customdata}<extra></extra>",
+            ),
+            row=polar_row,
+            col=1,
+        )
+        _adm2_x0, _adm2_x1 = category_adm_bar_x_range(list(bvals))
+        fig.update_xaxes(
+            title_text="Admissibility (%)",
+            range=[_adm2_x0, _adm2_x1],
+            tickformat=".2f%",
+            row=polar_row,
+            col=1,
+            showline=True,
+            linewidth=1.2,
+            automargin=True,
+        )
+        fig.update_yaxes(row=polar_row, col=1, automargin=True)
+    else:
+        st_law_c = _plotly_spatial_panel_title_with_subtitle(
+            law_sp_full,
+            _spatial_rowkey_subtitle_if_1d(spatial if has_spatial else None) or spatial_z_title,
+        )
+        st_const_c = _plotly_spatial_panel_title_with_subtitle(
+            const_sp_full,
+            _spatial_rowkey_subtitle_if_1d(spatial_rnorm if has_spatial_rnorm else None) or spatial_z_title,
+        )
+        nr_compact = bundle.get("nr_title") or "Normalized Residuals"
+        specs = [
+            [{"type": "xy"}, {"type": "xy"}],
+            [{"type": "xy", "colspan": 2}, None],
+            [{"type": "xy", "colspan": 2}, None],
+        ]
+        row_heights = [0.32, 0.20, 0.48]
+        fig = make_subplots(
+            rows=3,
+            cols=2,
+            specs=specs,
+            vertical_spacing=0.085,
+            row_heights=row_heights,
+            subplot_titles=(
+                st_law_c,
+                st_const_c,
+                "Category admissibility (final step)",
+                "",
+                nr_compact,
+                "",
+            ),
+        )
+        fig.update_annotations(font=dict(size=11, family="Arial, sans-serif", color="#1a1a1a"))
+
+        mid = indices[len(indices) // 2] if indices else 0
+        if has_spatial:
+            _plotly_add_spatial_panel_to_subplot(
+                fig,
+                row=1,
+                col=1,
+                spatial=spatial,
+                hm_cs=hm_cs,
+                mid=mid,
+                colorbar_compact=True,
+                use_log_rnorm=use_log_rnorm,
+                colorbar_title=law_sp_full,
             )
         else:
             fig.add_trace(
                 go.Scatter(
-                    x=[0],
-                    y=[0],
+                    x=[mid],
+                    y=[0.0],
                     mode="text",
-                    text=["Pass spatial_law_panel with<br>x and per-law values"],
+                    text=["No law spatial slice<br>(need coord in state_pred)"],
                     textposition="middle center",
                     showlegend=False,
                     hoverinfo="skip",
                 ),
-                row=polar_row,
+                row=1,
+                col=1,
+            )
+            fig.update_xaxes(visible=False, row=1, col=1)
+            fig.update_yaxes(visible=False, row=1, col=1)
+
+        if has_spatial_rnorm:
+            _plotly_add_spatial_panel_to_subplot(
+                fig,
+                row=1,
+                col=2,
+                spatial=spatial_rnorm,
+                hm_cs=hm_cs,
+                mid=mid,
+                colorbar_compact=True,
+                use_log_rnorm=use_log_rnorm,
+                colorbar_title=const_sp_full,
+            )
+        else:
+            fig.add_trace(
+                go.Scatter(
+                    x=[mid],
+                    y=[0.0],
+                    mode="text",
+                    text=["No constitutive spatial<br>|residual| rows"],
+                    textposition="middle center",
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=1,
                 col=2,
             )
-            fig.update_xaxes(visible=False, range=[-1, 1], row=polar_row, col=2)
-            fig.update_yaxes(visible=False, range=[-1, 1], row=polar_row, col=2)
+            fig.update_xaxes(visible=False, row=1, col=2)
+            fig.update_yaxes(visible=False, row=1, col=2)
+
+        blabels, bvals = _three_pillar_labels_values(metrics)
+        bcolors = [_adm_bar_color_plotly(v) for v in bvals]
+        bx = [v if math.isfinite(v) else 0.0 for v in bvals]
+        btext = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for v in bvals]
+        fig.add_trace(
+            go.Bar(
+                x=bx,
+                y=blabels,
+                orientation="h",
+                marker=dict(color=bcolors, line=dict(color="#333333", width=1)),
+                text=btext,
+                textposition="outside",
+                cliponaxis=False,
+                showlegend=False,
+                customdata=btext,
+                hovertemplate="%{y}<br>admissibility=%{customdata}<extra></extra>",
+            ),
+            row=2,
+            col=1,
+        )
+        _adm3_x0, _adm3_x1 = category_adm_bar_x_range(list(bvals))
+        fig.update_xaxes(
+            title_text="Admissibility (%)",
+            range=[_adm3_x0, _adm3_x1],
+            tickformat=".2f%",
+            row=2,
+            col=1,
+            showline=True,
+            linewidth=1.2,
+            automargin=True,
+        )
+        fig.update_yaxes(row=2, col=1, showline=True, linewidth=1.2, automargin=True)
+
+        if mode_eff == "test" or use_bar_chart:
+            y_labels_all = [truncate_display_label(d, 44) for d in bar_display]
+            fig.add_trace(
+                go.Bar(
+                    x=np.where(np.isfinite(bar_values), bar_values, 0.0),
+                    y=y_labels_all,
+                    orientation="h",
+                    marker_color="#6baed6",
+                    showlegend=False,
+                    hovertemplate="%{y}<br>R norm=%{x:.4g}<extra></extra>",
+                ),
+                row=3,
+                col=1,
+            )
+            fig.update_xaxes(
+                title_text="Normalized residual (R norm)",
+                row=3,
+                col=1,
+                showline=True,
+                linewidth=1.2,
+                automargin=True,
+            )
+            fig.update_yaxes(title_text="", row=3, col=1, automargin=True)
 
     last_ov_c = float(overall_adm[-1]) if len(overall_adm) else float("nan")
     title_base = figure_title or "Monitor visualization"
@@ -777,11 +1061,11 @@ def build_plotly_monitor_figure(
             text=title_text,
             x=0.5,
             xanchor="center",
-            pad=dict(t=16, b=10),
+            pad=dict(t=18, b=20),
             font=dict(size=19, family="Arial, sans-serif"),
         ),
-        height=260 + 305 * len(specs),
-        margin=dict(t=130, r=88, l=88, b=88),
+        height=280 + 305 * len(specs),
+        margin=dict(t=155, r=88, l=88, b=88),
         showlegend=True,
         legend=dict(
             orientation="h",
@@ -793,8 +1077,10 @@ def build_plotly_monitor_figure(
         ),
         hovermode="closest",
         template="plotly_white",
+        plot_bgcolor="#f7f8fa",
         font=dict(size=12, family="Arial, sans-serif"),
     )
+    align_heatmap_colorbars_to_subplot_domains(fig)
 
     return fig
 
@@ -806,7 +1092,11 @@ def _pos_axis_title_card(sp: Optional[Dict[str, Any]]) -> str:
     return f"Position {ax}"
 
 
-def build_plotly_law_rnorm_final_bar_figure(bundle: Dict[str, Any]) -> Any:
+def build_plotly_law_rnorm_final_bar_figure(
+    bundle: Dict[str, Any],
+    *,
+    card_height: int = MOJU_STUDIO_DASHBOARD_CARD_HEIGHT,
+) -> Any:
     """Horizontal bar chart: law R_norm at the final log step (Studio card)."""
     import numpy as np
     import plotly.graph_objects as go
@@ -854,7 +1144,7 @@ def build_plotly_law_rnorm_final_bar_figure(bundle: Dict[str, Any]) -> Any:
 
     fig.update_layout(
         title=dict(text="Law R_norm (final step)", font=dict(size=14, family="Arial, sans-serif")),
-        height=max(280, 60 + 28 * max(1, len(lk) if lk else 1)),
+        height=card_height,
         margin=dict(l=12, r=12, t=48, b=48),
         template="plotly_white",
         font=dict(size=11, family="Arial, sans-serif"),
@@ -862,7 +1152,11 @@ def build_plotly_law_rnorm_final_bar_figure(bundle: Dict[str, Any]) -> Any:
     return fig
 
 
-def build_plotly_category_admissibility_bar_figure(bundle: Dict[str, Any]) -> Any:
+def build_plotly_category_admissibility_bar_figure(
+    bundle: Dict[str, Any],
+    *,
+    card_height: int = MOJU_STUDIO_DASHBOARD_CARD_HEIGHT,
+) -> Any:
     """Horizontal bar chart: laws / constitutive admissibility at final step (Studio card)."""
     import plotly.graph_objects as go
 
@@ -900,7 +1194,7 @@ def build_plotly_category_admissibility_bar_figure(bundle: Dict[str, Any]) -> An
     fig.update_yaxes(showline=True, linewidth=1.2, automargin=True)
     fig.update_layout(
         title=dict(text="Category admissibility (final step)", font=dict(size=14, family="Arial, sans-serif")),
-        height=max(220, 60 + 36 * len(blabels)),
+        height=card_height,
         margin=dict(l=12, r=80, t=48, b=48),
         template="plotly_white",
         font=dict(size=11, family="Arial, sans-serif"),
@@ -912,19 +1206,20 @@ def build_plotly_spatial_rnorm_heatmap_card(
     spatial_parsed: Optional[Dict[str, Any]],
     *,
     colorscale: str = "Jet",
-    card_title: str = "Spatial R_norm",
+    card_title: str = "Spatial |residual|",
+    card_height: int = MOJU_STUDIO_DASHBOARD_CARD_HEIGHT,
 ) -> Any:
     """
     Single heatmap + slim colorbar for one spatial panel (law or constitutive).
 
     ``spatial_parsed`` is the output of ``_parse_spatial_law_panel`` or
-    ``_parse_spatial_rnorm_panel`` (keys ``x``, ``Z``, ``row_labels``, optional ``position_axis``).
+    ``_parse_spatial_rnorm_panel`` (``kind`` ``1d`` / ``2d`` / ``3d``; see parser docstring).
     """
     import numpy as np
     import plotly.graph_objects as go
 
-    n_rows = len(spatial_parsed["row_labels"]) if spatial_parsed else 1
     fig = go.Figure()
+    full_title = card_title
     if spatial_parsed is None:
         fig.add_annotation(
             text="No spatial slice (upload state with coords or adjust sidebar axis)",
@@ -938,47 +1233,123 @@ def build_plotly_spatial_rnorm_heatmap_card(
         fig.update_xaxes(visible=False)
         fig.update_yaxes(visible=False)
     else:
-        Z = spatial_parsed["Z"]
-        x_sp = spatial_parsed["x"]
-        row_labels = spatial_parsed["row_labels"]
-        rl_s = [truncate_display_label(lb, 34) for lb in row_labels]
-        fig.add_trace(
-            go.Heatmap(
-                x=x_sp,
-                y=list(range(len(row_labels))),
-                z=Z,
-                colorscale=colorscale,
-                colorbar=dict(
-                    title=dict(text="R_norm", side="right", font=dict(size=10)),
-                    len=0.72,
-                    thickness=10,
-                    x=1.02,
-                    xpad=6,
-                ),
-                hovertemplate="x=%{x:.4g}<br>%{customdata}<extra></extra>",
-                customdata=np.broadcast_to(
-                    np.asarray(row_labels, dtype=object)[:, np.newaxis],
-                    (len(row_labels), len(x_sp)),
-                ),
+        full_title = card_title + _spatial_log_step_suffix(spatial_parsed)
+        kind = spatial_parsed.get("kind", "1d")
+        cb = dict(
+            title=dict(text=card_title, side="right", font=dict(size=10)),
+            len=0.72,
+            thickness=10,
+            x=1.02,
+            xpad=6,
+        )
+        if kind == "1d":
+            Z = spatial_parsed["Z"]
+            x_sp = spatial_parsed["x"]
+            row_labels = spatial_parsed["row_labels"]
+            first = truncate_display_label(str(row_labels[0]), 34) if row_labels else ""
+            key_sub = (
+                first
+                if len(row_labels) <= 1
+                else f"{first} (+{len(row_labels) - 1} more)"
             )
-        )
-        fig.update_yaxes(
-            tickmode="array",
-            tickvals=list(range(len(row_labels))),
-            ticktext=rl_s,
-            tickangle=-20,
-            automargin=True,
-        )
-        fig.update_xaxes(
-            title_text=_pos_axis_title_card(spatial_parsed),
-            showline=True,
-            linewidth=1.2,
-            automargin=True,
-        )
+            if key_sub:
+                full_title = _plotly_spatial_panel_title_with_subtitle(full_title, key_sub)
+            fig.add_trace(
+                go.Heatmap(
+                    x=x_sp,
+                    y=list(range(len(row_labels))),
+                    z=Z,
+                    colorscale=colorscale,
+                    colorbar=cb,
+                    hovertemplate="x=%{x:.4g}<br>%{customdata}<extra></extra>",
+                    customdata=np.broadcast_to(
+                        np.asarray(row_labels, dtype=object)[:, np.newaxis],
+                        (len(row_labels), len(x_sp)),
+                    ),
+                )
+            )
+            fig.update_yaxes(
+                showticklabels=False,
+                automargin=True,
+            )
+            fig.update_xaxes(
+                title_text=_pos_axis_title_card(spatial_parsed),
+                showline=True,
+                linewidth=1.2,
+                automargin=True,
+            )
+        elif kind == "2d":
+            Zs = spatial_parsed["Z"]
+            x_sp = np.asarray(spatial_parsed["x"], dtype=float)
+            y_sp = np.asarray(spatial_parsed["y"], dtype=float)
+            row_labels = spatial_parsed["row_labels"]
+            nk = int(Zs.shape[0])
+            fig.add_trace(
+                go.Heatmap(
+                    x=x_sp,
+                    y=y_sp,
+                    z=Zs[0],
+                    colorscale=colorscale,
+                    colorbar=cb,
+                    hovertemplate="x=%{x:.4g}<br>y=%{y:.4g}<br>display=%{z:.4g}<extra></extra>",
+                )
+            )
+            fig.update_xaxes(title_text="x", automargin=True)
+            fig.update_yaxes(title_text="y", automargin=True)
+            if nk > 1:
+                fig.add_annotation(
+                    text=f"First of {nk} keys: {truncate_display_label(row_labels[0], 40)}",
+                    xref="paper",
+                    yref="paper",
+                    x=0.5,
+                    y=1.08,
+                    showarrow=False,
+                    yanchor="bottom",
+                    font=dict(size=10),
+                )
+        else:
+            V = np.asarray(spatial_parsed["V"][0], dtype=float)
+            x_sp = np.asarray(spatial_parsed["x"], dtype=float)
+            y_sp = np.asarray(spatial_parsed["y"], dtype=float)
+            z_sp = np.asarray(spatial_parsed["z"], dtype=float)
+            nk = int(spatial_parsed["V"].shape[0])
+            fig.add_trace(
+                go.Volume(
+                    x=x_sp,
+                    y=y_sp,
+                    z=z_sp,
+                    value=V,
+                    colorscale=colorscale,
+                    opacity=0.35,
+                    surface_count=18,
+                    caps=dict(x_show=False, y_show=False, z_show=False),
+                    colorbar=cb,
+                )
+            )
+            fig.update_layout(
+                scene=dict(
+                    xaxis_title="x",
+                    yaxis_title="y",
+                    zaxis_title="z",
+                    aspectmode="data",
+                ),
+                margin=dict(l=8, r=8, t=48, b=8),
+            )
+            if nk > 1:
+                fig.add_annotation(
+                    text=f"First of {nk} keys: {truncate_display_label(spatial_parsed['row_labels'][0], 40)}",
+                    xref="paper",
+                    yref="paper",
+                    x=0.5,
+                    y=1.06,
+                    showarrow=False,
+                    yanchor="bottom",
+                    font=dict(size=10),
+                )
 
     fig.update_layout(
-        title=dict(text=card_title, font=dict(size=14, family="Arial, sans-serif")),
-        height=max(320, 80 + 32 * n_rows),
+        title=dict(text=full_title, font=dict(size=14, family="Arial, sans-serif")),
+        height=card_height,
         margin=dict(l=8, r=100, t=48, b=48),
         template="plotly_white",
         font=dict(size=11, family="Arial, sans-serif"),

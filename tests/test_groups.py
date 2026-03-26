@@ -103,3 +103,18 @@ class TestGroupsNew:
         St_wave = Groups.st_wave(omega=omega, L=L, c=c)
         expected = (omega * L) / c
         assert jnp.allclose(St_wave, expected, rtol=rtol, atol=atol)
+
+    def test_poisson_rhs_pi(self, rtol, atol):
+        L = jnp.array(0.02)
+        source = jnp.array(1e-6)
+        epsilon = jnp.array(8.85e-12)
+        phi_ref = jnp.array(1.0)
+        pi = Groups.poisson_rhs_pi(L, source, epsilon, phi_ref)
+        assert jnp.allclose(pi, (L**2) * source / (epsilon * phi_ref), rtol=rtol, atol=atol)
+
+    def test_schrodinger_kinetic_length_squared(self, rtol, atol):
+        m = jnp.array(2.0)
+        L = jnp.array(3.0)
+        h_bar = jnp.array(4.0)
+        K = Groups.schrodinger_kinetic_length_squared(m, L, h_bar)
+        assert jnp.allclose(K, 2.0 * m * (L**2) / (h_bar**2), rtol=rtol, atol=atol)

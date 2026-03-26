@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional
 
 
 @dataclass(frozen=True)
@@ -10,28 +10,22 @@ class AuditSpec:
     Typed config for a Model/Group audit.
 
     - name: Models.<name> or Groups.<name>
-    - output_key: state key for F output (expects derivative keys d_<output_key>_dx/dt for chain closures)
+    - output_key: state key for F output (used by ref_delta and implied_delta evaluation)
     - state_map: function arg name -> state key
-    - predicted_spatial/temporal: state keys (not arg names) that vary in x/t
     - invariance_pi_constant (scaling only, Path A): second forward with constants scaled so
       the audited Group stays fixed; residual on invariance_compare_keys; flat key
       scaling/<name>/pi_constant. Requires built-in recipe and keys in engine.constants.
     - implied_value_key (optional): state/constants key holding implied constitutive value;
-      residual constitutive/<name>/implied_delta = F(pred args) - implied. Mutually exclusive
-      with implied_fn. Omitted if key missing (same as other closures returning None).
+      residual constitutive/<name>/implied_delta is always a **nondimensional** discrepancy vs
+      ``F(pred args)`` (see ``moju.monitor.closure_registry``). Mutually exclusive with
+      implied_fn. Omitted if key missing (same as other closures returning None).
     - implied_fn (optional, Python only): (merged_state, constants) -> array or None; not
       serialized in to_dict(). Use audit_spec_to_engine_dict() when building ResidualEngine.
-    - chain_output (optional): ``state_derivative`` (default) uses ``d_<output_key>/d(axis)``
-      from merged state; ``fd_on_composition`` finite-differences ``F(*args)`` along the mesh
-      using ``x`` / ``y`` / ``z`` / ``t`` coords (no ``d_<output>_dx`` key required).
     """
 
     name: str
     output_key: str
     state_map: Dict[str, str]
-    predicted_spatial: List[str] = field(default_factory=list)
-    predicted_temporal: List[str] = field(default_factory=list)
-    chain_output: str = "state_derivative"
     implied_value_key: Optional[str] = None
     implied_fn: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]] = field(
         default=None, repr=False, compare=False
@@ -40,15 +34,9 @@ class AuditSpec:
     residual_basename: Optional[str] = None
     # When False, skip F(pred)-F(ref) even if state_ref is set.
     include_ref_delta: bool = True
-    # Closure evaluation mode for chain_dx/chain_dy/chain_dz/chain_dt.
-    # - pointwise: return pointwise residual array (current behavior)
-    # - weak: return weighted integrated RMS (noise-robust)
-    closure_mode: str = "pointwise"
-    # Weak-form hook: canonical axis -> state key holding quadrature weights.
-    # Examples: {"x": "w_x"}, {"y": "w_y"}, {"z": "w_z"}, or {"t": "w_t"}.
-    quadrature_weights: Dict[str, str] = field(default_factory=dict)
-    # Spatial chain-rule axes: closure keys chain_dx / chain_dy / chain_dz for each axis listed.
-    chain_spatial_axes: Sequence[str] = field(default_factory=lambda: ["x"])
+    # Optional reference tensor key for implied/ref ND discrepancy denominator (|ref|); else symmetric scale.
+    implied_delta_ref_key: Optional[str] = None
+    ref_delta_ref_key: Optional[str] = None
     # π-constant closure (Path A only): perturb constants along a built-in recipe so the
     # audited Group stays fixed; compare merged state keys between baseline and scaled runs.
     invariance_pi_constant: bool = False
@@ -61,32 +49,37 @@ class AuditSpec:
             "name": self.name,
             "output_key": self.output_key,
             "state_map": dict(self.state_map),
-            "predicted_spatial": list(self.predicted_spatial),
-            "predicted_temporal": list(self.predicted_temporal),
-            "closure_mode": self.closure_mode,
-            "quadrature_weights": dict(self.quadrature_weights),
-            "chain_spatial_axes": list(self.chain_spatial_axes),
-            "chain_output": str(self.chain_output),
             "invariance_pi_constant": self.invariance_pi_constant,
             "invariance_compare_keys": list(self.invariance_compare_keys),
             "invariance_scale_c": self.invariance_scale_c,
             "implied_value_key": self.implied_value_key,
             "residual_basename": self.residual_basename,
             "include_ref_delta": self.include_ref_delta,
+            "implied_delta_ref_key": self.implied_delta_ref_key,
+            "ref_delta_ref_key": self.ref_delta_ref_key,
         }
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "AuditSpec":
+        removed_keys = {
+            "predicted_spatial",
+            "predicted_temporal",
+            "chain_output",
+            "closure_mode",
+            "quadrature_weights",
+            "chain_spatial_axes",
+        }
+        legacy = sorted(k for k in removed_keys if k in (d or {}))
+        if legacy:
+            raise ValueError(
+                "AuditSpec no longer supports chain-closure configuration. "
+                f"Remove legacy keys {legacy} from your config/spec. "
+                "Moju clean-out removed chain_dx/dy/dz/dt and all related fields."
+            )
         return AuditSpec(
             name=d["name"],
             output_key=d["output_key"],
             state_map=dict(d.get("state_map") or {}),
-            predicted_spatial=list(d.get("predicted_spatial") or []),
-            predicted_temporal=list(d.get("predicted_temporal") or []),
-            closure_mode=str(d.get("closure_mode") or "pointwise"),
-            quadrature_weights=dict(d.get("quadrature_weights") or {}),
-            chain_spatial_axes=list(d.get("chain_spatial_axes") or ["x"]),
-            chain_output=str(d.get("chain_output") or "state_derivative"),
             invariance_pi_constant=bool(d.get("invariance_pi_constant", False)),
             invariance_compare_keys=list(d.get("invariance_compare_keys") or []),
             invariance_scale_c=float(d.get("invariance_scale_c", 10.0)),
@@ -94,6 +87,8 @@ class AuditSpec:
             implied_fn=d.get("implied_fn"),
             residual_basename=(d.get("residual_basename") or None),
             include_ref_delta=bool(d.get("include_ref_delta", True)),
+            implied_delta_ref_key=(d.get("implied_delta_ref_key") or None),
+            ref_delta_ref_key=(d.get("ref_delta_ref_key") or None),
         )
 
 
@@ -117,11 +112,10 @@ class MonitorConfig:
     constitutive_audit: List[AuditSpec] = field(default_factory=list)
     scaling_audit: List[AuditSpec] = field(default_factory=list)
     constitutive_custom: List[Dict[str, Any]] = field(default_factory=list)
-    scaling_custom: List[Dict[str, Any]] = field(default_factory=list)
     # Ordered steps: each {"output_key": str, "expr": dict} evaluated before groups / FD / laws.
     derived_state_chain: List[Dict[str, Any]] = field(default_factory=list)
 
-    # Used for default inference when predicted_* omitted.
+    # Default field names for Studio / NPZ hints.
     primary_fields: List[str] = field(
         default_factory=lambda: ["T", "u", "v", "w", "p", "rho"]
     )
@@ -138,13 +132,18 @@ class MonitorConfig:
             "constitutive_audit": [s.to_dict() for s in self.constitutive_audit],
             "scaling_audit": [s.to_dict() for s in self.scaling_audit],
             "constitutive_custom": list(self.constitutive_custom),
-            "scaling_custom": list(self.scaling_custom),
             "derived_state_chain": list(self.derived_state_chain),
             "primary_fields": list(self.primary_fields),
         }
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "MonitorConfig":
+        legacy_sc = d.get("scaling_custom") or []
+        if legacy_sc:
+            raise ValueError(
+                "MonitorConfig no longer supports scaling_custom; remove it from JSON "
+                "and use scaling_audit (Groups.*) with ref_delta and optional π-constant only."
+            )
         return MonitorConfig(
             constants=dict(d.get("constants") or {}),
             laws=list(d.get("laws") or []),
@@ -153,7 +152,6 @@ class MonitorConfig:
             constitutive_audit=[AuditSpec.from_dict(x) for x in (d.get("constitutive_audit") or [])],
             scaling_audit=[AuditSpec.from_dict(x) for x in (d.get("scaling_audit") or [])],
             constitutive_custom=list(d.get("constitutive_custom") or []),
-            scaling_custom=list(d.get("scaling_custom") or []),
             derived_state_chain=list(d.get("derived_state_chain") or []),
             primary_fields=list(d.get("primary_fields") or ["T", "u", "v", "w", "p", "rho"]),
         )

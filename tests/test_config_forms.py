@@ -39,13 +39,11 @@ def test_build_constitutive_audit_spec_minimal():
         name="sutherland_mu",
         output_key="mu",
         state_map={a: a for a in args},
-        predicted_spatial=["T"],
         implied_value_key="mu_ref",
     )
     assert d["name"] == "sutherland_mu"
     assert d["implied_value_key"] == "mu_ref"
-    assert d["closure_mode"] == "pointwise"
-    assert "chain_spatial_axes" in d
+    assert "closure_mode" not in d
 
 
 def test_merge_simple_with_override_empty_lists():

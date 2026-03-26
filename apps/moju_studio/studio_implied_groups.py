@@ -12,7 +12,6 @@ from collections import defaultdict, deque
 from typing import Any, Dict, Iterable, List, Set
 
 from apps.moju_studio.config_forms import (
-    build_audit_spec_dict,
     build_group_spec,
     group_parameter_names,
     law_parameter_names,
@@ -82,45 +81,9 @@ def implied_scaling_audit_specs_for_laws(
     law_names: Iterable[str],
     pred_keys: Set[str],
 ) -> List[Dict[str, Any]]:
-    """
-    Extra **scaling_audit** rows for implied dimensionless groups so Path B runs **chain**
-    closures without requiring ``d_<group>/dx`` in the NPZ.
-
-    Currently: ``fourier_conduction`` implies ``fo`` — when ``T`` is in the upload, we add
-    ``alpha`` to ``predicted_spatial`` (thermal diffusivity on the grid) and set
-    ``chain_output`` is ``fd_on_composition`` so the LHS is FD of ``fo`` on the mesh.
-    """
-    law_names = list(law_names)
-    needed: Set[str] = set()
-    for name in law_names:
-        needed.update(law_parameter_names(name))
-
-    out: List[Dict[str, Any]] = []
-
-    def _predicted_from_sm(sm: Dict[str, str], pk: Set[str]) -> List[str]:
-        return [v for v in sm.values() if v in pk and v not in _MESH_COORD_KEYS]
-
-    if "fo" in needed and "fo" in GROUP_FNS:
-        sm = _identity_group_state_map("fo")
-        ps = _predicted_from_sm(sm, set(pred_keys))
-        if "T" in pred_keys and "alpha" not in ps:
-            ps = [*ps, "alpha"]
-        if ps:
-            out.append(
-                build_audit_spec_dict(
-                    category="scaling",
-                    name="fo",
-                    output_key="fo",
-                    state_map=sm,
-                    predicted_spatial=ps,
-                    predicted_temporal=[],
-                    closure_mode="pointwise",
-                    chain_spatial_axes=["x"],
-                    chain_output="fd_on_composition",
-                )
-            )
-
-    return out
+    """Chain-rule scaling audits were removed; no implied scaling rows are injected."""
+    _ = (law_names, pred_keys)
+    return []
 
 
 def _topological_sort_group_specs(specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

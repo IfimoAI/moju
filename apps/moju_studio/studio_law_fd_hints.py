@@ -22,7 +22,10 @@ def _recipe_line(law_name: str, arg_name: str, recipe: LawFDArgRecipe) -> str:
     target_sk = arg_name
     src = _resolve_source_state_key(recipe, arg_name, target_sk, sm_identity)
     prim = src or "(could not infer — use Expert JSON state_map)"
-    return f"- **`{arg_name}`** — FD kind `{recipe.kind}` from primitive **`{prim}`** when that key is missing."
+    extra = ""
+    if recipe.scale_laplacian_by_L2:
+        extra = " Then multiply by **`L**2`** (requires numeric **`L`** in state or constants)."
+    return f"- **`{arg_name}`** — FD kind `{recipe.kind}` from primitive **`{prim}`** when that key is missing.{extra}"
 
 
 def law_fd_help_markdown(law_name: str) -> str:

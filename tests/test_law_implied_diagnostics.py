@@ -13,7 +13,7 @@ from moju.piratio.groups import Groups
 from moju.piratio.laws import Laws
 
 
-def test_merge_fragment_unions_predicted_spatial_into_prepended_row():
+def test_merge_fragment_drops_duplicate_basename_rows():
     laws = [
         {
             "name": "fourier_conduction",
@@ -21,10 +21,11 @@ def test_merge_fragment_unions_predicted_spatial_into_prepended_row():
         }
     ]
     lic, _ = merge_law_implied_audit_specs(laws, enabled=True)
-    cfg = [dict(lic[0], predicted_spatial=["alpha"])]
+    bn = lic[0]["residual_basename"]
+    cfg = [{"name": "thermal_diffusivity", "residual_basename": bn, "output_key": "alpha"}]
     mc, rest = merge_fragment_law_implied_audit_specs(lic, cfg)
+    assert mc == lic
     assert rest == []
-    assert "alpha" in mc[0]["predicted_spatial"]
 
 
 def test_merge_fourier_prepends_thermal_diffusivity():
@@ -81,7 +82,8 @@ def test_fourier_implied_delta_near_zero_on_consistent_state():
         "Fo": Fo,
         "t": t,
         "L": L,
-        "k": jnp.array(200.0),
+        # k/(rho*cp) must match alpha so model thermal_diffusivity agrees with T_t/T_laplacian.
+        "k": jnp.array(1.2e-5 * 2700.0 * 900.0),
         "rho": jnp.array(2700.0),
         "cp": jnp.array(900.0),
         "alpha": alpha,
@@ -101,12 +103,9 @@ def test_ref_delta_gated_by_include_ref_delta():
         "name": "thermal_diffusivity",
         "output_key": "alpha",
         "state_map": {"k": "k", "rho": "rho", "cp": "cp"},
-        "predicted_spatial": [],
-        "predicted_temporal": [],
         "implied_fn": lambda st, c: jnp.array(1.0),
         "residual_basename": "thermal_diffusivity/custom",
         "include_ref_delta": False,
-        "chain_spatial_axes": ["x"],
     }
     engine = ResidualEngine(constitutive_audit=[spec])
     alpha = jnp.array(1.0)

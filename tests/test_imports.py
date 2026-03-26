@@ -35,12 +35,14 @@ def test_import_monitor_all():
         build_loss,
         audit,
         build_monitor_visualize_bundle,
+        build_spatial_rnorm_panels_from_residuals,
         visualize,
         list_constitutive_models,
         list_scaling_closure_ids,
         list_pi_constant_group_names,
     )
     assert callable(build_monitor_visualize_bundle)
+    assert callable(build_spatial_rnorm_panels_from_residuals)
     assert ResidualEngine is not None
     assert callable(list_constitutive_models)
     assert callable(list_scaling_closure_ids)
@@ -57,6 +59,8 @@ def test_monitor_module_has_all():
         "audit",
         "build_monitor_visualize_bundle",
         "visualize",
+        "build_spatial_rnorm_panels_from_residuals",
+        "apply_closure_discrepancy_normalize",
         "list_constitutive_models",
         "list_scaling_closure_ids",
         "list_pi_constant_group_names",

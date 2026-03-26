@@ -92,8 +92,8 @@ def test_fourier_fragment_includes_implied_fo_group():
     assert fo_specs[0]["state_map"] == {"alpha": "alpha", "t": "t", "L": "L"}
 
 
-def test_fourier_studio_patch_planner_requires_d_alpha_dx():
-    """Law-linked thermal_diffusivity row gets ``predicted_spatial: [alpha]`` when α is in NPZ."""
+def test_fourier_studio_patch_planner_no_audit_derivative_keys():
+    """Chain-rule audit derivatives removed; planner does not require d_alpha_dx."""
     frag = build_studio_auto_fragment(
         law_names=["fourier_conduction"],
         model_names=[],
@@ -102,7 +102,7 @@ def test_fourier_studio_patch_planner_requires_d_alpha_dx():
         constant_keys=set(),
     )
     dkeys = collect_audit_derivative_keys_from_fragment(frag)
-    assert "d_alpha_dx" in dkeys
+    assert dkeys == set()
 
 
 def test_plan_fourier_t_laplacian_derivable_with_fd():
@@ -319,7 +319,7 @@ def test_fourier_pred_plus_constants_no_false_missing_state():
     assert not p.has_blocking_gaps()
 
 
-def test_power_law_mu_model_adds_constitutive_derivatives_when_pred_has_fields():
+def test_power_law_mu_model_no_audit_derivative_keys():
     frag = build_studio_auto_fragment(
         law_names=[],
         model_names=["power_law_mu"],
@@ -328,4 +328,4 @@ def test_power_law_mu_model_adds_constitutive_derivatives_when_pred_has_fields()
         constant_keys=set(),
     )
     dkeys = collect_audit_derivative_keys_from_fragment(frag)
-    assert "d_mu_pl_dx" in dkeys
+    assert dkeys == set()

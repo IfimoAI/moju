@@ -1,5 +1,5 @@
 """
-Studio-only dependency planning: required state / audit derivatives / law-FD prerequisites.
+Studio-only dependency planning: required state keys and law-FD prerequisites.
 
 Does not change ``ResidualEngine`` behavior. Used for preflight UI and checklists.
 """
@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from moju.monitor.derived_state_chain import all_ref_keys_from_chain, keys_produced_by_chain
-from moju.monitor.derivative_keys import collect_audit_derivative_keys
 from moju.monitor.law_fd_recipes import (
     LAW_FD_RECIPES,
     LawFDArgRecipe,
@@ -90,9 +89,9 @@ def collect_required_state_keys_from_fragment(d: Dict[str, Any]) -> Set[str]:
 
 
 def collect_audit_derivative_keys_from_fragment(d: Dict[str, Any]) -> Set[str]:
-    ca, sa = effective_audit_specs_for_fragment(d)
-    sx, st = collect_audit_derivative_keys(ca, sa)
-    return sx | st
+    """Chain-rule audit derivatives were removed; always empty."""
+    _ = d
+    return set()
 
 
 def expand_keys_with_aliases(
@@ -156,12 +155,8 @@ def coord_keys_for_law_fd_recipe(
 
 
 def chain_axes_from_audits(d: Dict[str, Any]) -> Set[str]:
-    axes: Set[str] = set()
-    ca, sa = effective_audit_specs_for_fragment(d)
-    for spec in ca + sa:
-        for ax in spec.get("chain_spatial_axes") or ["x"]:
-            axes.add(str(ax))
-    return axes
+    _ = d
+    return set()
 
 
 def coord_keys_for_audit_derivative(

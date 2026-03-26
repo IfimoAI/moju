@@ -2,7 +2,7 @@
 
 import pytest
 import jax.numpy as jnp
-from moju.piratio import Laws
+from moju.piratio import Groups, Laws
 
 
 class TestLawsMassIncompressible:
@@ -78,6 +78,25 @@ class TestLawsFourierConduction:
         assert jnp.all(jnp.isfinite(out))
 
 
+class TestLawsSchrodingerSteady:
+    """Nondimensional steady Schrödinger matches scaled dimensional TISE."""
+
+    def test_nd_residual_equals_k_times_dimensional_residual(self, rtol, atol):
+        # Order-one m, L, h_bar so float32 JAX does not underflow h_bar**2.
+        lap_dim = jnp.array(-1.5)
+        V = jnp.array(2.0)
+        E = jnp.array(1.0)
+        psi = jnp.array(0.5 + 0.2j)
+        m = jnp.array(1.0)
+        h_bar = jnp.array(1.0)
+        L = jnp.array(1.0)
+        K = Groups.schrodinger_kinetic_length_squared(m, L, h_bar)
+        lap_L2 = (L**2) * lap_dim
+        r_new = Laws.schrodinger_steady(lap_L2, V, E, psi, K)
+        r_dim = (-(h_bar**2) / (2 * m)) * lap_dim + (V - E) * psi
+        assert jnp.allclose(r_new, K * r_dim, rtol=rtol, atol=atol)
+
+
 class TestLawsStokesFlow:
     """Stokes flow residual: grad p - (1/Re) Laplacian(u) = 0."""
 
@@ -88,3 +107,30 @@ class TestLawsStokesFlow:
         re = 100.0
         residual = Laws.stokes_flow(p_grad, u_laplacian, re)
         assert residual.shape == (2,)
+
+
+class TestLawsNewtonianLaplacianMomentum:
+    def test_incompressible_balance_zero(self, rtol, atol):
+        u_t = jnp.array([0.0, 0.0])
+        u = jnp.array([1.0, 0.0])
+        u_grad = jnp.zeros((2, 2))
+        p_grad = jnp.array([0.0, 0.0])
+        u_laplacian = jnp.array([0.0, 0.0])
+        nu = jnp.array(0.1)
+        r = Laws.momentum_incompressible_newtonian_laplacian(
+            u_t, u, u_grad, p_grad, u_laplacian, nu
+        )
+        assert jnp.allclose(r, 0.0, rtol=rtol, atol=atol)
+
+    def test_compressible_balance_zero(self, rtol, atol):
+        rho = jnp.array(1.2)
+        u_t = jnp.array([0.0, 0.0])
+        u = jnp.array([0.0, 0.0])
+        u_grad = jnp.zeros((2, 2))
+        p_grad = jnp.array([0.0, 0.0])
+        u_laplacian = jnp.array([0.0, 0.0])
+        nu = jnp.array(0.0)
+        r = Laws.momentum_compressible_newtonian_laplacian(
+            rho, u_t, u, u_grad, p_grad, u_laplacian, nu
+        )
+        assert jnp.allclose(r, 0.0, rtol=rtol, atol=atol)

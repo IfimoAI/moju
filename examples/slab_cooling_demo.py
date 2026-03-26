@@ -148,15 +148,11 @@ engine = ResidualEngine(
             "name": "fo",
             "output_key": "Fo",
             "state_map": {"alpha": "alpha", "t": "t", "L": "L"},
-            "predicted_spatial": ["alpha"],
-            "predicted_temporal": ["alpha", "t"],
         },
         {
             "name": "bi",
             "output_key": "Bi",
             "state_map": {"h": "h", "L": "L", "k_solid": "kappa"},
-            "predicted_spatial": ["kappa"],
-            "predicted_temporal": ["kappa"],
         },
     ],
 )
@@ -259,7 +255,7 @@ if __name__ == "__main__":
     print("Overall admissibility score:", report["overall_admissibility_score"])
     print("Overall admissibility level:", report["overall_admissibility_level"])
 
-    fig = visualize(engine.log, backend="matplotlib")
+    fig = visualize(engine.log, backend="matplotlib", engine=engine)
     if fig is not None:
         fig.savefig("slab_cooling_diagnostics.png", dpi=150, bbox_inches="tight")
         print("Saved slab_cooling_diagnostics.png")

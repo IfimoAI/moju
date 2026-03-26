@@ -64,6 +64,10 @@ GROUP_PI_CONSTANT_RECIPES: Dict[str, List[RecipeRow]] = {
     "pe_mass": [("re", "multiply_c"), ("sc", "divide_c")],
     # St_wave = omega*L/c_wave
     "st_wave": [("omega", "multiply_c"), ("c", "multiply_c")],
+    # poisson_rhs_pi = L^2 * source / (epsilon * phi_ref)
+    "poisson_rhs_pi": [("L", "multiply_c"), ("source", "divide_c", 2)],
+    # schrodinger_kinetic_length_squared = 2*m*L^2/h_bar^2  ->  L*c, h_bar*c
+    "schrodinger_kinetic_length_squared": [("L", "multiply_c"), ("h_bar", "multiply_c")],
 }
 
 

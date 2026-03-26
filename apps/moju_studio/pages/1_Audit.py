@@ -5,11 +5,12 @@ Upload state, configure physics via Studio allowlists (or expert JSON), run audi
 from __future__ import annotations
 
 import json
+import math
 import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 import numpy as np
 _ROOT = Path(__file__).resolve().parents[3]
@@ -67,11 +68,13 @@ from apps.moju_studio.studio_io import (
 _STATE_UPLOAD_TYPES = ["npz", "npy", "h5", "hdf5", "nc", "nc4"]
 from apps.moju_studio.studio_plots import plotly_pred_minus_ref, plotly_residual_or_state
 from moju.monitor import ResidualEngine, audit, build_monitor_visualize_bundle, visualize
+from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
 from moju.monitor.visualize_labels import format_admissibility_pct
 from moju.monitor.visualize_plotly import (
     build_plotly_category_admissibility_bar_figure,
     build_plotly_law_rnorm_final_bar_figure,
     build_plotly_spatial_rnorm_heatmap_card,
+    format_admissibility_status_label,
 )
 
 # Sidebar → Path B finite-difference grid (shared by Run tab and Config dependency preview).
@@ -354,146 +357,37 @@ def _parse_float_dict(raw: str, label: str) -> Dict[str, float]:
     return out
 
 
-def _per_key_scale_flat(
-    flat_key: str,
-    *,
-    log_entry: Optional[Dict[str, Any]],
-    first_rms: Optional[Dict[str, Any]],
-    r_ref: Optional[Dict[str, float]],
-) -> float:
-    """Scalar scale for R_norm-style normalization (matches audit log rules)."""
-    if log_entry is None:
-        return 1.0
-    rms = log_entry.get("rms") or {}
-    entry_scale = log_entry.get("scale") or {}
-    fr = first_rms or {}
-    ref = r_ref or {}
-    if flat_key in ref and ref[flat_key] is not None and float(ref[flat_key]) > 0:
-        return float(ref[flat_key])
-    if flat_key in entry_scale and entry_scale[flat_key] is not None and float(entry_scale[flat_key]) > 0:
-        return float(entry_scale[flat_key])
-    if flat_key in fr and fr[flat_key] is not None and float(fr[flat_key]) > 0:
-        return float(fr[flat_key])
-    return 1.0
-
-
-def _is_law_linked_implied_constitutive_key(flat_key: str) -> bool:
-    """True for law-linked implied constitutive residuals (e.g. …/law_fourier/…/implied_delta)."""
-    k = str(flat_key)
-    if not k.startswith("constitutive/"):
-        return False
-    parts = k.split("/")
-    if "implied_delta" not in parts:
-        return False
-    return any(p.startswith("law_") for p in parts)
-
-
-def _spatial_slice_vs_coord(
-    arr: Any,
-    pred: Dict[str, Any],
-    *,
-    coord_key: str,
-    prefer_last_t: bool,
-) -> Optional[np.ndarray]:
-    """Best-effort 1D slice along coord (x, y, or z) for spatial heatmap rows."""
-    coord = pred.get(coord_key)
-    if coord is None:
-        return None
-    c_arr = np.asarray(jnp.asarray(coord)).ravel()
-    nc = int(c_arr.shape[0])
-    a = np.asarray(jnp.asarray(arr), dtype=float)
-    if a.ndim == 0:
-        return None
-    t = pred.get("t")
-    if prefer_last_t and t is not None and a.ndim >= 2:
-        nt = int(np.asarray(jnp.asarray(t)).reshape(-1).shape[0])
-        if a.shape[0] == nt:
-            a = a[-1]
-    while a.ndim > 1 and a.shape[0] == 1:
-        a = a[0]
-    if a.ndim == 1 and a.shape[0] == nc:
-        return a
-    if a.ndim >= 2 and a.shape[-1] == nc:
-        flat = np.reshape(a, (-1, nc))
-        return np.nanmean(flat, axis=0)
-    if a.ndim >= 2 and a.shape[0] == nc:
-        flat = np.reshape(np.moveaxis(a, 0, -1), (-1, nc))
-        return np.nanmean(flat, axis=0)
-    return None
-
-
-def _build_spatial_panels_from_last_run(
-    residuals: Optional[Dict[str, Any]],
-    pred: Dict[str, Any],
-    *,
-    coord_key: str,
-    prefer_last_t: bool,
-    log_entry: Optional[Dict[str, Any]] = None,
-    first_rms: Optional[Dict[str, Any]] = None,
-    r_ref: Optional[Dict[str, float]] = None,
-) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    """Law and constitutive spatial panels (R_norm-style) along ``coord_key``."""
-    if residuals is None:
-        return None, None
-    coord = pred.get(coord_key)
-    if coord is None:
-        return None, None
-    coord_arr = np.asarray(jnp.asarray(coord), dtype=float).ravel()
-    flat = flatten_residuals(residuals)
-
-    law_values: Dict[str, np.ndarray] = {}
-    implied_const_rows: List[tuple[str, np.ndarray]] = []
-    other_const_rows: List[tuple[str, np.ndarray]] = []
-    for k, v in sorted(flat.items()):
-        sl = _spatial_slice_vs_coord(v, pred, coord_key=coord_key, prefer_last_t=prefer_last_t)
-        if sl is None:
-            continue
-        scale_k = _per_key_scale_flat(k, log_entry=log_entry, first_rms=first_rms, r_ref=r_ref)
-        denom = max(float(scale_k), 1e-30)
-        row = np.abs(sl) / denom
-        if k.startswith("laws/") and len(law_values) < 12:
-            law_values[k] = row
-        elif k.startswith("constitutive/"):
-            if _is_law_linked_implied_constitutive_key(k):
-                implied_const_rows.append((k, row))
-            else:
-                other_const_rows.append((k, row))
-
-    const_values: Dict[str, np.ndarray] = {}
-    for k, row in implied_const_rows:
-        if len(const_values) >= 12:
-            break
-        const_values[k] = row
-    for k, row in other_const_rows:
-        if len(const_values) >= 12:
-            break
-        if k not in const_values:
-            const_values[k] = row
-
-    pos = {"position_axis": coord_key}
-    law_panel = {**pos, "x": coord_arr, "values": law_values} if law_values else None
-    implied_panel = {**pos, "x": coord_arr, "values": const_values} if const_values else None
-    return law_panel, implied_panel
-
-
 def _studio_monitor_spatial_bundle() -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], str]:
     """Spatial panels + Plotly heatmap colorscale from sidebar session state."""
     eng = st.session_state.get("last_engine")
     log_entry = eng.log[-1] if eng and getattr(eng, "log", None) else None
+    log_idx = (len(eng.log) - 1) if eng and getattr(eng, "log", None) and len(eng.log) > 0 else None
     first_rms = (eng.log[0].get("rms") if eng and eng.log else None) or {}
     coord = str(st.session_state.get("sb_spatial_axis", "x"))
     prefer_last_t = st.session_state.get("studio_fd_time_label", "Steady") != "Steady"
     r_ref = st.session_state.get("last_r_ref") or {}
     if not isinstance(r_ref, dict):
         r_ref = {}
-    law_panel, implied_panel = _build_spatial_panels_from_last_run(
+    pred: Dict[str, Any] = {}
+    sp = st.session_state.get("state_pred")
+    if sp is not None:
+        pred.update(dict(sp))
+    if log_entry:
+        snap = log_entry.get("coord_snapshot")
+        if isinstance(snap, Mapping):
+            for k in ("x", "y", "z", "t"):
+                if k in snap and snap[k] is not None and k not in pred:
+                    pred[k] = snap[k]
+    law_panel, implied_panel = build_spatial_rnorm_panels_from_residuals(
         st.session_state.get("last_residuals"),
-        st.session_state.get("state_pred") or {},
+        pred,
         coord_key=coord,
         prefer_last_t=prefer_last_t,
         log_entry=log_entry,
         first_rms=first_rms,
         r_ref=r_ref,
+        log_step_index=log_idx,
+        normalize_spatial=False,
     )
     cs = str(st.session_state.get("sb_heatmap_cs", "Jet"))
     return law_panel, implied_panel, cs
@@ -513,6 +407,8 @@ def studio_redraw_plotly_fragment() -> None:
         if st.button("Redraw dashboard", key="viz_redraw_btn"):
             try:
                 _law_panel, _rnorm_panel, _hm_cs = _studio_monitor_spatial_bundle()
+                _pref_t = st.session_state.get("studio_fd_time_label", "Steady") != "Steady"
+                _sax = str(st.session_state.get("sb_spatial_axis", "x"))
                 fig2 = visualize(
                     st.session_state.get("viz_log") or [],
                     keys=list(vk) if vk else None,
@@ -522,7 +418,12 @@ def studio_redraw_plotly_fragment() -> None:
                     mode="training",
                     spatial_law_panel=_law_panel,
                     spatial_rnorm_panel=_rnorm_panel,
+                    residuals=st.session_state.get("last_residuals"),
+                    state_pred=st.session_state.get("state_pred"),
+                    spatial_coord_key=_sax,
+                    spatial_prefer_last_t=_pref_t,
                     spatial_heatmap_colorscale=_hm_cs,
+                    engine=st.session_state.get("last_engine"),
                 )
                 if fig2 is not None:
                     try:
@@ -828,6 +729,8 @@ with tab_cfg:
             "Law FD: derived inputs (e.g. `T_laplacian`) need **primitives** + **x** (… in `state_pred`) "
             "with Run tab **Compute state derivatives (finite difference)** + **Compute law derivatives (finite difference)**. "
             "See `moju.monitor.law_fd_recipes`. *(API: `auto_path_b_derivatives`, `fill_law_fd`.)* "
+            "**Constitutive `implied_delta` / `ref_delta`:** always nondimensional symmetric discrepancy "
+            "`(F−\\tilde F)/(ε+|F|+|\\tilde F|)` (or divide by `ε+|ref|` if `*_ref_key` / `{output_key}_ref` is set). "
             "**Fourier / `fo`:** implied **`Groups.fo`** needs **`alpha`**, **`t`**, **`L`**. **`t`** = mesh **time coordinate** in "
             "**`state_pred`** (match sidebar **Path B — FD grid** `key_t`, default `t`; aliases `time`/`coords_t`), not Constants unless you want a scalar broadcast. "
             "**`thermal_diffusivity`** auto-fills **`alpha`** from `k`,`rho`,`cp` when selected. README → Fourier."
@@ -1132,7 +1035,7 @@ with tab_run:
                     st.session_state["viz_rms_keys"] = rms_keys
 
                     req_s = sorted(engine.required_state_keys())
-                    req_d = sorted(engine.required_derivative_keys())
+                    req_d: list[str] = []
                     pred_k_list = list((pred or {}).keys())
                     chk = preflight_checklist_with_dependency_plan(
                         req_s,
@@ -1170,7 +1073,25 @@ with tab_run:
 with tab_dash:
     rep = st.session_state.get("last_report")
     if rep:
+        path_b_hdr = bool(st.session_state.get("last_path_b", True))
+        dash_title = (
+            "State Prediction Audit (Physics Residuals)"
+            if path_b_hdr
+            else "Model Audit (Physics Residuals)"
+        )
+        st.markdown(f"### {dash_title}")
+        ov_raw = rep.get("overall_admissibility_score")
+        try:
+            ov_hdr = float(ov_raw) if ov_raw is not None else float("nan")
+        except (TypeError, ValueError):
+            ov_hdr = float("nan")
+        pct_hdr = format_admissibility_pct(ov_hdr) if math.isfinite(ov_hdr) else "N/A"
+        st.caption(
+            f"Overall admissibility (final): {pct_hdr} - {format_admissibility_status_label(ov_hdr)}"
+        )
         _law_panel_main, _rnorm_panel_main, _hm_cs_main = _studio_monitor_spatial_bundle()
+        _pref_t_dash = st.session_state.get("studio_fd_time_label", "Steady") != "Steady"
+        _sax_dash = str(st.session_state.get("sb_spatial_axis", "x"))
         bundle = build_monitor_visualize_bundle(
             st.session_state.get("viz_log") or [],
             keys=None,
@@ -1179,6 +1100,11 @@ with tab_dash:
             spatial_law_panel=_law_panel_main,
             spatial_rnorm_panel=_rnorm_panel_main,
             mode="training",
+            residuals=st.session_state.get("last_residuals"),
+            state_pred=st.session_state.get("state_pred"),
+            spatial_coord_key=_sax_dash,
+            spatial_prefer_last_t=_pref_t_dash,
+            engine=st.session_state.get("last_engine"),
         )
         if bundle:
             bc1, bc2 = st.columns(2)
@@ -1208,7 +1134,7 @@ with tab_dash:
                             build_plotly_spatial_rnorm_heatmap_card(
                                 bundle.get("spatial"),
                                 colorscale=_hm_cs_main,
-                                card_title="Law R_norm (spatial)",
+                                card_title="Law |residual| (spatial)",
                             ),
                             "dash_card_law_hm",
                         )
@@ -1221,7 +1147,7 @@ with tab_dash:
                             build_plotly_spatial_rnorm_heatmap_card(
                                 bundle.get("spatial_rnorm"),
                                 colorscale=_hm_cs_main,
-                                card_title="Constitutive R_norm (spatial)",
+                                card_title="Constitutive |residual| (spatial)",
                             ),
                             "dash_card_const_hm",
                         )
@@ -1229,26 +1155,6 @@ with tab_dash:
                         st.warning(str(ex))
         else:
             st.caption("No visualization bundle (empty session log).")
-
-        with st.expander("Combined multi-panel Plotly figure", expanded=False):
-            try:
-                fig_full = visualize(
-                    st.session_state.get("viz_log") or [],
-                    keys=None,
-                    backend="plotly",
-                    r_ref=st.session_state.get("last_r_ref") or None,
-                    max_legend_keys=int(st.session_state.get("last_max_leg", 16)),
-                    mode="training",
-                    spatial_law_panel=_law_panel_main,
-                    spatial_rnorm_panel=_rnorm_panel_main,
-                    spatial_heatmap_colorscale=_hm_cs_main,
-                )
-                if fig_full is not None:
-                    _plotly_dashboard_card(fig_full, "plotly_full_combo")
-                else:
-                    st.caption("Plotly not available or returned None.")
-            except Exception as ex:  # noqa: BLE001
-                st.warning(str(ex))
     else:
         st.info("Run **compute_residuals + audit** on the **Run** tab to load dashboard charts.")
 

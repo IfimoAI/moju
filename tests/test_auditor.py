@@ -16,7 +16,12 @@ from moju.monitor import (
     visualize,
 )
 from moju.monitor.auditor import DEFAULT_VISUALIZE_TITLE_TEST, DEFAULT_VISUALIZE_TITLE_TRAINING
-from moju.monitor.closure_registry import MODEL_FNS, compute_implied_delta
+from moju.monitor.closure_registry import (
+    apply_closure_discrepancy_normalize,
+    GROUP_FNS,
+    MODEL_FNS,
+    compute_implied_delta,
+)
 from moju.piratio.models import Models
 
 
@@ -37,7 +42,7 @@ class TestAdmissibilityLevel:
 
 
 class TestNanTolerantAuditMetrics:
-    def test_compute_log_step_metrics_geometric_mean_ignores_nan_keys(self):
+    def test_compute_log_step_metrics_category_zero_if_any_key_nan(self):
         import math
 
         from moju.monitor.auditor import _compute_log_step_metrics
@@ -56,11 +61,11 @@ class TestNanTolerantAuditMetrics:
             }
         ]
         m = _compute_log_step_metrics(log)
-        assert math.isclose(m[0]["category_admissibility_score"]["constitutive"], 0.5, rel_tol=1e-9)
+        assert m[0]["category_admissibility_score"]["constitutive"] == 0.0
         assert "laws" not in m[0]["category_admissibility_score"]
-        assert math.isclose(m[0]["overall_admissibility_score"], 0.5, rel_tol=1e-9)
+        assert m[0]["overall_admissibility_score"] == 0.0
 
-    def test_compute_log_step_metrics_omits_category_when_all_nan(self):
+    def test_compute_log_step_metrics_all_nan_category_scores_zero_overall_zero(self):
         from moju.monitor.auditor import _compute_log_step_metrics
 
         log = [
@@ -71,10 +76,13 @@ class TestNanTolerantAuditMetrics:
             }
         ]
         m = _compute_log_step_metrics(log)
-        assert "constitutive" not in m[0]["category_admissibility_score"]
-        import math
+        assert m[0]["category_admissibility_score"]["constitutive"] == 0.0
+        assert m[0]["overall_admissibility_score"] == 0.0
 
-        assert math.isnan(m[0]["overall_admissibility_score"])
+        rep = audit(log)
+        assert rep["per_category"]["constitutive"] == 0.0
+        assert rep["overall_admissibility_score"] == 0.0
+        assert rep["overall_admissibility_level"] == "Non-Admissible"
 
     def test_rms_scalar_uses_nanmean(self):
         import math
@@ -110,6 +118,28 @@ class TestResidualEngineResidualDict:
         assert len(core.log) == 2
         assert "laws/laplace_equation" in core.log[0]["rms"]
 
+    def test_coord_snapshot_logged_from_state_coords(self):
+        core = ResidualEngine(
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
+        )
+        x = jnp.linspace(0.0, 1.0, 5)
+        state_pred = {"phi_laplacian": jnp.array(1.0), "x": x}
+        core.compute_residuals(state_pred)
+        snap = core.log[-1].get("coord_snapshot") or {}
+        assert "x" in snap
+        assert len(snap["x"]) == 5
+        assert all(isinstance(v, float) for v in snap["x"])
+
+    def test_last_residuals_set_after_compute(self):
+        core = ResidualEngine(
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
+        )
+        state_pred = {"phi_laplacian": jnp.array(1.0)}
+        r = core.compute_residuals(state_pred)
+        assert core.last_residuals is r
+        core.clear_log()
+        assert core.last_residuals is None
+
     def test_clear_log_resets_entries_and_index(self):
         core = ResidualEngine(
             laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
@@ -124,7 +154,7 @@ class TestResidualEngineResidualDict:
         assert len(core.log) == 1
         assert core.log[0].get("index") == 0
 
-    def test_constitutive_sutherland_closure(self, rtol, atol):
+    def test_constitutive_sutherland_ref_delta_nonzero(self, rtol, atol):
         core = ResidualEngine(
             constants={"mu0": 1.8e-5, "T0": 273.0, "S": 110.4},
             laws=[],
@@ -133,24 +163,21 @@ class TestResidualEngineResidualDict:
                     "name": "sutherland_mu",
                     "output_key": "mu",
                     "state_map": {"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
-                    "predicted_spatial": ["T"],
                 }
             ],
         )
-        T = 300.0
-        mu_true = 1.8e-5 * (T / 273) ** 1.5 * (273 + 110.4) / (T + 110.4)
-        state_pred = {
-            "mu": mu_true,
-            "T": T,
-            "d_T_dx": jnp.array(1.0),
-            "d_mu_dx": jnp.array(0.0),  # inconsistent on purpose
-        }
-        residuals = core.compute_residuals(state_pred)
+        T_pred = 300.0
+        T_ref = 280.0
+        mu_pred = 1.8e-5 * (T_pred / 273) ** 1.5 * (273 + 110.4) / (T_pred + 110.4)
+        mu_ref = 1.8e-5 * (T_ref / 273) ** 1.5 * (273 + 110.4) / (T_ref + 110.4)
+        state_pred = {"mu": mu_pred, "T": T_pred}
+        state_ref = {"mu": mu_ref, "T": T_ref}
+        residuals = core.compute_residuals(state_pred, state_ref=state_ref)
         assert "constitutive" in residuals
-        assert "sutherland_mu/chain_dx" in residuals["constitutive"]
-        assert abs(float(residuals["constitutive"]["sutherland_mu/chain_dx"])) > 0.0
+        assert "sutherland_mu/ref_delta" in residuals["constitutive"]
+        assert abs(float(residuals["constitutive"]["sutherland_mu/ref_delta"])) > 0.0
 
-    def test_scaling_pe_identity_zero(self, rtol, atol):
+    def test_scaling_pe_ref_delta_zero(self, rtol, atol):
         core = ResidualEngine(
             laws=[],
             scaling_audit=[
@@ -158,62 +185,15 @@ class TestResidualEngineResidualDict:
                     "name": "pe",
                     "output_key": "Pe",
                     "state_map": {"re": "Re", "pr": "Pr"},
-                    "predicted_spatial": ["Re"],
                 }
             ],
         )
         Re, Pr = 100.0, 0.7
-        # Provide d_Pe_dx consistent with chain rule for Pe = Re*Pr and dRe/dx = 1, dPr/dx = 0.
-        state_pred = {"Pe": Re * Pr, "Re": Re, "Pr": Pr, "d_Re_dx": 1.0, "d_Pe_dx": Pr}
-        residuals = core.compute_residuals(state_pred)
+        Pe = Re * Pr
+        state_pred = {"Pe": Pe, "Re": Re, "Pr": Pr}
+        residuals = core.compute_residuals(state_pred, state_ref=dict(state_pred))
         assert "scaling" in residuals
-        assert jnp.allclose(residuals["scaling"]["pe/chain_dx"], 0.0, rtol=rtol, atol=atol)
-
-    def test_scaling_pe_weak_chain_dx_weighted_rms(self, rtol, atol):
-        core = ResidualEngine(
-            laws=[],
-            scaling_audit=[
-                {
-                    "name": "pe",
-                    "output_key": "Pe",
-                    "state_map": {"re": "Re", "pr": "Pr"},
-                    "predicted_spatial": ["Re"],
-                    "closure_mode": "weak",
-                    "quadrature_weights": {"x": "w_x"},
-                }
-            ],
-        )
-        # Pe = Re * Pr, Pr constant, dRe/dx = 1, but we set dPe/dx = 0 -> residual = -Pr everywhere.
-        Pr = 5.0
-        state_pred = {
-            "Pe": jnp.array([10.0, 11.0, 12.0]),
-            "Re": jnp.array([2.0, 2.0, 2.0]),
-            "Pr": Pr,
-            "d_Re_dx": jnp.ones((3,)),
-            "d_Pe_dx": jnp.zeros((3,)),
-            "w_x": jnp.array([1.0, 2.0, 1.0]),
-        }
-        residuals = core.compute_residuals(state_pred)
-        assert "scaling" in residuals
-        # Weighted RMS of constant residual -Pr is |Pr|.
-        assert jnp.allclose(residuals["scaling"]["pe/chain_dx"], abs(Pr), rtol=rtol, atol=atol)
-
-    def test_scaling_pe_identity_nonzero(self, rtol, atol):
-        core = ResidualEngine(
-            laws=[],
-            scaling_audit=[
-                {
-                    "name": "pe",
-                    "output_key": "Pe",
-                    "state_map": {"re": "Re", "pr": "Pr"},
-                    "predicted_spatial": ["Re"],
-                }
-            ],
-        )
-        state_pred = {"Pe": 100.0, "Re": 10.0, "Pr": 5.0, "d_Re_dx": 1.0, "d_Pe_dx": 0.0}
-        residuals = core.compute_residuals(state_pred)
-        # For Pe = Re*Pr, chain expects dPe/dx = Pr * dRe/dx = 5.
-        assert jnp.allclose(residuals["scaling"]["pe/chain_dx"], -5.0, rtol=rtol, atol=atol)
+        assert jnp.allclose(residuals["scaling"]["pe/ref_delta"], 0.0, rtol=rtol, atol=atol)
 
     def test_state_ref_adds_data_residual(self, rtol, atol):
         core = ResidualEngine(
@@ -224,27 +204,6 @@ class TestResidualEngineResidualDict:
         residuals = core.compute_residuals(state_pred, state_ref=state_ref)
         assert "data" in residuals
         assert jnp.allclose(residuals["data"]["phi_laplacian"], -0.5, rtol=rtol, atol=atol)
-
-    def test_inferred_predicted_spatial_logged(self):
-        core = ResidualEngine(
-            constants={"mu0": 1.8e-5, "T0": 273.0, "S": 110.4},
-            laws=[],
-            constitutive_audit=[
-                {
-                    "name": "sutherland_mu",
-                    "output_key": "mu",
-                    "state_map": {"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
-                    # predicted_spatial intentionally omitted to trigger inference
-                }
-            ],
-        )
-        T = 300.0
-        mu_true = 1.8e-5 * (T / 273) ** 1.5 * (273 + 110.4) / (T + 110.4)
-        state_pred = {"mu": mu_true, "T": T, "d_T_dx": jnp.array(1.0), "d_mu_dx": jnp.array(0.0)}
-        core.compute_residuals(state_pred, collocation={"x": jnp.array([0.0])})
-        assert "inferred" in core.log[-1]
-        assert any("constitutive:sutherland_mu inferred predicted_spatial=['T']" in s for s in core.log[-1]["inferred"])
-
 
 class TestBuildLoss:
     def test_cascaded_loss_scalar(self, rtol, atol):
@@ -326,11 +285,59 @@ class TestAudit:
         rms = core.log[-1]["rms"]["laws/laplace_equation"]
         assert abs(r_norm - rms / scale_k) < 1e-6
 
+    def test_default_scale_is_unit_for_laws_and_implied_delta(self, rtol, atol):
+        """ND law and implied_delta keys use scale_k ≈ 1, not RMS(state primitives)."""
+        P, R, T = jnp.array(1e6), jnp.array(287.0), jnp.array(300.0)
+        rho = Models.ideal_gas_rho(P, R, T)
+        core = ResidualEngine(
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
+            constitutive_audit=[
+                {
+                    "name": "ideal_gas_rho",
+                    "output_key": "rho",
+                    "state_map": {"P": "P", "R": "R", "T": "T"},
+                    "implied_value_key": "rho_implied",
+                }
+            ],
+        )
+        state_pred = {
+            "phi_xx": jnp.array(2.0),
+            "P": P,
+            "R": R,
+            "T": T,
+            "rho": rho,
+            "rho_implied": rho,
+        }
+        core.compute_residuals(state_pred)
+        sc = core.log[-1]["scale"]
+        assert abs(sc["laws/laplace_equation"] - 1.0) < 1e-9
+        assert abs(sc["constitutive/ideal_gas_rho/implied_delta"] - 1.0) < 1e-9
+
+    def test_constitutive_implied_scale_is_unity(self, rtol, atol):
+        P, R = jnp.array(101325.0), jnp.array(287.0)
+        T = jnp.array(290.0)
+        rho = Models.ideal_gas_rho(P, R, T)
+        core = ResidualEngine(
+            laws=[],
+            constitutive_audit=[
+                {
+                    "name": "ideal_gas_rho",
+                    "output_key": "rho",
+                    "state_map": {"P": "P", "R": "R", "T": "T"},
+                    "implied_value_key": "rho_implied",
+                }
+            ],
+        )
+        state_pred = {"P": P, "R": R, "T": T, "rho": rho, "rho_implied": rho}
+        core.compute_residuals(state_pred)
+        sk = core.log[-1]["scale"]["constitutive/ideal_gas_rho/implied_delta"]
+        assert abs(sk - 1.0) < 1e-6
+
     def test_audit_export_dir_pdf_with_new_categories(self, tmp_path):
         pytest.importorskip("reportlab")
         log = [
-            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/chain_dx": 0.5, "scaling/pe/chain_dx": 0.1}},
-            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/chain_dx": 0.25, "scaling/pe/chain_dx": 0.05}},
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/implied_delta": 0.5, "scaling/pe/ref_delta": 0.1}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/implied_delta": 0.25, "scaling/pe/ref_delta": 0.05}},
         ]
         report = audit(log, export_dir=str(tmp_path))
         assert "per_key" in report
@@ -353,8 +360,8 @@ class TestVisualize:
                 "index": 0,
                 "rms": {
                     "laws/a": 1.0,
-                    "constitutive/m/chain_dx": 0.5,
-                    "scaling/pe/chain_dx": 0.1,
+                    "constitutive/m/implied_delta": 0.5,
+                    "scaling/pe/ref_delta": 0.1,
                     "data/T": 0.2,
                 },
                 "scale": {},
@@ -365,8 +372,8 @@ class TestVisualize:
                 "index": 1,
                 "rms": {
                     "laws/a": 0.5,
-                    "constitutive/m/chain_dx": 0.25,
-                    "scaling/pe/chain_dx": 0.05,
+                    "constitutive/m/implied_delta": 0.25,
+                    "scaling/pe/ref_delta": 0.05,
                     "data/T": 0.1,
                 },
                 "scale": {},
@@ -374,7 +381,7 @@ class TestVisualize:
         ]
         fig = visualize(log, backend="matplotlib", mode="training")
         assert fig is not None
-        # Training: top row + R_norm lines + R_norm heatmaps (+ colorbars) + optional spatial
+        # Training: top row + R_norm vs step lines + spatial R_norm row (two columns)
         assert len(fig.axes) >= 6
         from matplotlib.projections.polar import PolarAxes
 
@@ -387,8 +394,8 @@ class TestVisualize:
                 "index": 0,
                 "rms": {
                     "laws/a": 1.0,
-                    "constitutive/m/chain_dx": 0.5,
-                    "scaling/pe/chain_dx": 0.1,
+                    "constitutive/m/implied_delta": 0.5,
+                    "scaling/pe/ref_delta": 0.1,
                 },
                 "scale": {},
             },
@@ -396,8 +403,8 @@ class TestVisualize:
                 "index": 1,
                 "rms": {
                     "laws/a": 0.5,
-                    "constitutive/m/chain_dx": 0.25,
-                    "scaling/pe/chain_dx": 0.05,
+                    "constitutive/m/implied_delta": 0.25,
+                    "scaling/pe/ref_delta": 0.05,
                 },
                 "scale": {},
             },
@@ -414,6 +421,7 @@ class TestVisualize:
 
         from moju.monitor.auditor import build_monitor_visualize_bundle
         from moju.monitor.visualize_plotly import (
+            MOJU_STUDIO_DASHBOARD_CARD_HEIGHT,
             build_plotly_category_admissibility_bar_figure,
             build_plotly_law_rnorm_final_bar_figure,
             build_plotly_spatial_rnorm_heatmap_card,
@@ -424,8 +432,8 @@ class TestVisualize:
                 "index": 0,
                 "rms": {
                     "laws/a": 1.0,
-                    "constitutive/m/chain_dx": 0.5,
-                    "scaling/pe/chain_dx": 0.1,
+                    "constitutive/m/implied_delta": 0.5,
+                    "scaling/pe/ref_delta": 0.1,
                 },
                 "scale": {},
             },
@@ -433,15 +441,15 @@ class TestVisualize:
                 "index": 1,
                 "rms": {
                     "laws/a": 0.5,
-                    "constitutive/m/chain_dx": 0.25,
-                    "scaling/pe/chain_dx": 0.05,
+                    "constitutive/m/implied_delta": 0.25,
+                    "scaling/pe/ref_delta": 0.05,
                 },
                 "scale": {},
             },
         ]
         x = np.linspace(0, 1, 5)
         spatial_law = {"x": x, "values": {"laws/a": np.ones(5) * 0.2}}
-        spatial_c = {"x": x, "values": {"constitutive/m/chain_dx": np.ones(5) * 0.1}}
+        spatial_c = {"x": x, "values": {"constitutive/m/implied_delta": np.ones(5) * 0.1}}
         bundle = build_monitor_visualize_bundle(
             log,
             r_ref=None,
@@ -454,9 +462,68 @@ class TestVisualize:
         f1 = build_plotly_law_rnorm_final_bar_figure(bundle)
         f2 = build_plotly_category_admissibility_bar_figure(bundle)
         assert f1 is not None and f2 is not None
+        assert f1.layout.height == MOJU_STUDIO_DASHBOARD_CARD_HEIGHT
+        assert f2.layout.height == MOJU_STUDIO_DASHBOARD_CARD_HEIGHT
         f3 = build_plotly_spatial_rnorm_heatmap_card(bundle["spatial"], colorscale="Jet")
         f4 = build_plotly_spatial_rnorm_heatmap_card(bundle["spatial_rnorm"], colorscale="Jet")
         assert f3 is not None and f4 is not None
+        assert f3.layout.height == MOJU_STUDIO_DASHBOARD_CARD_HEIGHT
+        assert f4.layout.height == MOJU_STUDIO_DASHBOARD_CARD_HEIGHT
+
+    def test_build_monitor_visualize_bundle_uses_residuals_when_panels_none(self):
+        import numpy as np
+
+        from moju.monitor.auditor import build_monitor_visualize_bundle
+
+        log = [
+            {
+                "index": 0,
+                "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5},
+                "scale": {"laws/a": 1.0, "constitutive/m/c": 1.0},
+                "coord_snapshot": {"x": [0.0, 0.5, 1.0]},
+            },
+        ]
+        residuals = {"laws": {"a": np.ones(3) * 0.1}, "constitutive": {"m/c": np.ones(3) * 0.05}}
+        bundle = build_monitor_visualize_bundle(
+            log,
+            spatial_law_panel=None,
+            spatial_rnorm_panel=None,
+            mode="training",
+            residuals=residuals,
+            state_pred={},
+        )
+        assert bundle is not None
+        assert bundle.get("spatial") is not None
+        assert bundle.get("spatial_rnorm") is not None
+
+    def test_maybe_build_spatial_panels_fills_missing_constitutive_side(self):
+        import numpy as np
+
+        from moju.monitor.auditor import _maybe_build_spatial_panels
+
+        x = np.linspace(0, 1, 4)
+        explicit_law = {"x": x, "values": {"laws/a": np.ones(4) * 0.2}}
+        log = [
+            {
+                "index": 0,
+                "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5},
+                "scale": {"laws/a": 1.0, "constitutive/m/c": 1.0},
+            },
+        ]
+        residuals = {"constitutive": {"m/c": np.ones(4) * 0.1}}
+        law_p, rn_p = _maybe_build_spatial_panels(
+            log,
+            explicit_law,
+            None,
+            residuals,
+            {"x": x},
+            None,
+            "x",
+            True,
+        )
+        assert law_p is not None
+        assert rn_p is not None
+        assert "values" in rn_p and any(k.startswith("constitutive/") for k in (rn_p.get("values") or {}))
 
     def test_visualize_test_mode_uses_last_log_entry(self):
         pytest.importorskip("matplotlib")
@@ -483,7 +550,7 @@ class TestVisualize:
             spatial_law_panel={"x": x, "values": {"a": np.ones(5) * 0.2}},
         )
         assert fig is not None
-        assert len(fig.axes) >= 7
+        assert len(fig.axes) >= 6
 
     def test_visualize_matplotlib_training_top_axes_below_title_band(self):
         """Reserved layout rect should keep the top row of axes out of the title strip."""
@@ -549,13 +616,15 @@ class TestVisualize:
 
     def test_visualize_plotly_returns_figure(self):
         pytest.importorskip("plotly")
+        import numpy as np
+
         log = [
             {
                 "index": 0,
                 "rms": {
                     "laws/a": 1.0,
-                    "constitutive/m/chain_dx": 0.5,
-                    "scaling/pe/chain_dx": 0.1,
+                    "constitutive/m/implied_delta": 0.5,
+                    "scaling/pe/ref_delta": 0.1,
                     "data/T": 0.2,
                 },
                 "scale": {},
@@ -566,19 +635,89 @@ class TestVisualize:
                 "index": 1,
                 "rms": {
                     "laws/a": 0.5,
-                    "constitutive/m/chain_dx": 0.25,
-                    "scaling/pe/chain_dx": 0.05,
+                    "constitutive/m/implied_delta": 0.25,
+                    "scaling/pe/ref_delta": 0.05,
                     "data/T": 0.1,
                 },
                 "scale": {},
             },
         ]
-        fig = visualize(log, backend="plotly", mode="training")
+        x = np.linspace(0, 1, 5)
+        spatial_law = {"x": x, "values": {"laws/a": np.ones(5) * 0.2}}
+        spatial_c = {"x": x, "values": {"constitutive/m/implied_delta": np.ones(5) * 0.1}}
+        fig = visualize(
+            log,
+            backend="plotly",
+            mode="training",
+            spatial_law_panel=spatial_law,
+            spatial_rnorm_panel=spatial_c,
+        )
         assert fig is not None
         assert hasattr(fig, "data")
         assert len(fig.data) >= 7
         hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
         assert len(hm) >= 2
+
+    def test_visualize_autofill_spatial_from_residuals(self):
+        pytest.importorskip("matplotlib")
+        import numpy as np
+
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {"laws/a": 1.0, "constitutive/m/c": 1.0}},
+        ]
+        x = np.linspace(0, 1, 5)
+        residuals = {"laws": {"a": np.ones(5) * 0.1}, "constitutive": {"m/c": np.ones(5) * 0.05}}
+        pred = {"x": x}
+        fig = visualize(
+            log,
+            backend="matplotlib",
+            mode="training",
+            residuals=residuals,
+            state_pred=pred,
+        )
+        assert fig is not None
+        titled = " ".join(ax.get_title() for ax in fig.axes)
+        assert "spatial" in titled.lower()
+
+    def test_visualize_uses_engine_without_explicit_residuals(self):
+        pytest.importorskip("matplotlib")
+
+        core = ResidualEngine(
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
+        )
+        x = jnp.linspace(0.0, 1.0, 5)
+        state_pred = {"phi_laplacian": jnp.ones(5) * 0.1, "x": x}
+        core.compute_residuals(state_pred)
+        log = list(core.log)
+        assert log[-1].get("coord_snapshot")
+        fig = visualize(log, backend="matplotlib", mode="training", engine=core)
+        assert fig is not None
+        titled = " ".join(ax.get_title() for ax in fig.axes)
+        assert "spatial" in titled.lower()
+
+    def test_visualize_uses_coord_snapshot_when_state_pred_empty(self):
+        pytest.importorskip("matplotlib")
+        import numpy as np
+
+        log = [
+            {
+                "index": 0,
+                "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5},
+                "scale": {"laws/a": 1.0, "constitutive/m/c": 1.0},
+                "coord_snapshot": {"x": [0.0, 0.25, 0.5, 0.75, 1.0]},
+            },
+        ]
+        residuals = {"laws": {"a": np.ones(5) * 0.1}, "constitutive": {"m/c": np.ones(5) * 0.05}}
+        fig = visualize(
+            log,
+            backend="matplotlib",
+            mode="training",
+            residuals=residuals,
+            state_pred={},
+        )
+        assert fig is not None
+        titled = " ".join(ax.get_title() for ax in fig.axes)
+        assert "spatial" in titled.lower()
 
     def test_visualize_plotly_default_titles(self):
         pytest.importorskip("plotly")
@@ -587,8 +726,8 @@ class TestVisualize:
                 "index": 0,
                 "rms": {
                     "laws/a": 1.0,
-                    "constitutive/m/chain_dx": 0.5,
-                    "scaling/pe/chain_dx": 0.1,
+                    "constitutive/m/implied_delta": 0.5,
+                    "scaling/pe/ref_delta": 0.1,
                 },
                 "scale": {},
             },
@@ -596,8 +735,8 @@ class TestVisualize:
                 "index": 1,
                 "rms": {
                     "laws/a": 0.5,
-                    "constitutive/m/chain_dx": 0.25,
-                    "scaling/pe/chain_dx": 0.05,
+                    "constitutive/m/implied_delta": 0.25,
+                    "scaling/pe/ref_delta": 0.05,
                 },
                 "scale": {},
             },
@@ -606,6 +745,134 @@ class TestVisualize:
         assert DEFAULT_VISUALIZE_TITLE_TRAINING in (fig_tr.layout.title.text or "")
         fig_te = visualize(log, backend="plotly", mode="test")
         assert DEFAULT_VISUALIZE_TITLE_TEST in (fig_te.layout.title.text or "")
+
+    def test_visualize_plotly_test_mode_spatial_row_placeholders_without_coords(self):
+        pytest.importorskip("plotly")
+        log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}}]
+        fig = visualize(log, backend="plotly", mode="test")
+        assert fig is not None
+        hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
+        assert len(hm) == 0
+        sc = [t for t in fig.data if getattr(t, "type", None) == "scatter"]
+        assert any("spatial" in str(getattr(t, "text", "") or "").lower() for t in sc)
+
+    def test_visualize_plotly_test_mode_heatmaps_with_residuals_only(self):
+        pytest.importorskip("plotly")
+        import numpy as np
+
+        log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}}]
+        residuals = {"laws": {"a": np.ones(5) * 0.1}, "constitutive": {"m/c": np.ones(5) * 0.05}}
+        fig = visualize(log, backend="plotly", mode="test", residuals=residuals)
+        assert fig is not None
+        hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
+        assert len(hm) >= 2
+
+    def test_visualize_plotly_test_mode_dual_spatial_heatmaps(self):
+        pytest.importorskip("plotly")
+        import numpy as np
+
+        log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}}]
+        x = np.linspace(0, 1, 5)
+        spatial_law = {"x": x, "values": {"laws/a": np.ones(5) * 0.2}}
+        spatial_c = {"x": x, "values": {"constitutive/m/c": np.ones(5) * 0.1}}
+        fig = visualize(
+            log,
+            backend="plotly",
+            mode="test",
+            spatial_law_panel=spatial_law,
+            spatial_rnorm_panel=spatial_c,
+        )
+        assert fig is not None
+        hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
+        assert len(hm) == 2
+
+    def test_visualize_matplotlib_test_mode_dual_spatial_layout(self):
+        pytest.importorskip("matplotlib")
+        import numpy as np
+
+        log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}}]
+        x = np.linspace(0, 1, 5)
+        fig = visualize(
+            log,
+            backend="matplotlib",
+            mode="test",
+            spatial_law_panel={"x": x, "values": {"laws/a": np.ones(5) * 0.2}},
+            spatial_rnorm_panel={"x": x, "values": {"constitutive/m/c": np.ones(5) * 0.1}},
+        )
+        assert fig is not None
+        titled = [ax.get_title() for ax in fig.axes if ax.get_title()]
+        assert any("Governing" in t and "spatial" in t for t in titled)
+        assert any("Constitutive" in t and "spatial" in t for t in titled)
+
+    def test_parse_spatial_law_panel_1d_2d_3d(self):
+        import numpy as np
+
+        from moju.monitor.auditor import _parse_spatial_law_panel
+
+        x = np.linspace(0, 1, 3)
+        y = np.linspace(0, 1, 4)
+        z = np.linspace(0, 1, 5)
+        o1 = _parse_spatial_law_panel({"x": x, "values": {"a": np.ones(3)}})
+        assert o1 is not None and o1["kind"] == "1d"
+        assert o1["Z"].shape == (1, 3)
+        o2 = _parse_spatial_law_panel({"x": x, "y": y, "values": {"laplace": np.ones((4, 3))}})
+        assert o2 is not None and o2["kind"] == "2d"
+        assert o2["Z"].shape == (1, 4, 3)
+        o3 = _parse_spatial_law_panel({"x": x, "y": y, "z": z, "values": {"laplace": np.ones((3, 4, 5))}})
+        assert o3 is not None and o3["kind"] == "3d"
+        assert o3["V"].shape == (1, 3, 4, 5)
+        assert _parse_spatial_law_panel({"x": x, "y": y, "values": {"a": np.ones(3)}}) is None
+        o2i = _parse_spatial_law_panel(
+            {"x": x, "y": y, "values": {"a": np.ones((4, 3))}, "log_step_index": 7}
+        )
+        assert o2i is not None and o2i.get("log_step_index") == 7
+
+    def test_build_plotly_spatial_card_2d_and_volume_3d(self):
+        pytest.importorskip("plotly")
+        import numpy as np
+
+        from moju.monitor.auditor import _parse_spatial_law_panel
+        from moju.monitor.visualize_plotly import build_plotly_spatial_rnorm_heatmap_card
+
+        x, y = np.linspace(0, 1, 4), np.linspace(0, 1, 5)
+        sp2 = _parse_spatial_law_panel({"x": x, "y": y, "values": {"laws/a": np.ones((5, 4)) * 0.2}})
+        f2 = build_plotly_spatial_rnorm_heatmap_card(sp2)
+        assert f2 is not None and f2.data
+        assert getattr(f2.data[0], "type", None) == "heatmap"
+        z = np.linspace(0, 1, 3)
+        sp3 = _parse_spatial_law_panel(
+            {
+                "x": np.linspace(0, 1, 3),
+                "y": np.linspace(0, 1, 4),
+                "z": z,
+                "values": {"laws/a": np.ones((3, 4, 3)) * 0.15},
+            }
+        )
+        f3 = build_plotly_spatial_rnorm_heatmap_card(sp3, card_title="Vol")
+        assert f3 is not None
+        assert any(getattr(t, "type", None) == "volume" for t in f3.data)
+
+    def test_build_plotly_spatial_card_1d_moves_key_to_subtitle_and_updates_colorbar(self):
+        pytest.importorskip("plotly")
+        import numpy as np
+
+        from moju.monitor.auditor import _parse_spatial_law_panel
+        from moju.monitor.visualize_plotly import build_plotly_spatial_rnorm_heatmap_card
+
+        x = np.linspace(0, 1, 5)
+        sp1 = _parse_spatial_law_panel({"x": x, "values": {"fourier_conduction": np.ones(5) * 0.2}})
+        fig = build_plotly_spatial_rnorm_heatmap_card(sp1, card_title="Spatial |residual|")
+        assert fig is not None
+
+        assert fig.layout.yaxis.showticklabels is False
+
+        title_text = fig.layout.title.text or ""
+        assert "Fourier Conduction" in title_text
+
+        hm = next(t for t in fig.data if getattr(t, "type", None) == "heatmap")
+        cb_title_obj = getattr(getattr(hm, "colorbar", None), "title", None)
+        cb_title_text = getattr(cb_title_obj, "text", None)
+        assert cb_title_text == "Spatial |residual|"
 
     def test_visualize_plotly_figure_title_override(self):
         pytest.importorskip("plotly")
@@ -665,15 +932,6 @@ class TestCustomFn:
         residuals = core.compute_residuals(state_pred)
         assert jnp.allclose(residuals["constitutive"]["custom/my_c"], 0.0, rtol=rtol, atol=atol)
 
-    def test_scaling_custom_closure(self, rtol, atol):
-        core = ResidualEngine(
-            laws=[],
-            scaling_custom=[{"name": "diff", "fn": lambda s, c: s["x"] - s["y"]}],
-        )
-        state_pred = {"x": jnp.array(1.0), "y": jnp.array(3.0)}
-        residuals = core.compute_residuals(state_pred)
-        assert jnp.allclose(residuals["scaling"]["custom/diff"], -2.0, rtol=rtol, atol=atol)
-
     def test_custom_group_fn_in_state(self, rtol, atol):
         def my_group(a, b):
             return a * b
@@ -683,6 +941,30 @@ class TestCustomFn:
         )
         state = core._state_builder({"a": jnp.array(3.0), "b": jnp.array(4.0)})
         assert jnp.allclose(state["ab"], 12.0, rtol=rtol, atol=atol)
+
+
+class TestClosureDiscrepancyNormalize:
+    def test_symmetric_zero_when_pred_matches_implied(self, rtol, atol):
+        pred = jnp.array(3.0)
+        implied = jnp.array(3.0)
+        r = apply_closure_discrepancy_normalize(pred - implied, pred, implied)
+        assert jnp.allclose(r, 0.0, rtol=rtol, atol=atol)
+
+    def test_symmetric_scale_doubling_invariant(self, rtol, atol):
+        pred = jnp.array(4.0)
+        implied = jnp.array(2.0)
+        r1 = apply_closure_discrepancy_normalize(pred - implied, pred, implied)
+        r2 = apply_closure_discrepancy_normalize(
+            2 * (pred - implied), 2 * pred, 2 * implied
+        )
+        assert jnp.allclose(r1, r2, rtol=rtol, atol=atol)
+
+    def test_ref_scale_uses_ref_denominator(self, rtol, atol):
+        pred = jnp.array(10.0)
+        implied = jnp.array(6.0)
+        ref = jnp.array(2.0)
+        r = apply_closure_discrepancy_normalize(pred - implied, pred, implied, ref=ref)
+        assert jnp.allclose(r, 4.0 / (1e-30 + 2.0), rtol=rtol, atol=atol)
 
 
 class TestImpliedDeltaClosure:
@@ -746,8 +1028,6 @@ class TestImpliedDeltaClosure:
                     "name": "ideal_gas_rho",
                     "output_key": "rho",
                     "state_map": {"P": "P", "R": "R", "T": "T"},
-                    "predicted_spatial": [],
-                    "predicted_temporal": [],
                 }
             ],
         )
@@ -833,7 +1113,6 @@ class TestMonitorConfig:
                     name="sutherland_mu",
                     output_key="mu",
                     state_map={"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
-                    predicted_temporal=["T"],
                 )
             ],
         )
@@ -843,7 +1122,7 @@ class TestMonitorConfig:
 
 
 class TestRequiredKeys:
-    def test_required_state_and_derivative_keys(self):
+    def test_required_state_keys_union(self):
         engine = ResidualEngine(
             laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
             scaling_audit=[
@@ -851,8 +1130,6 @@ class TestRequiredKeys:
                     "name": "pe",
                     "output_key": "Pe",
                     "state_map": {"re": "Re", "pr": "Pr"},
-                    "predicted_spatial": ["Re", "Pr"],
-                    "predicted_temporal": ["Re"],
                 }
             ],
         )
@@ -860,17 +1137,9 @@ class TestRequiredKeys:
         assert "phi_xx" in state_keys
         assert "Re" in state_keys and "Pr" in state_keys and "Pe" in state_keys
 
-        deriv_keys = engine.required_derivative_keys()
-        assert "d_Pe_dx" in deriv_keys
-        assert "d_Re_dx" in deriv_keys
-        assert "d_Pr_dx" in deriv_keys
-        assert "d_Pe_dt" in deriv_keys
-        assert "d_Re_dt" in deriv_keys
-
-    def test_default_inference_uses_primary_fields(self, rtol, atol):
+    def test_scaling_pe_ref_delta_with_matching_ref(self, rtol, atol):
         engine = ResidualEngine(
             laws=[],
-            primary_fields=["u", "T"],
             scaling_audit=[
                 {
                     "name": "pe",
@@ -879,11 +1148,10 @@ class TestRequiredKeys:
                 }
             ],
         )
-        # No predicted_* provided: with collocation including x and t, engine should pick 'u' first.
-        state_pred = {"u": 1.0, "T": 2.0, "Pe": 2.0, "d_u_dx": 0.0, "d_Pe_dx": 0.0}
-        residuals = engine.compute_residuals(state_pred, collocation={"x": 0.0, "t": 0.0})
-        # With u chosen for predicted_spatial, chain_dx exists only if derivative keys are present; here it is present.
+        state_pred = {"u": 1.0, "T": 2.0, "Pe": 2.0}
+        residuals = engine.compute_residuals(state_pred, state_ref=dict(state_pred))
         assert "scaling" in residuals
+        assert jnp.allclose(residuals["scaling"]["pe/ref_delta"], 0.0, rtol=rtol, atol=atol)
 
 
 def _re_pi_spec(*, compare_keys=("out",), scale_c=10.0):
@@ -902,7 +1170,7 @@ class TestPiConstantClosure:
         names = list_pi_constant_group_names()
         assert "re" in names and "pr" in names and "pe" in names
         assert "st" in names and "gr" in names and "we" in names
-        assert len(names) == 22
+        assert set(names) == set(GROUP_FNS.keys())
 
     def test_apply_pi_constant_recipe_re_preserves_re(self):
         from moju.monitor.pi_constant_recipes import (

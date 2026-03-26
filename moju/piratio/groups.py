@@ -350,3 +350,40 @@ class Groups:
         SciML: Normalized frequency in wave-equation residuals.
         """
         return (omega * L) / c
+
+    @staticmethod
+    @jax.jit
+    def poisson_rhs_pi(L, source, epsilon, phi_ref):
+        """
+        Dimensionless Poisson source strength for a reference-scaled potential.
+
+        With spatial coordinate :math:`x^* = x/L`, a common nondimensional form is
+        :math:`\\nabla^{*2}\\phi^* + \\Pi\\, s^* = 0` where :math:`\\Pi = L^2 s / (\\varepsilon \\phi_\\mathrm{ref})`
+        when the dimensional equation is :math:`\\nabla^2\\phi + s/\\varepsilon = 0`
+        and :math:`\\phi^* = \\phi/\\phi_\\mathrm{ref}`, :math:`s^*` is the scaled source.
+
+        :param L: Characteristic length [m].
+        :param source: Source term (same physical meaning as in the dimensional Poisson equation).
+        :param epsilon: Permittivity or field constant (same as dimensional equation).
+        :param phi_ref: Reference scale for the potential [same units as ``phi``].
+        :return: Dimensionless group :math:`\\Pi` (broadcasts like inputs).
+        """
+        return (L**2) * source / (epsilon * phi_ref)
+
+    @staticmethod
+    @jax.jit
+    def schrodinger_kinetic_length_squared(m, L, h_bar):
+        """
+        Kinetic index :math:`2 m L^2 / \\hbar^2` for the nondimensional steady Schrödinger equation.
+
+        :func:`moju.piratio.Laws.schrodinger_steady` uses
+        :math:`\\psi_\\mathrm{lap} = L^2\\nabla^2\\psi` and residual
+        :math:`-\\psi_\\mathrm{lap} + K\\,(V-E)\\psi = 0` with :math:`K = 2mL^2/\\hbar^2`
+        (equivalent to scaling the dimensional TISE by :math:`2mL^2/\\hbar^2`).
+
+        :param m: Particle mass [kg].
+        :param L: Characteristic length [m].
+        :param h_bar: Reduced Planck constant [J*s].
+        :return: Dimensionless scalar :math:`K` (broadcasts like inputs).
+        """
+        return 2.0 * m * (L**2) / (h_bar**2)

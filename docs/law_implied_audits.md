@@ -1,12 +1,22 @@
 # Law-linked implied audits
 
-When you select a governing law in `ResidualEngine` or `MonitorConfig`, Moju can **automatically** add matching **constitutive** or **scaling** audit rows. Each row uses the standard **`implied_delta`** closure:
+When you select a governing law in `ResidualEngine` or `MonitorConfig`, Moju can **automatically** add matching **constitutive** or **scaling** audit rows. Each row uses the standard **`implied_delta`** closure.
+
+Let \(F\) be the catalog model output (`Models.*` from state) and \(\tilde F\) the **implied** value from rearranging the law (`implied_fn` / `implied_value_key`). The stored tensor is **always** the nondimensional discrepancy
 
 \[
-\text{residual} = F(\text{catalog inputs from state}) - \text{implied}(\text{state}, \text{constants})
+R^* = \frac{F - \tilde F}{\varepsilon + |F| + |\tilde F|}
 \]
 
-where **`implied`** is computed by **rearranging the law** using the fields referenced by that law’s **`state_map`** (e.g. α\_implied = T_t / T_laplacian for Fourier conduction).
+unless a reference field resolves (audit **`implied_delta_ref_key`**, or **`{output_key}_ref`** in merged state/constants), in which case
+
+\[
+R^* = \frac{F - \tilde F}{\varepsilon + |\text{ref}|}.
+\]
+
+There is **no** raw SI-difference mode. **`Models.*`** still uses your physical state keys; the **monitor residual** is always normalized as above.
+
+**Implied \(\tilde F\)** is computed by **rearranging the law** using the fields referenced by that law’s **`state_map`** (e.g. α\_implied = T_t / T_laplacian for Fourier conduction).
 
 This answers: *“Does the constitutive closure in the catalog agree with what the PDE fields imply locally?”* without requiring **`state_ref`**. It is **not** a claim that the closure matches experiment—only that it matches the **same predicted state** you pass to the law.
 These implied residual keys are included in normal category/overall admissibility scoring by default (same as other constitutive/scaling residual keys).
@@ -27,7 +37,7 @@ Each auto row sets **`residual_basename`** so keys stay unique when multiple law
 
 - Example: `constitutive/thermal_diffusivity/law_fourier_conduction/implied_delta`
 
-If **`state_ref`** is passed to **`compute_residuals`**, **`ref_delta`** is computed for the same row **unless** the spec sets **`include_ref_delta: false`** (catalog `F(pred args) - F(ref args)`).
+If **`state_ref`** is passed to **`compute_residuals`**, **`ref_delta`** is computed for the same row **unless** the spec sets **`include_ref_delta: false`**. It uses the same nondimensional rules as **`implied_delta`** (symmetric scale, or **`ref_delta_ref_key`** / **`{output_key}_ref`** for the \(|\text{ref}|\) denominator).
 
 ## Constitutive-only policy
 

@@ -37,6 +37,16 @@ ResidualEngine.compute_residuals(...)  →  residuals
 loss = build_loss(residuals)     report = audit(engine.log)
 ```
 
+Built-in `Laws.*` residuals are **nondimensional**: supply fields and derivatives in each law’s documented scaled sense, and use `Groups.*` / `Models.*` for dimensionless groups and constitutive recovery.
+
+**Residual conventions (ND-first):**
+
+- **Governing laws** (`Laws.*`): PDE balance residuals in the documented nondimensional sense.
+- **Constitutive `implied_delta` and `ref_delta`:** always **nondimensional**—by default
+  \((F - \tilde F) / (\varepsilon + |F| + |\tilde F|)\) where \(\tilde F\) is the implied value or \(F(\text{ref})\).
+  Catalog **`Models.*` / `Groups.*`** still evaluate physical formulas with your state keys; the **logged closure tensors** use that discrepancy only. Optional denominator \((\varepsilon + |\text{ref}|)\) when **`implied_delta_ref_key`** / **`ref_delta_ref_key`** or **`{output_key}_ref`** is present in merged state/constants (see `moju.monitor.closure_registry.apply_closure_discrepancy_normalize`).
+- **Scaling audits:** group values are dimensionless; π-constant checks compare scaled states.
+
 Instead of hand-wiring `loss = data_loss + physics_loss`, you get residuals from the engine, a physics loss from `build_loss(residuals)`, and an admissibility report from `audit(engine.log)`.
 
 ---
@@ -68,7 +78,6 @@ cfg = MonitorConfig(
             name="sutherland_mu",
             output_key="mu",
             state_map={"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
-            predicted_spatial=["T"],
         )
     ],
     scaling_audit=[
@@ -76,7 +85,6 @@ cfg = MonitorConfig(
             name="pe",
             output_key="Pe",
             state_map={"re": "Re", "pr": "Pr"},
-            predicted_spatial=["Re"],
         )
     ],
 )
@@ -89,17 +97,23 @@ state_pred = {
     "mu0": mu0,
     "T0": T0,
     "S": S,
-    "mu": mu,
-    "d_T_dx": jnp.array(0.0),
-    "d_mu_dx": jnp.array(0.0),
+    "mu": mu * 1.01,
     "Re": Re,
     "Pr": Pr,
     "Pe": Pe,
-    "d_Re_dx": jnp.array(0.0),
-    "d_Pe_dx": jnp.array(0.0),
+}
+state_ref = {
+    "T": T,
+    "mu0": mu0,
+    "T0": T0,
+    "S": S,
+    "mu": mu,
+    "Re": Re,
+    "Pr": Pr,
+    "Pe": Pe,
 }
 
-residuals = engine.compute_residuals(state_pred)
+residuals = engine.compute_residuals(state_pred, state_ref=state_ref)
 loss = build_loss(residuals)
 report = audit(engine.log)
 
@@ -125,9 +139,9 @@ Moju gives you physics diagnostics, not just a loss. The audit report looks like
 
 Report keys: `report["per_category"]` (`laws`, `constitutive`, `scaling`), `report["overall_admissibility_score"]`, `report["overall_admissibility_level"]`. Per-key RMS, R_norm, and admissibility are in `report["per_key"]`.
 
-**Admissibility levels:** (1) each residual key has its own score in `per_key`; (2) each category score in `per_category` is the **geometric mean** of **finite** per-key scores in that category (NaN/inf keys are skipped; categories with no finite keys are omitted); (3) the **overall** score is the geometric mean of **finite** category scores. Per-key RMS uses **NaN-tolerant** reductions where applicable so a few bad points do not poison the whole metric. New metrics use the same pipeline—for example optional **π-constant** checks on a scaling audit add a key `scaling/<name>/pi_constant` and are included in the scaling category mean. π-constant recipes exist for **every** registered dimensionless group (`list_pi_constant_group_names()`); each recipe scales selected inputs by powers of `c>1` so the group value is unchanged (see `moju.monitor.pi_constant_recipes`). For **Grashof** (`gr`), `g` is fixed inside `Groups.gr`; the recipe only varies the other arguments. End-to-end π-constant examples: `examples/cookbook_pi_constant_reynolds.py`, `examples/cookbook_pi_constant_prandtl.py`. Turbulence-related constitutive chain audits: `examples/cookbook_turbulence_law_of_wall.py`, `examples/cookbook_turbulence_colebrook.py`, `examples/cookbook_constitutive_smagorinsky.py`, `examples/cookbook_constitutive_k_epsilon.py` (k–ε νₜ), `examples/cookbook_constitutive_k_omega.py` (k–ω νₜ). These νₜ closures are algebraic only; full k–ε/k–ω transport belongs in `Laws.*` if you need PDE residuals. **Implied constitutive audit** (`constitutive/<name>/implied_delta`): compare `Models.*` to an alternate value in `state_pred` via `AuditSpec.implied_value_key`, or to `implied_fn(state, constants)` (Python-only; omitted from `to_dict()`). Cookbooks: `examples/cookbook_constitutive_implied_ideal_gas_rho.py`, `examples/cookbook_constitutive_implied_power_law_fn.py`.
+**Admissibility levels:** (1) each residual key has its own score in `per_key`; (2) each category score in `per_category` is the **geometric mean** of **finite** per-key scores in that category (NaN/inf keys are skipped; categories with no finite keys are omitted); (3) the **overall** score is the geometric mean of **finite** category scores. Per-key RMS uses **NaN-tolerant** reductions where applicable so a few bad points do not poison the whole metric. New metrics use the same pipeline—for example optional **π-constant** checks on a scaling audit add a key `scaling/<name>/pi_constant` and are included in the scaling category mean. π-constant recipes exist for **every** registered dimensionless group (`list_pi_constant_group_names()`); each recipe scales selected inputs by powers of `c>1` so the group value is unchanged (see `moju.monitor.pi_constant_recipes`). For **Grashof** (`gr`), `g` is fixed inside `Groups.gr`; the recipe only varies the other arguments. End-to-end π-constant examples: `examples/cookbook_pi_constant_reynolds.py`, `examples/cookbook_pi_constant_prandtl.py`. Turbulence-related constitutive audit cookbooks: `examples/cookbook_turbulence_law_of_wall.py`, `examples/cookbook_turbulence_colebrook.py`, `examples/cookbook_constitutive_smagorinsky.py`, `examples/cookbook_constitutive_k_epsilon.py` (k–ε νₜ), `examples/cookbook_constitutive_k_omega.py` (k–ω νₜ). These νₜ closures are algebraic only; full k–ε/k–ω transport belongs in `Laws.*` if you need PDE residuals. **Implied constitutive audit** (`constitutive/<name>/implied_delta`): compare `Models.*` to an alternate value in `state_pred` via `AuditSpec.implied_value_key`, or to `implied_fn(state, constants)` (Python-only; omitted from `to_dict()`). Cookbooks: `examples/cookbook_constitutive_implied_ideal_gas_rho.py`, `examples/cookbook_constitutive_implied_power_law_fn.py`.
 
-**Law-linked implied audits (default on)** — For several `Laws.*` entries, Moju **prepends** matching `constitutive_audit` / `scaling_audit` rows whose `implied_fn` recomputes a quantity by rearranging the law using your law `state_map` (e.g. **Fourier conduction** → `Models.thermal_diffusivity(k,rho,cp)` vs **α\_implied = T_t / T_laplacian**). Residual keys look like `constitutive/thermal_diffusivity/law_fourier_conduction/implied_delta`. We **do not** add a separate implied row for **Fo** when **α** is already checked (same information given fixed `t`, `L`). Toggle with `MonitorConfig(law_implied_audits=False)` or `ResidualEngine(..., law_implied_audits=False)`. With **`state_ref`**, **`ref_delta`** still runs for those rows (unless a spec sets `include_ref_delta: false`). Registry: `list_laws_with_implied_diagnostics()`, `merge_law_implied_audit_specs`, `moju.monitor.law_implied_diagnostics`; Studio prepends the same rows in `build_studio_auto_fragment`. Details: [docs/law_implied_audits.md](docs/law_implied_audits.md).
+**Law-linked implied audits (default on)** — For several `Laws.*` entries, Moju **prepends** matching `constitutive_audit` / `scaling_audit` rows whose `implied_fn` recomputes a quantity by rearranging the law using your law `state_map` (e.g. **Fourier conduction** → `Models.thermal_diffusivity(k,rho,cp)` vs **α\_implied = T_t / T_laplacian**). Logged **`implied_delta`** / **`ref_delta`** tensors use the **default nondimensional symmetric normalization** (see “Residual conventions” above). Residual keys look like `constitutive/thermal_diffusivity/law_fourier_conduction/implied_delta`. We **do not** add a separate implied row for **Fo** when **α** is already checked (same information given fixed `t`, `L`). Toggle with `MonitorConfig(law_implied_audits=False)` or `ResidualEngine(..., law_implied_audits=False)`. With **`state_ref`**, **`ref_delta`** still runs for those rows (unless a spec sets `include_ref_delta: false`). Registry: `list_laws_with_implied_diagnostics()`, `merge_law_implied_audit_specs`, `moju.monitor.law_implied_diagnostics`; Studio prepends the same rows in `build_studio_auto_fragment`. Details: [docs/law_implied_audits.md](docs/law_implied_audits.md).
 
 ---
 
@@ -147,7 +161,7 @@ Report keys: `report["per_category"]` (`laws`, `constitutive`, `scaling`), `repo
 | **Models**      | Constitutive relationships (e.g. viscosity μ(T), density ρ(P,T)). |
 | **Groups**      | Dimensionless quantities (Re, Pr, Pe, Ma, …). |
 | **Laws**        | Governing equations (mass, momentum, energy, …); residuals go into `build_loss`. |
-| **ResidualEngine** | Builds state from config and optional predictions; runs laws and optional constitutive/scaling audits (`ref_delta`, `implied_delta`, `chain_dx`/`chain_dt`, …); produces residuals and a log. |
+| **ResidualEngine** | Builds state from config and optional predictions; runs laws and optional constitutive/scaling audits (`ref_delta`, `implied_delta`, optional π-constant on scaling); produces residuals and a log. |
 | **build_loss**  | Builds a scalar physics loss from residuals (laws only). |
 | **audit**       | Takes the engine log; returns per-key and per-category admissibility and overall score. |
 
@@ -200,18 +214,17 @@ Moju does not define physics. Moju provides a structured way to **enforce** and 
 
 ## Learn more
 
-**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, `MonitorConfig`, `AuditSpec`, `audit_spec_to_engine_dict`, `PathBGridConfig`, `fill_path_b_derivatives`, `fill_law_fd_from_primitives`, `list_law_fd_supported_laws`, **`merge_law_implied_audit_specs`**, **`list_laws_with_implied_diagnostics`**, **`law_implied_unsupported_reasons`**, **`effective_audit_specs_for_fragment`**, build_loss, audit, **`visualize(..., backend="matplotlib"|"plotly"|"none", mode="training"|"test", spatial_law_panel=..., r_norm_scale=...)`** for training/test dashboards, `pretty_residual_key` / `pretty_category_name` for display). Law-linked implied rows follow a strict constitutive-only policy; use `law_implied_unsupported_reasons()` for laws pending constitutive target/model support. Constitutive/scaling closure keys include `ref_delta`, `implied_delta`, `chain_dx`/`chain_dy`/`chain_dz`, `chain_dt` (plus scaling `pi_constant` when configured). Path B optional FD: `compute_residuals(..., auto_path_b_derivatives=...)` and `fill_law_fd=True` for registered law inputs. Use `engine.required_state_keys()` and `engine.required_derivative_keys()` for introspection.
+**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, `MonitorConfig`, `AuditSpec`, `audit_spec_to_engine_dict`, `PathBGridConfig`, `fill_path_b_derivatives`, `fill_law_fd_from_primitives`, `list_law_fd_supported_laws`, **`merge_law_implied_audit_specs`**, **`list_laws_with_implied_diagnostics`**, **`law_implied_unsupported_reasons`**, **`effective_audit_specs_for_fragment`**, build_loss, audit, **`visualize(..., backend="matplotlib"|"plotly"|"none", mode="training"|"test", spatial_law_panel=..., r_norm_scale=...)`** for training/test dashboards, `pretty_residual_key` / `pretty_category_name` for display). Law-linked implied rows follow a strict constitutive-only policy; use `law_implied_unsupported_reasons()` for laws pending constitutive target/model support. Constitutive/scaling closure keys include `ref_delta`, `implied_delta`, and scaling `pi_constant` when configured. Path B optional FD: `compute_residuals(..., auto_path_b_derivatives=...)` with `fill_law_fd=True` fills missing **registered** `Laws.*` inputs on structured grids. Use `engine.required_state_keys()` for introspection.
 
 **Examples**
 
 - Quick scaling and laws: `Groups.re(...)`, `Models.ideal_gas_rho(...)`, `Laws.mass_incompressible(u_grad)` — see snippets in the full docs.
-- Monitor with laws + scaling audit: `python examples/monitor_chain_spatial_demo.py`, `python examples/monitor_chain_temporal_demo.py`.
 - End-to-end NN → residuals → PDF: `python examples/monitor_heat_end_to_end.py`, `python examples/monitor_burgers_end_to_end.py`.
 - CFD snapshot → state_ref → audit: `examples/cfd_snapshot_cookbook_heat_1d.py`; reference loaders: `examples/monitor_state_ref_from_vtu_demo.py`, `from_openfoam`, `from_hdf5`.
-- Path B auto-FD: `examples/cookbook_path_b_fd_audit_pe.py` (audit `d_*_dx` fill for `scaling/pe`), `examples/cookbook_path_b_fd_law_laplace.py` (law `phi_laplacian` fill for `laplace_equation`).
+- Path B auto-FD (law inputs): `examples/cookbook_path_b_fd_law_laplace.py` (`phi_laplacian` fill for `laplace_equation`).
 - Implied constitutive audit (`implied_delta`): `examples/cookbook_constitutive_implied_ideal_gas_rho.py`, `examples/cookbook_constitutive_implied_power_law_fn.py`.
 
-**Paths** — Path A: pass `(model, params, collocation)` and a `state_builder` to build `state_pred`. Path B: pass `state_pred` directly (e.g. from CFD or finite differences). Optional **structured-grid FD**: `compute_residuals(..., auto_path_b_derivatives=True|PathBGridConfig)` fills missing audit derivatives (`d_*_dx`, …); `fill_law_fd=True` (with that enabled) fills missing **registered** `Laws.*` inputs (e.g. `phi_laplacian`, `u_grad`) via `law_fd_recipes`. Constitutive and scaling audits use specs tied to `Models.*` and `Groups.*`: **ref_delta** (needs `state_ref`), **implied_delta** (`AuditSpec.implied_value_key` or `implied_fn`; `implied_fn` is omitted from `MonitorConfig.to_dict()`—use in-memory `AuditSpec` + `ResidualEngine(config=...)` or `audit_spec_to_engine_dict`), **chain_dx** / **chain_dy** / **chain_dz** / **chain_dt** (need `predicted_spatial` / `predicted_temporal`; axes from `chain_spatial_axes`). R_norm is scale-based (state-derived by default; override with `audit(log, r_ref=...)`).
+**Paths** — Path A: pass `(model, params, collocation)` and a `state_builder` to build `state_pred`. Path B: pass `state_pred` directly (e.g. from CFD or finite differences). Optional **structured-grid FD**: `compute_residuals(..., auto_path_b_derivatives=True|PathBGridConfig)` with `fill_law_fd=True` fills missing **registered** `Laws.*` inputs (e.g. `phi_laplacian`, `u_grad`) via `law_fd_recipes`. Constitutive and scaling audits use specs tied to `Models.*` and `Groups.*`: **ref_delta** (needs `state_ref`), **implied_delta** on constitutive specs only (`AuditSpec.implied_value_key` or `implied_fn`; `implied_fn` is omitted from `MonitorConfig.to_dict()`—use in-memory `AuditSpec` + `ResidualEngine(config=...)` or `audit_spec_to_engine_dict`), and **π-constant** checks on scaling (Path A). R_norm = RMS(r)/scale_k: default scale_k ≈ 1 for **laws/** and nondimensional **implied_delta** / **ref_delta**; other audit keys and **data/** use state/reference-derived scales. Optional `audit(log, r_ref=...)` overrides scale_k per key. Admissibility uses 1/(1+R_norm) per key.
 
 **Docs** — [VERSIONING.md](VERSIONING.md). Online docs: overview, Groups, Models, Laws, Operators.
 

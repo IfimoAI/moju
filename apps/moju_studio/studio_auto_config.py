@@ -8,20 +8,10 @@ signatures (e.g. ``k_solid`` for :func:`Groups.bi`).
 **Implied groups (Studio):** for allowlisted laws, dimensionless arguments that correspond
 to a registered ``Groups.*`` function (e.g. ``fo`` for :func:`Groups.fo`) are prepended to
 ``groups`` so Moju computes them from primitives (``alpha``, ``t``, ``L``) before laws run.
-**Fourier conduction** also prepends an implied **scaling audit** for ``fo`` when ``T`` is in
-the upload (``predicted_spatial`` includes ``alpha``, ``chain_output=fd_on_composition``) so
-spatial **chain** residuals run without ``d_fo_dx`` in the NPZ.
 **Law-linked implied audits** (``moju.monitor.law_implied_diagnostics``) prepend e.g.
-``thermal_diffusivity`` vs α from ``T_t`` / ``T_laplacian``; when ``alpha`` is in the upload
-and the user did not select the ``thermal_diffusivity`` model, Studio adds
-``predicted_spatial: ["alpha"]`` so ``d_alpha_dx`` constitutive chain runs under the same
-``residual_basename``. See ``docs/law_implied_audits.md``.
+``thermal_diffusivity`` vs α from ``T_t`` / ``T_laplacian`` when those laws are selected.
 Users need not upload ``fo`` / ``re`` / etc. unless they override the matching ``output_key``
 via expert JSON.
-
-Chain audits: ``predicted_spatial`` / ``predicted_temporal`` are inferred from which
-mapped keys appear in ``state_pred``; mesh coordinates ``x,y,z,t`` are always excluded so
-audits do not request ``d_t_dt`` on the time coordinate or spatial derivatives of ``t``.
 """
 
 from __future__ import annotations
@@ -86,37 +76,6 @@ def _filtered_groups() -> tuple[str, ...]:
 
 STUDIO_GROUP_NAMES_EFFECTIVE: tuple[str, ...] = _filtered_groups()
 
-# Law-linked Fourier constitutive row (``merge_law_implied_audit_specs``).
-_LAW_FOURIER_TD_BASENAME = "thermal_diffusivity/law_fourier_conduction"
-
-
-def _patch_fourier_law_thermal_diffusivity_chain(
-    law_implied_constitutive: List[Dict[str, Any]],
-    *,
-    pred_keys: Set[str],
-    user_model_names: List[str],
-) -> None:
-    """
-    Enable spatial chain on the Fourier law-linked ``thermal_diffusivity`` row when ``alpha``
-    is a predicted field, without duplicating a user-selected ``thermal_diffusivity`` model row.
-
-    Uses ``predicted_spatial: ["alpha"]`` (allowed as matching ``output_key``) so the LHS
-    ``d_alpha_dx`` is checked against the model Jacobian (RHS zero if ``k``, ``rho``, ``cp``
-    do not vary in ``x``).
-    """
-    if "thermal_diffusivity" in user_model_names:
-        return
-    if "alpha" not in pred_keys:
-        return
-    for row in law_implied_constitutive:
-        if row.get("residual_basename") != _LAW_FOURIER_TD_BASENAME:
-            continue
-        ps = list(row.get("predicted_spatial") or [])
-        if "alpha" not in ps:
-            row["predicted_spatial"] = [*ps, "alpha"]
-        break
-
-
 # Default output_key for constitutive audits (pred field vs model).
 MODEL_DEFAULT_OUTPUT_KEY: Dict[str, str] = {
     "sutherland_mu": "mu",
@@ -161,28 +120,6 @@ def _group_default_output_key(name: str) -> str:
     return name
 
 
-def _predicted_spatial_values(state_map: Dict[str, str], pred_keys: Set[str]) -> List[str]:
-    out: List[str] = []
-    for v in state_map.values():
-        if v in pred_keys and v not in _COORD_ALL:
-            out.append(v)
-    return out
-
-
-def _predicted_temporal_values(
-    state_map: Dict[str, str],
-    pred_keys: Set[str],
-) -> List[str]:
-    """Exclude mesh coords so we never request ``d_t_dt`` / ``chain_dt`` on ``t`` itself."""
-    if "t" not in pred_keys:
-        return []
-    out: List[str] = []
-    for v in state_map.values():
-        if v in pred_keys and v not in _COORD_ALL:
-            out.append(v)
-    return out
-
-
 def build_studio_auto_fragment(
     *,
     law_names: List[str],
@@ -223,18 +160,12 @@ def build_studio_auto_fragment(
             raise ValueError(f"No default output_key for model {name!r} — extend MODEL_DEFAULT_OUTPUT_KEY")
         args = model_parameter_names(name)
         sm = {a: a for a in args}
-        ps = _predicted_spatial_values(sm, pred_keys)
-        pt = _predicted_temporal_values(sm, pred_keys)
         constitutive.append(
             build_audit_spec_dict(
                 category="constitutive",
                 name=name,
                 output_key=out_k,
                 state_map=sm,
-                predicted_spatial=ps,
-                predicted_temporal=pt,
-                closure_mode="pointwise",
-                chain_spatial_axes=["x"],
             )
         )
 
@@ -245,18 +176,12 @@ def build_studio_auto_fragment(
         args = group_parameter_names(name)
         sm = {a: a for a in args}
         user_groups.append(build_group_spec(name, out_k, sm))
-        ps = _predicted_spatial_values(sm, pred_keys)
-        pt = _predicted_temporal_values(sm, pred_keys)
         scaling.append(
             build_audit_spec_dict(
                 category="scaling",
                 name=name,
                 output_key=out_k,
                 state_map=sm,
-                predicted_spatial=ps,
-                predicted_temporal=pt,
-                closure_mode="pointwise",
-                chain_spatial_axes=["x"],
                 invariance_pi_constant=False,
             )
         )
@@ -273,9 +198,6 @@ def build_studio_auto_fragment(
     groups = merge_implied_groups_first(implied, user_groups)
 
     li_c, li_s = merge_law_implied_audit_specs(laws, enabled=True)
-    _patch_fourier_law_thermal_diffusivity_chain(
-        li_c, pred_keys=pred_keys, user_model_names=model_names
-    )
     constitutive = li_c + constitutive
     scaling = li_s + scaling
 

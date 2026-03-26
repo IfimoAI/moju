@@ -5,7 +5,8 @@ Cookbook: **implied_delta** constitutive audit (no ``state_ref``).
 Compares ``Models.ideal_gas_rho(P, R, T)`` to an **implied** density carried under
 ``rho_implied`` in ``state_pred`` (e.g. from a surrogate, experiment, or alternate EOS path).
 
-- Residual: ``constitutive/ideal_gas_rho/implied_delta`` = F(P,R,T) − ``rho_implied``.
+- Residual: ``constitutive/ideal_gas_rho/implied_delta`` is the **nondimensional** symmetric
+  discrepancy ``(F − rho_implied) / (ε + |F| + |rho_implied|)``.
 - If ``rho_implied`` is missing, the closure is **omitted** (same policy as ``ref_delta`` /
   ``chain_*`` when prerequisites are missing).
 
@@ -40,8 +41,6 @@ def main() -> Dict[str, Any]:
                 name="ideal_gas_rho",
                 output_key="rho",
                 state_map={"P": "P", "R": "R", "T": "T"},
-                predicted_spatial=[],
-                predicted_temporal=[],
                 implied_value_key="rho_implied",
             )
         ],

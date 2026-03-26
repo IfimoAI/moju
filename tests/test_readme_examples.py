@@ -20,7 +20,7 @@ def test_readme_quick_start_runs():
 
 
 def test_readme_five_minute_example_runs():
-    """README 5-minute example: Laws + Constitutive + Scaling audits."""
+    """README-style smoke: laws + constitutive/scaling ref_delta with matching reference."""
     import jax.numpy as jnp
     from moju.monitor import ResidualEngine, build_loss, audit, MonitorConfig, AuditSpec
     from moju.piratio import Models, Groups
@@ -43,7 +43,6 @@ def test_readme_five_minute_example_runs():
                 name="sutherland_mu",
                 output_key="mu",
                 state_map={"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
-                predicted_spatial=["T"],
             )
         ],
         scaling_audit=[
@@ -51,30 +50,25 @@ def test_readme_five_minute_example_runs():
                 name="pe",
                 output_key="Pe",
                 state_map={"re": "Re", "pr": "Pr"},
-                predicted_spatial=["Re"],
             )
         ],
     )
 
     engine = ResidualEngine(config=cfg)
 
-    state_pred = {
+    base = {
         "phi_xx": jnp.array(0.0),
         "T": T,
         "mu0": mu0,
         "T0": T0,
         "S": S,
         "mu": mu,
-        "d_T_dx": jnp.array(0.0),
-        "d_mu_dx": jnp.array(0.0),
         "Re": Re,
         "Pr": Pr,
         "Pe": Pe,
-        "d_Re_dx": jnp.array(0.0),
-        "d_Pe_dx": jnp.array(0.0),
     }
 
-    residuals = engine.compute_residuals(state_pred)
+    residuals = engine.compute_residuals(dict(base), state_ref=dict(base))
     loss = build_loss(residuals)
     report = audit(engine.log)
 

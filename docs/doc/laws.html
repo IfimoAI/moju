@@ -131,9 +131,9 @@
       <div class="desc">re from Groups.re(). U, L scale. Simplified turbulence, shocks.</div>
     </div>
     <div class="api-block">
-      <div class="name">Laws.schrodinger_steady(psi_laplacian, V, E, psi, m, h_bar=1.054571817e-34)</div>
-      <div class="sig">−(ℏ²/2m)∇²ψ + (V − E)ψ = 0</div>
-      <div class="desc">V, E [J], m [kg]. Quantum states, electron density.</div>
+      <div class="name">Laws.schrodinger_steady(psi_laplacian, V, E, psi, sch_kin_l2)</div>
+      <div class="sig">−L²∇²ψ + K(V − E)ψ = 0, K = 2mL²/ℏ² (Groups.schrodinger_kinetic_length_squared)</div>
+      <div class="desc">psi_laplacian = L²∇²ψ. Law-FD multiplies grid Laplacian by L² when L is in state. Breaking vs m,h_bar API.</div>
     </div>
     <div class="api-block">
       <div class="name">Laws.laplace_beltrami(phi_laplacian_g)</div>

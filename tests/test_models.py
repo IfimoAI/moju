@@ -125,3 +125,18 @@ class TestModelsKnownValues:
         omega0 = jnp.array(1e-12)
         nu = Models.k_omega_nu_t(k=jnp.array(3.0), omega=jnp.array(0.0), omega0=omega0)
         assert jnp.allclose(nu, 3.0 / 1e-12, rtol=rtol, atol=atol)
+
+
+class TestTurbulentViscousAcceleration:
+    def test_k_omega_matches_nu_times_laplacian(self, rtol, atol):
+        u_lap = jnp.array([[1.0, 0.0], [0.0, 1.0]])
+        nu_m = jnp.array(1e-6)
+        k = jnp.array(0.4)
+        omega = jnp.array(2.0)
+        omega0 = jnp.array(1e-12)
+        out = Models.turbulent_viscous_acceleration_k_omega(
+            u_laplacian=u_lap, nu_molecular=nu_m, k=k, omega=omega, omega0=omega0
+        )
+        nu_t = Models.k_omega_nu_t(k, omega, omega0)
+        exp = (nu_m + nu_t) * u_lap
+        assert jnp.allclose(out, exp, rtol=rtol, atol=atol)

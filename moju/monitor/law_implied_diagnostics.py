@@ -299,6 +299,41 @@ def implied_mu_burgers_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
     return implied_mu_from_re_fn(law_sm, implied_re_burgers_equation(law_sm))
 
 
+def implied_viscous_acceleration_incompressible(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """Implied Newtonian viscous acceleration u_t + (u·∇)u + ∇p from the momentum balance."""
+
+    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+        u_t = _val(state, constants, law_sm, "u_t")
+        u = _val(state, constants, law_sm, "u")
+        u_grad = _val(state, constants, law_sm, "u_grad")
+        p_grad = _val(state, constants, law_sm, "p_grad")
+        if u_t is None or u is None or u_grad is None or p_grad is None:
+            return None
+        adv = jnp.einsum("...ij,...j->...i", jnp.asarray(u_grad), jnp.asarray(u))
+        return jnp.asarray(u_t) + adv + jnp.asarray(p_grad)
+
+    return implied_fn
+
+
+def implied_viscous_acceleration_compressible(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """Implied ρ(u_t + u·∇u) + ∇p for the simplified compressible momentum form."""
+
+    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+        rho = _val(state, constants, law_sm, "rho")
+        u_t = _val(state, constants, law_sm, "u_t")
+        u = _val(state, constants, law_sm, "u")
+        u_grad = _val(state, constants, law_sm, "u_grad")
+        p_grad = _val(state, constants, law_sm, "p_grad")
+        if rho is None or u_t is None or u is None or u_grad is None or p_grad is None:
+            return None
+        adv = jnp.einsum("...ij,...j->...i", jnp.asarray(u_grad), jnp.asarray(u))
+        rho_b = jnp.asarray(rho)[..., jnp.newaxis]
+        return rho_b * (jnp.asarray(u_t) + adv) + jnp.asarray(p_grad)
+
+    return implied_fn
+
+
+
 # ---------------------------------------------------------------------------
 # Registry: law_name -> list of audit spec dict fragments (merged into engine lists)
 # ---------------------------------------------------------------------------
@@ -313,8 +348,6 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "thermal_diffusivity",
             "output_key": "alpha",
             "state_map": {"k": "k", "rho": "rho", "cp": "cp"},
-            "predicted_spatial": [],
-            "predicted_temporal": [],
             "implied_maker": implied_alpha_fourier_conduction,
             "residual_basename": "thermal_diffusivity/law_fourier_conduction",
             "include_ref_delta": True,
@@ -326,8 +359,6 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "mass_diffusivity",
             "output_key": "D",
             "state_map": {"fo_mass": "fo_mass", "t": "t", "L": "L"},
-            "predicted_spatial": [],
-            "predicted_temporal": [],
             "implied_maker": implied_D_fick_diffusion,
             "residual_basename": "mass_diffusivity/law_fick_diffusion",
             "include_ref_delta": True,
@@ -339,8 +370,6 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "wave_speed_from_st",
             "output_key": "c",
             "state_map": {"omega": "omega", "L": "L", "st_wave": "st_wave"},
-            "predicted_spatial": [],
-            "predicted_temporal": [],
             "implied_maker": implied_c_wave_equation,
             "residual_basename": "wave_speed_from_st/law_wave_equation",
             "include_ref_delta": True,
@@ -352,8 +381,6 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "scalar_diffusivity_from_pe",
             "output_key": "kappa",
             "state_map": {"u": "u", "L": "L", "pe": "pe"},
-            "predicted_spatial": [],
-            "predicted_temporal": [],
             "implied_maker": implied_kappa_advection_diffusion,
             "residual_basename": "scalar_diffusivity_from_pe/law_advection_diffusion",
             "include_ref_delta": True,
@@ -365,8 +392,6 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "dynamic_viscosity_from_re",
             "output_key": "mu",
             "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
-            "predicted_spatial": [],
-            "predicted_temporal": [],
             "implied_maker": implied_mu_momentum_navier_stokes,
             "residual_basename": "dynamic_viscosity_from_re/law_momentum_navier_stokes",
             "include_ref_delta": True,
@@ -378,8 +403,6 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "dynamic_viscosity_from_re",
             "output_key": "mu",
             "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
-            "predicted_spatial": [],
-            "predicted_temporal": [],
             "implied_maker": implied_mu_stokes_flow,
             "residual_basename": "dynamic_viscosity_from_re/law_stokes_flow",
             "include_ref_delta": True,
@@ -391,10 +414,107 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "dynamic_viscosity_from_re",
             "output_key": "mu",
             "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
-            "predicted_spatial": [],
-            "predicted_temporal": [],
             "implied_maker": implied_mu_burgers_equation,
             "residual_basename": "dynamic_viscosity_from_re/law_burgers_equation",
+            "include_ref_delta": True,
+        },
+    ],
+    "momentum_incompressible_newtonian_laplacian": [
+        {
+            "category": "constitutive",
+            "name": "turbulent_viscous_acceleration_k_omega",
+            "output_key": "viscous_accel",
+            "state_map": {
+                "u_laplacian": "u_laplacian",
+                "nu_molecular": "nu_molecular",
+                "k": "k",
+                "omega": "omega",
+                "omega0": "omega0",
+            },
+            "implied_maker": implied_viscous_acceleration_incompressible,
+            "residual_basename": "turbulent_viscous_acceleration_k_omega/law_momentum_incompressible_newtonian_laplacian",
+            "include_ref_delta": True,
+        },
+        {
+            "category": "constitutive",
+            "name": "turbulent_viscous_acceleration_k_epsilon",
+            "output_key": "viscous_accel",
+            "state_map": {
+                "u_laplacian": "u_laplacian",
+                "nu_molecular": "nu_molecular",
+                "C_mu": "C_mu",
+                "k": "k",
+                "epsilon": "epsilon",
+                "eps0": "eps0",
+            },
+            "implied_maker": implied_viscous_acceleration_incompressible,
+            "residual_basename": "turbulent_viscous_acceleration_k_epsilon/law_momentum_incompressible_newtonian_laplacian",
+            "include_ref_delta": True,
+        },
+        {
+            "category": "constitutive",
+            "name": "turbulent_viscous_acceleration_smagorinsky",
+            "output_key": "viscous_accel",
+            "state_map": {
+                "u_laplacian": "u_laplacian",
+                "nu_molecular": "nu_molecular",
+                "Cs": "Cs",
+                "Delta": "Delta",
+                "strain_rate_magnitude": "strain_rate_magnitude",
+            },
+            "implied_maker": implied_viscous_acceleration_incompressible,
+            "residual_basename": "turbulent_viscous_acceleration_smagorinsky/law_momentum_incompressible_newtonian_laplacian",
+            "include_ref_delta": True,
+        },
+    ],
+    "momentum_compressible_newtonian_laplacian": [
+        {
+            "category": "constitutive",
+            "name": "turbulent_viscous_acceleration_compressible_k_omega",
+            "output_key": "viscous_accel",
+            "state_map": {
+                "rho": "rho",
+                "u_laplacian": "u_laplacian",
+                "nu_molecular": "nu_molecular",
+                "k": "k",
+                "omega": "omega",
+                "omega0": "omega0",
+            },
+            "implied_maker": implied_viscous_acceleration_compressible,
+            "residual_basename": "turbulent_viscous_acceleration_compressible_k_omega/law_momentum_compressible_newtonian_laplacian",
+            "include_ref_delta": True,
+        },
+        {
+            "category": "constitutive",
+            "name": "turbulent_viscous_acceleration_compressible_k_epsilon",
+            "output_key": "viscous_accel",
+            "state_map": {
+                "rho": "rho",
+                "u_laplacian": "u_laplacian",
+                "nu_molecular": "nu_molecular",
+                "C_mu": "C_mu",
+                "k": "k",
+                "epsilon": "epsilon",
+                "eps0": "eps0",
+            },
+            "implied_maker": implied_viscous_acceleration_compressible,
+            "residual_basename": "turbulent_viscous_acceleration_compressible_k_epsilon/law_momentum_compressible_newtonian_laplacian",
+            "include_ref_delta": True,
+        },
+        {
+            "category": "constitutive",
+            "name": "turbulent_viscous_acceleration_compressible_smagorinsky",
+            "output_key": "viscous_accel",
+            "state_map": {
+                "rho": "rho",
+                "u_laplacian": "u_laplacian",
+                "nu_molecular": "nu_molecular",
+                "Cs": "Cs",
+                "Delta": "Delta",
+                "strain_rate_magnitude": "strain_rate_magnitude",
+            },
+            "implied_maker": implied_viscous_acceleration_compressible,
+            "residual_basename": "turbulent_viscous_acceleration_compressible_smagorinsky/law_momentum_compressible_newtonian_laplacian",
             "include_ref_delta": True,
         },
     ],
@@ -485,12 +605,6 @@ def merge_law_implied_audit_specs(
                 "name": row["name"],
                 "output_key": row["output_key"],
                 "state_map": dict(row["state_map"]),
-                "predicted_spatial": list(row.get("predicted_spatial") or []),
-                "predicted_temporal": list(row.get("predicted_temporal") or []),
-                "closure_mode": "pointwise",
-                "quadrature_weights": {},
-                "chain_spatial_axes": ["x"],
-                "chain_output": "state_derivative",
                 "implied_fn": implied_maker(law_sm),
                 "residual_basename": basename,
                 "include_ref_delta": bool(row.get("include_ref_delta", True)),
@@ -508,50 +622,15 @@ def merge_fragment_law_implied_audit_specs(
     from_config: List[Dict[str, Any]],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    For each prepended law-linked row with ``residual_basename`` ``B``, merge
-    ``predicted_spatial`` / ``predicted_temporal`` from every config row that also
-    has ``B``, then drop those config rows from the remainder.
-
-    Used so Studio (or JSON fragments) can attach extra chain keys to law-linked
-    audits without duplicating closures: the engine rebuilds prepended rows from
-    laws; config copies supply merged ``predicted_*`` only.
+    Return ``(prepended, extras)``. Rows in ``from_config`` that declare the same
+    ``residual_basename`` as a prepended law-linked row are dropped (legacy duplicate
+    suppression); all other config rows are kept in ``extras``.
     """
-    by_bn: Dict[str, List[Dict[str, Any]]] = {}
-    no_bn: List[Dict[str, Any]] = []
+    prep_bn = {str(r["residual_basename"]) for r in prepended if r.get("residual_basename")}
+    extras: List[Dict[str, Any]] = []
     for d in from_config:
         bn = d.get("residual_basename")
-        if bn:
-            by_bn.setdefault(str(bn), []).append(d)
-        else:
-            no_bn.append(d)
-
-    merged_prepended: List[Dict[str, Any]] = []
-    for row in prepended:
-        bn = row.get("residual_basename")
-        if not bn:
-            merged_prepended.append(dict(row))
+        if bn and str(bn) in prep_bn:
             continue
-        bn_s = str(bn)
-        mates = by_bn.pop(bn_s, [])
-        ps = list(row.get("predicted_spatial") or [])
-        pt = list(row.get("predicted_temporal") or [])
-        seen_ps = set(ps)
-        seen_pt = set(pt)
-        for m in mates:
-            for k in m.get("predicted_spatial") or []:
-                if k not in seen_ps:
-                    ps.append(k)
-                    seen_ps.add(k)
-            for k in m.get("predicted_temporal") or []:
-                if k not in seen_pt:
-                    pt.append(k)
-                    seen_pt.add(k)
-        out = dict(row)
-        out["predicted_spatial"] = ps
-        out["predicted_temporal"] = pt
-        merged_prepended.append(out)
-
-    extras: List[Dict[str, Any]] = list(no_bn)
-    for lst in by_bn.values():
-        extras.extend(lst)
-    return merged_prepended, extras
+        extras.append(d)
+    return list(prepended), extras

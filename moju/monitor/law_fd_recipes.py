@@ -43,10 +43,13 @@ class LawFDArgRecipe:
     - ``source_arg``: function argument name whose **state_map value** is the primitive field key
       (e.g. ``u`` for ``u_grad``). If ``None``, infer primitive key from the **target** state key
       using ``_infer_primitive_key``.
+    - ``scale_laplacian_by_L2``: if true and ``kind == "laplacian"``, multiply the filled Laplacian
+      by ``L**2`` from merged state/constants (requires numeric ``L``).
     """
 
     kind: str
     source_arg: Optional[str] = None
+    scale_laplacian_by_L2: bool = False
 
 
 def _infer_primitive_key(target_state_key: str, law_arg_name: str) -> Optional[str]:
@@ -72,7 +75,9 @@ LAW_FD_RECIPES: Dict[str, Dict[str, LawFDArgRecipe]] = {
     "laplace_equation": {"phi_laplacian": LawFDArgRecipe("laplacian")},
     "poisson_equation": {"phi_laplacian": LawFDArgRecipe("laplacian")},
     "helmholtz_equation": {"phi_laplacian": LawFDArgRecipe("laplacian", source_arg="phi")},
-    "schrodinger_steady": {"psi_laplacian": LawFDArgRecipe("laplacian")},
+    "schrodinger_steady": {
+        "psi_laplacian": LawFDArgRecipe("laplacian", scale_laplacian_by_L2=True),
+    },
     "laplace_beltrami": {},  # metric-specific; no generic FD
     "fourier_conduction": {
         "T_laplacian": LawFDArgRecipe("laplacian"),
@@ -98,6 +103,18 @@ LAW_FD_RECIPES: Dict[str, Dict[str, LawFDArgRecipe]] = {
         "u_grad": LawFDArgRecipe("jacobian", source_arg="u"),
     },
     "momentum_navier_stokes": {
+        "u_t": LawFDArgRecipe("dt", source_arg="u"),
+        "u_grad": LawFDArgRecipe("jacobian", source_arg="u"),
+        "u_laplacian": LawFDArgRecipe("vector_laplacian", source_arg="u"),
+        "p_grad": LawFDArgRecipe("grad_scalar", source_arg="p"),
+    },
+    "momentum_incompressible_newtonian_laplacian": {
+        "u_t": LawFDArgRecipe("dt", source_arg="u"),
+        "u_grad": LawFDArgRecipe("jacobian", source_arg="u"),
+        "u_laplacian": LawFDArgRecipe("vector_laplacian", source_arg="u"),
+        "p_grad": LawFDArgRecipe("grad_scalar", source_arg="p"),
+    },
+    "momentum_compressible_newtonian_laplacian": {
         "u_t": LawFDArgRecipe("dt", source_arg="u"),
         "u_grad": LawFDArgRecipe("jacobian", source_arg="u"),
         "u_laplacian": LawFDArgRecipe("vector_laplacian", source_arg="u"),
@@ -423,6 +440,21 @@ def fill_law_fd_from_primitives(
         except Exception as e:  # noqa: BLE001
             warnings.append(f"law_fd {law_name}.{arg_name}: {e}")
             arr = None
+        if arr is not None and recipe.scale_laplacian_by_L2:
+            if recipe.kind != "laplacian":
+                warnings.append(
+                    f"law_fd {law_name}.{arg_name}: scale_laplacian_by_L2 only applies to laplacian"
+                )
+                arr = None
+            else:
+                Lv = m.get("L")
+                if Lv is None:
+                    warnings.append(
+                        f"law_fd {law_name}.{arg_name}: skip {target_sk!r}: need L for L^2 laplacian scale"
+                    )
+                    arr = None
+                else:
+                    arr = arr * (jnp.asarray(Lv) ** 2)
         if arr is not None:
             state[target_sk] = arr
             m[target_sk] = arr

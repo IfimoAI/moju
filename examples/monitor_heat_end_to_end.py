@@ -140,13 +140,12 @@ def main():
         ],
         # thermal_diffusivity implied_delta is prepended from fourier_conduction (law_implied_audits=True).
         scaling_audit=[
-            {"name": "fo", "output_key": "Fo", "state_map": {"alpha": "alpha", "t": "t", "L": "L"}, "predicted_spatial": ["alpha"], "predicted_temporal": ["alpha", "t"]},
-            {"name": "bi", "output_key": "Bi", "state_map": {"h": "h", "L": "L", "k_solid": "kappa"}, "predicted_spatial": ["kappa"], "predicted_temporal": ["kappa"]},
+            {"name": "fo", "output_key": "Fo", "state_map": {"alpha": "alpha", "t": "t", "L": "L"}},
+            {"name": "bi", "output_key": "Bi", "state_map": {"h": "h", "L": "L", "k_solid": "kappa"}},
         ],
     )
 
     print("Required state keys:", sorted(engine.required_state_keys()))
-    print("Required derivative keys:", sorted(engine.required_derivative_keys()))
 
     key = jax.random.PRNGKey(0)
     params = init_mlp(key, [2, 32, 32, 1])

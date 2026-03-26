@@ -345,6 +345,62 @@ class Models:
 
     @staticmethod
     @jax.jit
+    def turbulent_viscous_acceleration_k_omega(u_laplacian, nu_molecular, k, omega, omega0):
+        r"""Newtonian viscous acceleration :math:`(\nu_m+\nu_t)\nabla^2\mathbf{u}` with :math:`\nu_t=k/(\omega+\omega_0)`."""
+        nu_t = Models.k_omega_nu_t(k, omega, omega0)
+        nu_tot = jnp.asarray(nu_molecular) + nu_t
+        ul = jnp.asarray(u_laplacian)
+        if nu_tot.ndim < ul.ndim:
+            nu_tot = nu_tot[..., jnp.newaxis]
+        return nu_tot * ul
+
+    @staticmethod
+    @jax.jit
+    def turbulent_viscous_acceleration_k_epsilon(u_laplacian, nu_molecular, C_mu, k, epsilon, eps0):
+        r"""Same as :meth:`turbulent_viscous_acceleration_k_omega` but :math:`\nu_t=C_\mu k^2/(\varepsilon+\varepsilon_0)`."""
+        nu_t = Models.k_epsilon_nu_t(C_mu, k, epsilon, eps0)
+        nu_tot = jnp.asarray(nu_molecular) + nu_t
+        ul = jnp.asarray(u_laplacian)
+        if nu_tot.ndim < ul.ndim:
+            nu_tot = nu_tot[..., jnp.newaxis]
+        return nu_tot * ul
+
+    @staticmethod
+    @jax.jit
+    def turbulent_viscous_acceleration_smagorinsky(u_laplacian, nu_molecular, Cs, Delta, strain_rate_magnitude):
+        """Same with Smagorinsky :math:`\nu_t`."""
+        nu_t = Models.smagorinsky_nu_t(Cs, Delta, strain_rate_magnitude)
+        nu_tot = jnp.asarray(nu_molecular) + nu_t
+        ul = jnp.asarray(u_laplacian)
+        if nu_tot.ndim < ul.ndim:
+            nu_tot = nu_tot[..., jnp.newaxis]
+        return nu_tot * ul
+
+    @staticmethod
+    @jax.jit
+    def turbulent_viscous_acceleration_compressible_k_omega(rho, u_laplacian, nu_molecular, k, omega, omega0):
+        return jnp.asarray(rho)[..., jnp.newaxis] * Models.turbulent_viscous_acceleration_k_omega(
+            u_laplacian, nu_molecular, k, omega, omega0
+        )
+
+    @staticmethod
+    @jax.jit
+    def turbulent_viscous_acceleration_compressible_k_epsilon(rho, u_laplacian, nu_molecular, C_mu, k, epsilon, eps0):
+        return jnp.asarray(rho)[..., jnp.newaxis] * Models.turbulent_viscous_acceleration_k_epsilon(
+            u_laplacian, nu_molecular, C_mu, k, epsilon, eps0
+        )
+
+    @staticmethod
+    @jax.jit
+    def turbulent_viscous_acceleration_compressible_smagorinsky(
+        rho, u_laplacian, nu_molecular, Cs, Delta, strain_rate_magnitude
+    ):
+        return jnp.asarray(rho)[..., jnp.newaxis] * Models.turbulent_viscous_acceleration_smagorinsky(
+            u_laplacian, nu_molecular, Cs, Delta, strain_rate_magnitude
+        )
+
+    @staticmethod
+    @jax.jit
     def orifice_flow(Cd, A, dp, rho):
         """
         Volumetric flow rate through an orifice or restriction.

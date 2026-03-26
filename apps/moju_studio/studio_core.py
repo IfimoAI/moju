@@ -155,7 +155,7 @@ def preflight_engine(
     outputs**, and **law-FD derivables** so preflight matches what ``compute_residuals`` can fill.
     """
     req_s = engine.required_state_keys()
-    req_d = engine.required_derivative_keys()
+    req_d: Set[str] = set()
     miss_s = sorted(k for k in req_s if k not in state_keys)
     miss_d = sorted(k for k in req_d if k not in state_keys)
     return miss_s, miss_d

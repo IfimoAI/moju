@@ -25,7 +25,7 @@ def test_build_fragment_laplace_only():
     assert d["scaling_audit"] == []
 
 
-def test_build_fragment_thermal_diffusivity_predicted_spatial():
+def test_build_fragment_thermal_diffusivity_audit_minimal():
     d = build_studio_auto_fragment(
         law_names=[],
         model_names=["thermal_diffusivity"],
@@ -36,27 +36,10 @@ def test_build_fragment_thermal_diffusivity_predicted_spatial():
     ca = d["constitutive_audit"][0]
     assert ca["name"] == "thermal_diffusivity"
     assert ca["output_key"] == "alpha"
-    assert set(ca["predicted_spatial"]) == {"k", "rho", "cp"}
-
-
-def test_fo_scaling_audit_excludes_mesh_coords_from_chain_lists():
-    """Avoid ``d_fo_dt`` on coordinate ``t`` when ``t`` is in NPZ keys."""
-    d = build_studio_auto_fragment(
-        law_names=[],
-        model_names=[],
-        group_names=["fo"],
-        pred_keys={"alpha", "t", "L", "x", "T"},
-        constant_keys=set(),
-    )
-    sa = next(s for s in d["scaling_audit"] if s["name"] == "fo")
-    assert "t" not in sa["predicted_temporal"]
-    assert "t" not in sa["predicted_spatial"]
-    assert "x" not in sa["predicted_spatial"]
-    assert "alpha" in sa["predicted_temporal"]
+    assert "predicted_spatial" not in ca
 
 
 def test_user_selected_fo_group_output_key_matches_law_fo():
-    """``fo`` must stay lowercase so laws and implied groups agree; avoid requiring ``Fo`` in NPZ."""
     d = build_studio_auto_fragment(
         law_names=[],
         model_names=[],
@@ -88,8 +71,7 @@ def test_allowlists_non_empty():
     assert "thermal_diffusivity" in STUDIO_MODEL_NAMES
 
 
-def test_fourier_implied_scaling_audit_fd_on_composition_when_T_in_pred():
-    """Implied ``fo`` scaling audit enables spatial chain without ``d_fo_dx`` in NPZ."""
+def test_fourier_law_linked_implied_no_chain_fields():
     d = build_studio_auto_fragment(
         law_names=["fourier_conduction"],
         model_names=[],
@@ -102,53 +84,7 @@ def test_fourier_implied_scaling_audit_fd_on_composition_when_T_in_pred():
     assert len(ca) == 1
     assert "law_fourier_conduction" in ca[0].get("residual_basename", "")
     assert ca[0].get("implied_fn") is not None
-    assert "alpha" in ca[0].get("predicted_spatial", [])
-    sa = [s for s in d["scaling_audit"] if s.get("name") == "fo"]
-    assert len(sa) == 1
-    assert sa[0]["chain_output"] == "fd_on_composition"
-    assert "alpha" in sa[0]["predicted_spatial"]
-
-
-def test_fourier_T_in_pred_adds_alpha_to_predicted_spatial_for_fo_chain():
-    d = build_studio_auto_fragment(
-        law_names=["fourier_conduction"],
-        model_names=[],
-        group_names=[],
-        pred_keys={"T", "x", "t", "L"},
-        constant_keys=set(),
-    )
-    sa = next(s for s in d["scaling_audit"] if s["name"] == "fo")
-    assert "alpha" in sa["predicted_spatial"]
-    assert sa["chain_output"] == "fd_on_composition"
-
-
-def test_fourier_law_td_no_alpha_in_pred_skips_constitutive_chain_patch():
-    d = build_studio_auto_fragment(
-        law_names=["fourier_conduction"],
-        model_names=[],
-        group_names=[],
-        pred_keys={"T", "x", "t", "L"},
-        constant_keys=set(),
-    )
-    ca = next(s for s in d["constitutive_audit"] if s.get("name") == "thermal_diffusivity")
-    assert "alpha" not in ca.get("predicted_spatial", [])
-
-
-def test_fourier_user_thermal_diffusivity_model_skips_law_chain_patch():
-    d = build_studio_auto_fragment(
-        law_names=["fourier_conduction"],
-        model_names=["thermal_diffusivity"],
-        group_names=[],
-        pred_keys={"T", "x", "t", "L", "alpha", "k", "rho", "cp"},
-        constant_keys=set(),
-    )
-    law_rows = [
-        s
-        for s in d["constitutive_audit"]
-        if s.get("name") == "thermal_diffusivity" and "law_fourier_conduction" in s.get("residual_basename", "")
-    ]
-    assert len(law_rows) == 1
-    assert "alpha" not in law_rows[0].get("predicted_spatial", [])
+    assert "predicted_spatial" not in ca[0]
 
 
 def test_studio_includes_law_linked_implied_for_supported_laws():

@@ -84,7 +84,6 @@ def main(n: int = 200, noise: float = 0.05, smooth_window: int = 9, export_dir: 
                 name="pe",
                 output_key="Pe",
                 state_map={"re": "Re", "pr": "Pr"},
-                predicted_spatial=["Re"],
                 closure_mode="weak",
                 quadrature_weights={"x": "w_x"},
             )

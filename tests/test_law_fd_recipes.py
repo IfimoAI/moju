@@ -55,6 +55,41 @@ class TestFillLawFdLaplace:
         assert jnp.allclose(out["phi_laplacian"][1:-1], expect[1:-1], rtol=1e-3, atol=1e-3)
 
 
+class TestSchrodingerLawFd:
+    def test_psi_laplacian_includes_L2_factor(self, rtol, atol):
+        """FD Laplacian is multiplied by L**2 for schrodinger_steady (L from merged state)."""
+        L = jnp.array(2.0)
+        x = jnp.linspace(0.0, 1.0, 65)
+        psi = jnp.sin(jnp.pi * x)
+        state = {"psi": psi, "x": x, "L": L}
+        laws = [
+            {"name": "schrodinger_steady", "state_map": {"psi_laplacian": "psi_laplacian"}}
+        ]
+        out, w = fill_law_fd_from_primitives(
+            state,
+            laws,
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+        )
+        assert "psi_laplacian" in out, w
+        expect = (L**2) * (-(jnp.pi**2)) * psi
+        assert jnp.allclose(out["psi_laplacian"][1:-1], expect[1:-1], rtol=1e-2, atol=1e-2)
+
+    def test_psi_laplacian_skipped_without_L(self):
+        x = jnp.linspace(0.0, 1.0, 33)
+        psi = jnp.sin(jnp.pi * x)
+        state = {"psi": psi, "x": x}
+        laws = [
+            {"name": "schrodinger_steady", "state_map": {"psi_laplacian": "psi_laplacian"}}
+        ]
+        out, w = fill_law_fd_from_primitives(
+            state,
+            laws,
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+        )
+        assert out.get("psi_laplacian") is None
+        assert any("need L" in s for s in w)
+
+
 class TestFillPathBWithLawRecipes:
     def test_fill_path_b_derivatives_law_flag(self, rtol, atol):
         x = jnp.linspace(0.0, 1.0, 33)

@@ -10,6 +10,7 @@ from moju.monitor.auditor import (
     list_scaling_closure_ids,
     visualize,
 )
+from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
 from moju.monitor.config import AuditSpec, MonitorConfig, audit_spec_to_engine_dict
 from moju.monitor.derived_state_chain import (
     apply_derived_state_chain,
@@ -29,6 +30,7 @@ from moju.monitor.law_implied_diagnostics import (
     merge_law_implied_audit_specs,
 )
 from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
+from moju.monitor.closure_registry import apply_closure_discrepancy_normalize
 from moju.monitor.pi_constant_recipes import list_pi_constant_group_names
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
 
@@ -57,7 +59,9 @@ __all__ = [
     "list_laws_with_implied_diagnostics",
     "merge_law_implied_audit_specs",
     "merge_fragment_law_implied_audit_specs",
+    "apply_closure_discrepancy_normalize",
     "list_pi_constant_group_names",
     "pretty_residual_key",
     "pretty_category_name",
+    "build_spatial_rnorm_panels_from_residuals",
 ]

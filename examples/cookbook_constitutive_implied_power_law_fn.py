@@ -8,7 +8,7 @@ For ``Models.power_law_mu``, shear stress for the power-law fluid is
 
 Here ``implied_fn(merged_state, constants)`` returns ``tau_effective / gamma_dot``.
 If your network predicts a different ``tau_effective`` than the consistent stress,
-``implied_delta`` becomes non-zero.
+the **nondimensional** ``implied_delta`` becomes non-zero.
 
 ``implied_fn`` is **not** JSON-serializable; ``MonitorConfig.to_dict()`` omits it.
 ``ResidualEngine`` restores it from the ``AuditSpec`` object when loading ``MonitorConfig``.
@@ -56,8 +56,6 @@ def main() -> Dict[str, Any]:
                 name="power_law_mu",
                 output_key="mu",
                 state_map={"gamma_dot": "gamma_dot", "K": "K", "n": "n"},
-                predicted_spatial=[],
-                predicted_temporal=[],
                 implied_fn=_implied_mu_from_tau,
             )
         ],

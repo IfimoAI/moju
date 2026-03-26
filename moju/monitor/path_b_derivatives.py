@@ -1,24 +1,18 @@
 """
-Opt-in finite-difference fill for Path B monitor derivative keys (d_<field>_dx, _dy, _dz, _dt).
+Opt-in finite-difference fill for Path B: **law** inputs (gradients, Laplacians, etc.).
 
-Does not overwrite existing non-None entries in ``state_pred``. Use with structured grids;
-see ``PathBGridConfig`` for layout and dimension conventions.
+When ``fill_law_recipes`` is True, fills registered ``Laws.*`` arguments via
+``law_fd_recipes``. Does not overwrite existing non-None entries in ``state_pred``.
+Use with structured grids; see ``PathBGridConfig`` for layout conventions.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import jax
 import jax.numpy as jnp
-
-from moju.monitor.derivative_keys import collect_audit_derivative_keys, derivative_state_key
-
-_DERIV_KEY_RE = re.compile(r"^d_(.+)_((?:dx|dy|dz)|dt)$")
-_SUFFIX_TO_DERIV = {"dx": "x", "dy": "y", "dz": "z", "dt": "t"}
-
 
 @dataclass(frozen=True)
 class PathBGridConfig:
@@ -44,17 +38,6 @@ class PathBGridConfig:
 def _merged(state: Dict[str, Any], constants: Dict[str, Any]) -> Dict[str, Any]:
     """Constants first, then ``state`` — prediction / NPZ fields must not be masked by constants."""
     return {**constants, **state}
-
-
-def _parse_deriv_key(key: str) -> Optional[Tuple[str, str]]:
-    m = _DERIV_KEY_RE.match(key)
-    if not m:
-        return None
-    field, suf = m.group(1), m.group(2)
-    deriv = _SUFFIX_TO_DERIV.get(suf)
-    if deriv is None:
-        return None
-    return field, deriv
 
 
 def _get_coord(
@@ -517,47 +500,19 @@ def fill_path_b_derivatives(
     fill_law_recipes: bool = False,
 ) -> Tuple[Dict[str, Any], List[str]]:
     """
-    Fill missing monitor derivative keys using finite differences.
-
-    When ``fill_law_recipes`` is True and ``laws_spec`` is non-empty, also fills **registered**
+    When ``fill_law_recipes`` is True and ``laws_spec`` is non-empty, fills **registered**
     ``Laws.*`` inputs (gradients, Laplacians, time derivatives) from primitive fields on the
     same grid; see ``moju.monitor.law_fd_recipes``.
 
-    Returns ``(new_state, warnings)``. Skips any key already present with a **non-None** value.
+    ``constitutive_audit`` / ``scaling_audit`` are accepted for API compatibility but are not
+    used for finite-difference fill.
+
+    Returns ``(new_state, warnings)``.
     """
     cfg = grid or PathBGridConfig()
     c = dict(constants or {})
     state: Dict[str, Any] = dict(state_pred) if copy else state_pred
-    m = _merged(state, c)
-
-    spatial_needed, temporal_needed = collect_audit_derivative_keys(
-        list(constitutive_audit), list(scaling_audit)
-    )
     warnings: List[str] = []
-
-    for key in sorted(spatial_needed | temporal_needed):
-        if state.get(key) is not None:
-            continue
-        parsed = _parse_deriv_key(key)
-        if parsed is None:
-            continue
-        field, deriv = parsed
-        Kraw = m.get(field)
-        if Kraw is None:
-            warnings.append(f"skip {key}: field {field!r} missing")
-            continue
-        K = jnp.asarray(Kraw)
-        try:
-            if deriv == "t":
-                arr = _fill_temporal_derivative(K, cfg, m, warnings)
-            else:
-                arr = _fill_spatial_derivative(K, deriv, cfg, m, warnings)
-        except Exception as e:  # noqa: BLE001
-            warnings.append(f"{key}: {e}")
-            arr = None
-        if arr is not None:
-            state[key] = arr
-            m[key] = arr
 
     if fill_law_recipes and laws_spec:
         from moju.monitor.law_fd_recipes import fill_law_fd_from_primitives
