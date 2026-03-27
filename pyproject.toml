@@ -32,7 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 units = ["pint>=0.20"]
-viz = ["matplotlib>=3.5.0", "plotly>=5.18.0"]
+viz = ["plotly>=5.18.0"]
 studio = ["streamlit>=1.33.0", "plotly>=5.18.0"]
 studio-science = ["h5py>=3.8.0", "xarray>=2023.1.0", "netCDF4>=1.6.0"]
 dev = ["pytest", "black", "ruff"]

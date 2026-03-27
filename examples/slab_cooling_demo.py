@@ -1,11 +1,25 @@
 #!/usr/bin/env python3
 """
-Transient cooling of an aluminum slab with convection (1D).
+Transient cooling of an aluminum slab (1D).
 
-  - PDE: rho(T)*cp*T_t = k(T)*T_xx; audit uses Laws.fourier_conduction.
-  - Monitor: this demo focuses on governing-law residuals (Laws.fourier_conduction).
-    See `examples/monitor_chain_spatial_demo.py` and `examples/monitor_chain_temporal_demo.py`
-    for the new Model/Group chain-closure audits.
+  - Training PDE (interior): T_t - alpha(x,t) T_xx = 0 with alpha = k(T)/(rho(T)*cp) [m^2/s].
+  - Moju law: ``Laws.fourier_conduction`` is the same balance written as
+    T_t - (Fo*L^2/t) T_xx = 0 with Fo = alpha*t/L^2 (``Groups.fo``). Use **physical** T_t, T_xx,
+    t [s], L [m], and alpha [m^2/s] so this matches the training residual.
+
+  - Law-linked implied audit (default ``law_implied_audits=True``): compares
+    ``Models.thermal_diffusivity(k, rho, cp)`` to alpha_implied = T_t/T_xx from the same fields.
+    If those numbers disagree, check that T_t and T_xx are the same derivatives you use in the
+    PDE (SI-consistent), not a different nondimensionalization. See ``docs/law_implied_audits.md``.
+
+  - Scaling audits (Fo ``ref_delta``) only run when ``state_ref`` is passed; this demo omits
+    them and relies on laws + groups + constitutive implied rows only.
+
+  - **Training loss:** Interior collocation only (no explicit initial/boundary penalties in the
+    objective). **Normalization:** inputs :math:`\\tau=(t-t_{\\min})/(t_{\\max}-t_{\\min})`,
+    :math:`\\xi=x/L`; network predicts :math:`\\theta\\in(0,1)` with ``sigmoid``, and
+    :math:`T=T_\\infty+(T_i-T_\\infty)\\theta`. The interior PDE residual is scaled so the loss is
+    :math:`O(1)` at initialization.
 
 Run: pip install moju[report] && python examples/slab_cooling_demo.py
 """
@@ -23,9 +37,9 @@ L = 0.02
 k_solid = 200.0
 rho_ref = 2700.0
 cp = 900.0
-h = 500.0
 T_inf = 300.0
 T_i = 500.0
+t_min = 1.0
 t_max = 60.0
 
 
@@ -47,17 +61,51 @@ def mlp(params, tx):
     return h @ out["W"].T + out["b"]
 
 
-def scalar_field(params, t, x):
+def k_model(T):
+    T_ref = (T_i + T_inf) / 2.0
+    return k_solid * (1.0 + 0.001 * (T - T_ref))
+
+
+def rho_model(T):
+    T_ref = (T_i + T_inf) / 2.0
+    return rho_ref * (1.0 - 0.0001 * (T - T_ref))
+
+
+_delta_T = T_i - T_inf
+_T_mid = (T_i + T_inf) / 2.0
+_alpha_mid = k_model(_T_mid) / (rho_model(_T_mid) * cp)
+_pde_residual_scale = _delta_T * max(1.0 / (t_max - t_min), float(_alpha_mid / (L**2)))
+
+
+def _coords_norm(t, x):
+    """Map physical (t, x) to normalized inputs ``(tau, xi)`` for the MLP."""
     t = jnp.asarray(t)
     x = jnp.asarray(x)
+    dt = t_max - t_min
     if t.ndim == 0 and x.ndim == 1:
-        tx = jnp.concatenate([jnp.broadcast_to(t, x.shape[:-1] + (1,)), x], axis=-1)
+        tau = jnp.broadcast_to((t - t_min) / dt, x.shape[:-1] + (1,))
+        xi = x / L
     elif t.ndim == 1 and x.ndim == 2:
-        tx = jnp.concatenate([t[:, None], x], axis=-1)
+        tau = ((t - t_min) / dt)[:, None]
+        xi = x / L
     else:
-        tx = jnp.concatenate([jnp.broadcast_to(t, x.shape[:-1] + (1,)), x], axis=-1)
-    out = mlp(params, tx)[..., 0]
+        tau = jnp.broadcast_to((t - t_min) / dt, x.shape[:-1] + (1,))
+        xi = x / L
+    return jnp.concatenate([tau, xi], axis=-1)
+
+
+def theta_field(params, t, x):
+    """Dimensionless temperature :math:`\\theta=(T-T_\\infty)/(T_i-T_\\infty)` in (0, 1)."""
+    tx = _coords_norm(t, x)
+    raw = mlp(params, tx)[..., 0]
+    out = jax.nn.sigmoid(raw)
     return jnp.squeeze(out) if out.ndim > 0 and out.size == 1 else out
+
+
+def scalar_field(params, t, x):
+    theta = theta_field(params, t, x)
+    T = T_inf + _delta_T * theta
+    return jnp.squeeze(T) if T.ndim > 0 and T.size == 1 else T
 
 
 def T_t_batch(params, t, x):
@@ -83,16 +131,6 @@ def T_x_batch(params, t, x):
     return jax.vmap(body)(t, x)
 
 
-def k_model(T):
-    T_ref = (T_i + T_inf) / 2.0
-    return k_solid * (1.0 + 0.001 * (T - T_ref))
-
-
-def rho_model(T):
-    T_ref = (T_i + T_inf) / 2.0
-    return rho_ref * (1.0 - 0.0001 * (T - T_ref))
-
-
 def physics_loss_interior(params, t, x):
     T = scalar_field(params, t, x)
     kappa = k_model(T)
@@ -101,27 +139,38 @@ def physics_loss_interior(params, t, x):
     return T_t_batch(params, t, x) - alpha_loc * T_xx_batch(params, t, x)
 
 
-def loss_fn(params, t, x):
-    return jnp.mean(physics_loss_interior(params, t, x) ** 2)
+def make_loss_fn(t_int, x_int):
+    """Mean squared scaled interior PDE residual only (no IC/BC terms)."""
+
+    def loss_fn(params):
+        r_int = physics_loss_interior(params, t_int, x_int) / _pde_residual_scale
+        return jnp.mean(r_int**2)
+
+    return loss_fn
 
 
-@jax.jit
-def train_step(params, opt_state, t, x):
-    loss, grads = jax.value_and_grad(loss_fn)(params, t, x)
-    updates, opt_state = optimizer.update(grads, opt_state)
-    params = optax.apply_updates(params, updates)
-    return params, opt_state, loss
+def make_train_step(loss_fn):
+    """Return a jitted step that closes over ``loss_fn`` (uses module-level ``optimizer``)."""
+
+    @jax.jit
+    def train_step(params, opt_state):
+        loss, grads = jax.value_and_grad(loss_fn)(params)
+        updates, opt_state = optimizer.update(grads, opt_state)
+        params = optax.apply_updates(params, updates)
+        return params, opt_state, loss
+
+    return train_step
 
 
 engine = ResidualEngine(
-    constants={"cp": cp, "h": h},
+    constants={"cp": cp},
     laws=[
         {
             "name": "fourier_conduction",
             "state_map": {
                 "T_t": "T_t",
                 "T_laplacian": "T_xx",
-                "fo": "Fo",
+                "fo": "fo",
                 "t": "t",
                 "L": "L",
             },
@@ -132,27 +181,8 @@ engine = ResidualEngine(
         {
             "name": "fo",
             "state_map": {"alpha": "alpha", "t": "t", "L": "L"},
-            "output_key": "Fo",
+            "output_key": "fo",
             "fn": Groups.fo,
-        },
-        {
-            "name": "bi",
-            "state_map": {"h": "h", "L": "L", "k_solid": "kappa"},
-            "output_key": "Bi",
-            "fn": Groups.bi,
-        },
-    ],
-    # Law-linked implied audit adds thermal_diffusivity vs α from T_t / T_xx (see law_implied_diagnostics).
-    scaling_audit=[
-        {
-            "name": "fo",
-            "output_key": "Fo",
-            "state_map": {"alpha": "alpha", "t": "t", "L": "L"},
-        },
-        {
-            "name": "bi",
-            "output_key": "Bi",
-            "state_map": {"h": "h", "L": "L", "k_solid": "kappa"},
         },
     ],
 )
@@ -167,24 +197,9 @@ def build_state_for_engine(params, t, x):
     rho = rho_model(T)
     alpha = kappa / (rho * cp)
     Lb = jnp.broadcast_to(L, t.shape)
-    hb = jnp.broadcast_to(h, t.shape)
-    # Derivatives for Model/Group chain audits.
-    dk_dT = 0.001 * k_solid
-    drho_dT = -0.0001 * rho_ref
-    d_k_dx = dk_dT * T_x
-    d_k_dt = dk_dT * T_t
-    d_rho_dx = drho_dT * T_x
-    d_rho_dt = drho_dT * T_t
-    d_alpha_dx = (1.0 / (rho * cp)) * d_k_dx - (kappa / (rho**2 * cp)) * d_rho_dx
-    d_alpha_dt = (1.0 / (rho * cp)) * d_k_dt - (kappa / (rho**2 * cp)) * d_rho_dt
-    d_t_dt = jnp.ones_like(t)
-    # Fo = alpha*t/L^2, Bi = h*L/kappa
-    Fo = alpha * t / (Lb**2)
-    Bi = hb * Lb / kappa
-    d_Fo_dx = (t / (Lb**2)) * d_alpha_dx
-    d_Fo_dt = (t / (Lb**2)) * d_alpha_dt + (alpha / (Lb**2)) * d_t_dt
-    d_Bi_dx = -(hb * Lb / (kappa**2)) * d_k_dx
-    d_Bi_dt = -(hb * Lb / (kappa**2)) * d_k_dt
+    cp_b = jnp.broadcast_to(cp, t.shape)
+    # fo = alpha*t/L^2 (dimensionless; same alpha as in PDE and Fourier law).
+    fo = alpha * t / (Lb**2)
     return {
         "T": T,
         "T_t": T_t,
@@ -194,24 +209,11 @@ def build_state_for_engine(params, t, x):
         "L": Lb,
         "kappa": kappa,
         "rho": rho,
+        "cp": cp_b,
         "alpha": alpha,
         "k": kappa,
         "k_solid": kappa,
-        "h": hb,
-        # Derivative convention for chain closures
-        "d_k_dx": d_k_dx,
-        "d_k_dt": d_k_dt,
-        "d_rho_dx": d_rho_dx,
-        "d_rho_dt": d_rho_dt,
-        "d_alpha_dx": d_alpha_dx,
-        "d_alpha_dt": d_alpha_dt,
-        "d_t_dt": d_t_dt,
-        "Fo": Fo,
-        "Bi": Bi,
-        "d_Fo_dx": d_Fo_dx,
-        "d_Fo_dt": d_Fo_dt,
-        "d_Bi_dx": d_Bi_dx,
-        "d_Bi_dt": d_Bi_dt,
+        "fo": fo,
     }
 
 
@@ -226,17 +228,20 @@ optimizer = optax.adam(1e-3)
 if __name__ == "__main__":
     key = jax.random.PRNGKey(0)
     n_t, n_x = 32, 24
-    t_flat = jnp.linspace(1.0, t_max, n_t)
+    t_flat = jnp.linspace(t_min, t_max, n_t)
     x_flat = jnp.linspace(0.0, L, n_x)
     t_col, x_col = jnp.meshgrid(t_flat, x_flat, indexing="ij")
     t_col = t_col.reshape(-1)
     x_col = x_col.reshape(-1, 1)
 
+    loss_fn = make_loss_fn(t_col, x_col)
+    train_step = make_train_step(loss_fn)
+
     params = init_mlp(key, [2, 48, 48, 1])
     opt_state = optimizer.init(params)
 
     for step in range(1500):
-        params, opt_state, loss = train_step(params, opt_state, t_col, x_col)
+        params, opt_state, loss = train_step(params, opt_state)
         if step % 150 == 0:
             law_loss = monitor_with_engine(params, t_col, x_col)
             print(f"step {step:4d}  loss={float(loss):.3e}  law_loss(engine)={float(law_loss):.3e}")
@@ -255,7 +260,11 @@ if __name__ == "__main__":
     print("Overall admissibility score:", report["overall_admissibility_score"])
     print("Overall admissibility level:", report["overall_admissibility_level"])
 
-    fig = visualize(engine.log, backend="matplotlib", engine=engine)
+    fig = visualize(engine.log, engine=engine)
     if fig is not None:
-        fig.savefig("slab_cooling_diagnostics.png", dpi=150, bbox_inches="tight")
-        print("Saved slab_cooling_diagnostics.png")
+        if hasattr(fig, "write_html"):
+            fig.write_html("slab_cooling_diagnostics.html")
+            print("Saved slab_cooling_diagnostics.html")
+        else:
+            fig.savefig("slab_cooling_diagnostics.png", dpi=150, bbox_inches="tight")
+            print("Saved slab_cooling_diagnostics.png")

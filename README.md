@@ -180,7 +180,7 @@ Optional extras:
 - `pip install moju[ref_foam]` — OpenFOAM snapshot loaders (meshio).
 - `pip install moju[ref_hdf5]` — HDF5 loaders (h5py).
 - `pip install moju[report]` — PDF Physics Admissibility Report from `audit(..., export_dir=...)`.
-- `pip install moju[viz]` — matplotlib + plotly for **`visualize(engine.log, backend="matplotlib"|"plotly")`**, with `mode="training"|"test"`, optional **`spatial_law_panel`**, **`step_label`**, **`r_norm_scale="log"|"linear"`** (default log on the three training category R_norm panels), **`figure_title`**, and **`ResidualEngine.clear_log()`** between runs. Pass **`keys=[...]`** or **`r_ref=...`** to subset or rescale like `audit`.
+- `pip install moju[viz]` — **plotly** for **`visualize(engine.log, backend="plotly"|"none")`** (default **`plotly`**), with `mode="training"|"test"`, optional **`spatial_law_panel`**, **`step_label`**, **`r_norm_scale="log"|"linear"`** (default log on the three training category R_norm panels), **`figure_title`**, and **`ResidualEngine.clear_log()`** between runs. Pass **`keys=[...]`** or **`r_ref=...`** to subset or rescale like `audit`.
 - `pip install moju[studio]` — Streamlit + Plotly for **Moju Studio** (`streamlit run apps/moju_studio/Home.py` from a source checkout; see `apps/moju_studio/README.md`).
 - `pip install moju[studio-science]` — optional **HDF5 / NetCDF** state uploads in Studio (`h5py`, `xarray`, `netCDF4`); `.npz` / `.npy` work with `studio` alone.
 
@@ -191,7 +191,7 @@ Optional extras:
 | OpenFOAM reference | `ref_foam` | `pip install moju[ref_foam]` |
 | HDF5 reference | `ref_hdf5` | `pip install moju[ref_hdf5]` |
 | PDF report export | `report` | `pip install moju[report]` |
-| Matplotlib / Plotly dashboards | `viz` | `pip install moju[viz]` |
+| Plotly monitoring dashboards | `viz` | `pip install moju[viz]` |
 | Moju Studio (Streamlit) | `studio` | `pip install moju[studio]` |
 | Studio HDF5 / NetCDF uploads | `studio-science` | `pip install moju[studio-science]` |
 | PyTorch ↔ JAX law bridge | `torch` | `pip install moju[torch]` |
@@ -214,7 +214,7 @@ Moju does not define physics. Moju provides a structured way to **enforce** and 
 
 ## Learn more
 
-**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, `MonitorConfig`, `AuditSpec`, `audit_spec_to_engine_dict`, `PathBGridConfig`, `fill_path_b_derivatives`, `fill_law_fd_from_primitives`, `list_law_fd_supported_laws`, **`merge_law_implied_audit_specs`**, **`list_laws_with_implied_diagnostics`**, **`law_implied_unsupported_reasons`**, **`effective_audit_specs_for_fragment`**, build_loss, audit, **`visualize(..., backend="matplotlib"|"plotly"|"none", mode="training"|"test", spatial_law_panel=..., r_norm_scale=...)`** for training/test dashboards, `pretty_residual_key` / `pretty_category_name` for display). Law-linked implied rows follow a strict constitutive-only policy; use `law_implied_unsupported_reasons()` for laws pending constitutive target/model support. Constitutive/scaling closure keys include `ref_delta`, `implied_delta`, and scaling `pi_constant` when configured. Path B optional FD: `compute_residuals(..., auto_path_b_derivatives=...)` with `fill_law_fd=True` fills missing **registered** `Laws.*` inputs on structured grids. Use `engine.required_state_keys()` for introspection.
+**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, `MonitorConfig`, `AuditSpec`, `audit_spec_to_engine_dict`, `PathBGridConfig`, `fill_path_b_derivatives`, `fill_law_fd_from_primitives`, `list_law_fd_supported_laws`, **`merge_law_implied_audit_specs`**, **`list_laws_with_implied_diagnostics`**, **`law_implied_unsupported_reasons`**, **`effective_audit_specs_for_fragment`**, build_loss, audit, **`visualize(..., backend="plotly"|"none", mode="training"|"test", spatial_law_panel=..., r_norm_scale=...)`** for training/test dashboards, `pretty_residual_key` / `pretty_category_name` for display). Law-linked implied rows follow a strict constitutive-only policy; use `law_implied_unsupported_reasons()` for laws pending constitutive target/model support. Constitutive/scaling closure keys include `ref_delta`, `implied_delta`, and scaling `pi_constant` when configured. Path B optional FD: `compute_residuals(..., auto_path_b_derivatives=...)` with `fill_law_fd=True` fills missing **registered** `Laws.*` inputs on structured grids. Use `engine.required_state_keys()` for introspection.
 
 **Examples**
 

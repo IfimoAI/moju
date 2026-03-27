@@ -348,13 +348,21 @@ class TestAudit:
 
 class TestVisualize:
     def test_visualize_empty_log_returns_none(self):
-        assert visualize([], backend="matplotlib") is None
+        assert visualize([], backend="plotly") is None
 
     def test_visualize_backend_none_returns_none(self):
         assert visualize([{"index": 0, "rms": {"k": 1.0}}], backend="none") is None
 
+    def test_visualize_matplotlib_backend_raises(self):
+        with pytest.raises(ValueError, match="matplotlib"):
+            visualize([{"index": 0, "rms": {"k": 1.0}, "scale": {}}], backend="matplotlib")
+
+    def test_visualize_unknown_backend_raises(self):
+        with pytest.raises(ValueError, match="Unknown visualize backend"):
+            visualize([{"index": 0, "rms": {"k": 1.0}, "scale": {}}], backend="not_a_backend")
+
     def test_visualize_multi_panel_figure(self):
-        pytest.importorskip("matplotlib")
+        pytest.importorskip("plotly")
         log = [
             {
                 "index": 0,
@@ -379,16 +387,13 @@ class TestVisualize:
                 "scale": {},
             },
         ]
-        fig = visualize(log, backend="matplotlib", mode="training")
+        fig = visualize(log, mode="training")
         assert fig is not None
-        # Training: top row + R_norm vs step lines + spatial R_norm row (two columns)
-        assert len(fig.axes) >= 6
-        from matplotlib.projections.polar import PolarAxes
-
-        assert not any(isinstance(ax, PolarAxes) for ax in fig.axes)
+        assert hasattr(fig, "data")
+        assert len(fig.data) >= 7
 
     def test_visualize_r_norm_scale_linear(self):
-        pytest.importorskip("matplotlib")
+        pytest.importorskip("plotly")
         log = [
             {
                 "index": 0,
@@ -409,10 +414,7 @@ class TestVisualize:
                 "scale": {},
             },
         ]
-        fig = visualize(log, backend="matplotlib", mode="training", r_norm_scale="linear")
-        assert fig is not None
-        pytest.importorskip("plotly")
-        fig_p = visualize(log, backend="plotly", mode="training", r_norm_scale="linear")
+        fig_p = visualize(log, mode="training", r_norm_scale="linear")
         assert fig_p is not None
 
     def test_build_monitor_visualize_bundle_and_studio_plotly_cards(self):
@@ -464,6 +466,13 @@ class TestVisualize:
         assert f1 is not None and f2 is not None
         assert f1.layout.height == MOJU_STUDIO_DASHBOARD_CARD_HEIGHT
         assert f2.layout.height == MOJU_STUDIO_DASHBOARD_CARD_HEIGHT
+        law_bar = next((t for t in f1.data if getattr(t, "type", None) == "bar"), None)
+        assert law_bar is not None
+        marker_color = getattr(getattr(law_bar, "marker", None), "color", None)
+        if isinstance(marker_color, (list, tuple)):
+            assert all(c == "#7e57c2" for c in marker_color)
+        else:
+            assert marker_color == "#7e57c2"
         f3 = build_plotly_spatial_rnorm_heatmap_card(bundle["spatial"], colorscale="Jet")
         f4 = build_plotly_spatial_rnorm_heatmap_card(bundle["spatial_rnorm"], colorscale="Jet")
         assert f3 is not None and f4 is not None
@@ -526,16 +535,17 @@ class TestVisualize:
         assert "values" in rn_p and any(k.startswith("constitutive/") for k in (rn_p.get("values") or {}))
 
     def test_visualize_test_mode_uses_last_log_entry(self):
-        pytest.importorskip("matplotlib")
+        pytest.importorskip("plotly")
         log = [
             {"index": 0, "rms": {"laws/a": 10.0}, "scale": {"laws/a": 1.0}},
             {"index": 1, "rms": {"laws/a": 0.1}, "scale": {"laws/a": 1.0}},
         ]
-        fig = visualize(log, backend="matplotlib", mode="test")
+        fig = visualize(log, mode="test")
         assert fig is not None
+        assert hasattr(fig, "data")
 
-    def test_visualize_spatial_law_panel_matplotlib(self):
-        pytest.importorskip("matplotlib")
+    def test_visualize_spatial_law_panel_plotly(self):
+        pytest.importorskip("plotly")
         import numpy as np
 
         log = [
@@ -545,36 +555,16 @@ class TestVisualize:
         x = np.linspace(0, 1, 5)
         fig = visualize(
             log,
-            backend="matplotlib",
             mode="training",
             spatial_law_panel={"x": x, "values": {"a": np.ones(5) * 0.2}},
         )
         assert fig is not None
-        assert len(fig.axes) >= 6
+        assert len(fig.data) >= 7
+        hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
+        assert len(hm) >= 1
 
-    def test_visualize_matplotlib_training_top_axes_below_title_band(self):
-        """Reserved layout rect should keep the top row of axes out of the title strip."""
-        pytest.importorskip("matplotlib")
-        log = [
-            {
-                "index": 0,
-                "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5},
-                "scale": {},
-            },
-            {
-                "index": 1,
-                "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25},
-                "scale": {},
-            },
-        ]
-        fig = visualize(log, backend="matplotlib", mode="training")
-        assert fig is not None
-        assert fig.axes
-        max_y1 = max(ax.get_position().y1 for ax in fig.axes)
-        assert max_y1 < 0.94, f"expected axes below title band, got max y1={max_y1}"
-
-    def test_visualize_matplotlib_category_adm_bar_autoscale(self):
-        pytest.importorskip("matplotlib")
+    def test_visualize_category_adm_high_scores_plotly(self):
+        pytest.importorskip("plotly")
         log = [
             {
                 "index": 0,
@@ -587,14 +577,9 @@ class TestVisualize:
                 "scale": {"laws/a": 1.0, "constitutive/b": 1.0},
             },
         ]
-        fig = visualize(log, backend="matplotlib", mode="training")
+        fig = visualize(log, mode="training")
         assert fig is not None
-        ax_cat = next(
-            ax for ax in fig.axes if ax.get_title() and "Category admissibility" in ax.get_title()
-        )
-        x0, x1 = ax_cat.get_xlim()
-        assert x1 - x0 < 0.5
-        assert x1 <= 1.0 + 1e-6
+        assert len(fig.data) >= 5
 
     def test_build_visualize_bundle_category_training(self):
         from moju.monitor.auditor import _build_visualize_bundle
@@ -659,7 +644,7 @@ class TestVisualize:
         assert len(hm) >= 2
 
     def test_visualize_autofill_spatial_from_residuals(self):
-        pytest.importorskip("matplotlib")
+        pytest.importorskip("plotly")
         import numpy as np
 
         log = [
@@ -670,17 +655,16 @@ class TestVisualize:
         pred = {"x": x}
         fig = visualize(
             log,
-            backend="matplotlib",
             mode="training",
             residuals=residuals,
             state_pred=pred,
         )
         assert fig is not None
-        titled = " ".join(ax.get_title() for ax in fig.axes)
-        assert "spatial" in titled.lower()
+        hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
+        assert len(hm) >= 2
 
     def test_visualize_uses_engine_without_explicit_residuals(self):
-        pytest.importorskip("matplotlib")
+        pytest.importorskip("plotly")
 
         core = ResidualEngine(
             laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
@@ -690,13 +674,13 @@ class TestVisualize:
         core.compute_residuals(state_pred)
         log = list(core.log)
         assert log[-1].get("coord_snapshot")
-        fig = visualize(log, backend="matplotlib", mode="training", engine=core)
+        fig = visualize(log, mode="training", engine=core)
         assert fig is not None
-        titled = " ".join(ax.get_title() for ax in fig.axes)
-        assert "spatial" in titled.lower()
+        hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
+        assert len(hm) >= 1
 
     def test_visualize_uses_coord_snapshot_when_state_pred_empty(self):
-        pytest.importorskip("matplotlib")
+        pytest.importorskip("plotly")
         import numpy as np
 
         log = [
@@ -710,14 +694,13 @@ class TestVisualize:
         residuals = {"laws": {"a": np.ones(5) * 0.1}, "constitutive": {"m/c": np.ones(5) * 0.05}}
         fig = visualize(
             log,
-            backend="matplotlib",
             mode="training",
             residuals=residuals,
             state_pred={},
         )
         assert fig is not None
-        titled = " ".join(ax.get_title() for ax in fig.axes)
-        assert "spatial" in titled.lower()
+        hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
+        assert len(hm) >= 2
 
     def test_visualize_plotly_default_titles(self):
         pytest.importorskip("plotly")
@@ -785,24 +768,6 @@ class TestVisualize:
         assert fig is not None
         hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
         assert len(hm) == 2
-
-    def test_visualize_matplotlib_test_mode_dual_spatial_layout(self):
-        pytest.importorskip("matplotlib")
-        import numpy as np
-
-        log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}}]
-        x = np.linspace(0, 1, 5)
-        fig = visualize(
-            log,
-            backend="matplotlib",
-            mode="test",
-            spatial_law_panel={"x": x, "values": {"laws/a": np.ones(5) * 0.2}},
-            spatial_rnorm_panel={"x": x, "values": {"constitutive/m/c": np.ones(5) * 0.1}},
-        )
-        assert fig is not None
-        titled = [ax.get_title() for ax in fig.axes if ax.get_title()]
-        assert any("Governing" in t and "spatial" in t for t in titled)
-        assert any("Constitutive" in t and "spatial" in t for t in titled)
 
     def test_parse_spatial_law_panel_1d_2d_3d(self):
         import numpy as np
@@ -872,7 +837,7 @@ class TestVisualize:
         hm = next(t for t in fig.data if getattr(t, "type", None) == "heatmap")
         cb_title_obj = getattr(getattr(hm, "colorbar", None), "title", None)
         cb_title_text = getattr(cb_title_obj, "text", None)
-        assert cb_title_text == "Spatial |residual|"
+        assert cb_title_text == "log10(|residual| + ε)"
 
     def test_visualize_plotly_figure_title_override(self):
         pytest.importorskip("plotly")
@@ -882,6 +847,59 @@ class TestVisualize:
         ]
         fig = visualize(log, backend="plotly", mode="training", figure_title="Custom dashboard title")
         assert "Custom dashboard title" in (fig.layout.title.text or "")
+
+    def test_visualize_training_all_residuals_bar_and_category_colors(self):
+        pytest.importorskip("plotly")
+        log = [
+            {
+                "index": 0,
+                "rms": {
+                    "laws/fourier_conduction": 1.0,
+                    "constitutive/thermal_diffusivity/implied_delta": 0.5,
+                },
+                "scale": {},
+            },
+            {
+                "index": 1,
+                "rms": {
+                    "laws/fourier_conduction": 0.5,
+                    "constitutive/thermal_diffusivity/implied_delta": 0.25,
+                },
+                "scale": {},
+            },
+        ]
+        fig = visualize(log, backend="plotly", mode="training")
+        assert fig is not None
+
+        # Overall admissibility axis stays percentage with two decimals.
+        yaxes = [getattr(fig.layout, k) for k in dir(fig.layout) if k.startswith("yaxis")]
+        assert any(
+            getattr(getattr(ax, "title", None), "text", None) == "Admissibility (%)"
+            and getattr(ax, "tickformat", None) == ".2f%"
+            for ax in yaxes
+        )
+
+        # Vertical training residual bar includes constitutive implied residual too.
+        vbars = [t for t in fig.data if getattr(t, "type", None) == "bar" and getattr(t, "orientation", None) != "h"]
+        assert vbars
+        x_labels = [str(x) for x in (vbars[0].x or [])]
+        assert any("Fourier Conduction" in x for x in x_labels)
+        assert any("Thermal diffusivity (implied)" in x for x in x_labels)
+
+        xaxes = [getattr(fig.layout, k) for k in dir(fig.layout) if k.startswith("xaxis")]
+        assert any(getattr(getattr(ax, "title", None), "text", None) == "All Residuals" for ax in xaxes)
+
+        # Color mapping: laws=purple, constitutive=teal on non-overall residual traces.
+        color_by_name = {}
+        for tr in fig.data:
+            if getattr(tr, "type", None) == "scatter" and getattr(tr, "mode", None) == "lines":
+                nm = str(getattr(tr, "name", "") or "")
+                line = getattr(tr, "line", None)
+                color = getattr(line, "color", None)
+                if nm:
+                    color_by_name[nm] = color
+        assert color_by_name.get("Fourier Conduction") == "#7e57c2"
+        assert color_by_name.get("Thermal diffusivity (implied)") == "#009688"
 
     def test_compute_log_step_metrics_includes_data_category(self):
         log = [

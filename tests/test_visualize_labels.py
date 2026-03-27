@@ -1,6 +1,7 @@
 """Tests for moju.monitor.visualize_labels."""
 
 from moju.monitor.visualize_labels import (
+    category_adm_bar_axis_range_percent_full,
     category_adm_bar_x_range,
     format_admissibility_pct,
     pretty_category_name,
@@ -51,6 +52,10 @@ def test_category_adm_bar_x_range_tight_when_close():
 def test_category_adm_bar_x_range_empty_defaults_unit_interval():
     x0, x1 = category_adm_bar_x_range([])
     assert (x0, x1) == (0.0, 1.0)
+
+
+def test_category_adm_bar_axis_range_percent_full():
+    assert category_adm_bar_axis_range_percent_full() == (0.0, 1.0)
 
 
 def test_category_adm_bar_x_range_high_scores_cap_at_one():

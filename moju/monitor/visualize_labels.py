@@ -46,7 +46,7 @@ def _is_law_slug_segment(segment: str) -> bool:
 
 def truncate_display_label(text: Any, max_len: int = 36) -> str:
     """
-    Shorten long metric names for axis tick labels (matplotlib / Plotly).
+    Shorten long metric names for axis tick labels (Plotly dashboards).
 
     Uses a single ellipsis character for a consistent conference-style look.
     """
@@ -99,6 +99,14 @@ def category_adm_bar_x_range(vals: List[float]) -> Tuple[float, float]:
     if x1 <= x0:
         x1 = min(1.0, x0 + 0.04)
     return (float(x0), float(x1))
+
+
+def category_adm_bar_axis_range_percent_full() -> Tuple[float, float]:
+    """
+    Fixed horizontal axis range for category admissibility bar charts so the x-axis
+    always spans 0–100% (data remain in [0, 1]; use with tickformat ``.2f%``).
+    """
+    return (0.0, 1.0)
 
 
 def pretty_residual_key(flat_key: str) -> str:

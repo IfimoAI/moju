@@ -10,7 +10,7 @@ import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from moju.monitor.visualize_labels import (
-    category_adm_bar_x_range,
+    category_adm_bar_axis_range_percent_full,
     format_admissibility_pct,
     pretty_category_name,
     truncate_display_label,
@@ -20,6 +20,19 @@ R_NORM_LOG_EPS = 1e-12
 
 # Fixed height for Moju Studio Dashboard Plotly cards (law/adm bars + spatial heatmaps).
 MOJU_STUDIO_DASHBOARD_CARD_HEIGHT = 400
+
+RESIDUAL_COLOR_LAWS = "#7e57c2"  # purple
+RESIDUAL_COLOR_CONSTITUTIVE = "#009688"  # teal
+RESIDUAL_COLOR_OTHER = "#6b7280"  # neutral fallback
+
+
+def _residual_color_from_key(flat_key: str) -> str:
+    key = str(flat_key or "")
+    if key.startswith("laws/"):
+        return RESIDUAL_COLOR_LAWS
+    if key.startswith("constitutive/"):
+        return RESIDUAL_COLOR_CONSTITUTIVE
+    return RESIDUAL_COLOR_OTHER
 
 
 def _adm_bar_color_plotly(score: float) -> str:
@@ -136,6 +149,34 @@ def _spatial_log_step_suffix(spatial: Dict[str, Any]) -> str:
         return ""
 
 
+def _heatmap_subplot_title_from_spatial(sp: Optional[Dict[str, Any]]) -> str:
+    """Human-readable title from spatial ``row_labels`` (law / constitutive names)."""
+    if not sp:
+        return ""
+    row_labels = list(sp.get("row_labels") or [])
+    if not row_labels:
+        return ""
+    first = truncate_display_label(str(row_labels[0]), 40)
+    if len(row_labels) == 1:
+        return first
+    return f"{first} (+{len(row_labels) - 1} more)"
+
+
+def _spatial_heatmap_subplot_title(sp: Optional[Dict[str, Any]], fallback: str) -> str:
+    h = _heatmap_subplot_title_from_spatial(sp)
+    if h:
+        return h + _spatial_log_step_suffix(sp or {})
+    return fallback
+
+
+def _convergence_subplot_title(cat: str, info: Dict[str, Any]) -> str:
+    displays = list(info.get("displays") or [])
+    keys = list(info.get("keys") or [])
+    if len(keys) == 1 and displays:
+        return f"{displays[0]} Convergence"
+    return f"{pretty_category_name(cat)} Convergence"
+
+
 def _plotly_spatial_panel_title_with_subtitle(main: str, rnorm_y_title: str) -> str:
     """Two-line subplot title: main + R_norm scale as smaller second line (HTML)."""
     esc = (
@@ -145,20 +186,6 @@ def _plotly_spatial_panel_title_with_subtitle(main: str, rnorm_y_title: str) -> 
         .replace(">", "&gt;")
     )
     return f"{main}<br><span style='font-size:10px'>{esc}</span>"
-
-
-def _spatial_panel_subtitle(prefix: str, sp: Optional[Dict[str, Any]], default_axis: str) -> str:
-    if sp is None:
-        return f"{prefix} vs {default_axis}"
-    k = sp.get("kind", "1d")
-    if k == "1d":
-        ax = sp.get("position_axis") or default_axis
-        return f"{prefix} vs {ax}"
-    if k == "2d":
-        return f"{prefix} (x, y)"
-    if k == "3d":
-        return f"{prefix} (z-slice of volume)"
-    return prefix
 
 
 def _plotly_add_spatial_panel_to_subplot(
@@ -171,7 +198,7 @@ def _plotly_add_spatial_panel_to_subplot(
     mid: float,
     colorbar_compact: bool,
     use_log_rnorm: bool = True,
-    colorbar_title: str = "|residual|",
+    colorbar_scale_title: str = "log10(|residual| + ε)",
 ) -> None:
     """Add law or constitutive spatial trace (1D keys×x, 2D x×y, or 3D z-slice) to a subplot cell."""
     import numpy as np
@@ -181,7 +208,7 @@ def _plotly_add_spatial_panel_to_subplot(
     row_labels: List[str] = list(spatial["row_labels"])
 
     cb_kw: Dict[str, Any] = dict(
-        title=dict(text=colorbar_title, side="right"),
+        title=dict(text=colorbar_scale_title, side="right"),
         len=0.38 if colorbar_compact else 0.36,
         xpad=12,
         thickness=14,
@@ -333,9 +360,6 @@ def build_plotly_monitor_figure(
         if spatial_norm
         else ("log10(|residual| + ε)" if use_log_rnorm else "|residual|")
     )
-    spatial_cb_title = "R_norm" if spatial_norm else "|residual|"
-    law_sp_label = "Governing laws R_norm" if spatial_norm else "Governing laws |residual|"
-    const_sp_label = "Implied constitutive R_norm" if spatial_norm else "Constitutive |residual|"
     law_sp_full = (
         "Governing laws R_norm (spatial, last step)"
         if spatial_norm
@@ -348,31 +372,11 @@ def build_plotly_monitor_figure(
     )
     hm_cs = spatial_heatmap_colorscale or "Jet"
 
-    def _pos_axis_title(sp: Optional[Dict[str, Any]]) -> str:
-        if not sp:
-            return "Position x"
-        ax = sp.get("position_axis") or "x"
-        return f"Position {ax}"
-
-    def _spatial_rowkey_subtitle_if_1d(sp: Optional[Dict[str, Any]]) -> Optional[str]:
-        """Return first key label as subplot subtitle for 1D heatmaps."""
-        if not sp:
-            return None
-        if sp.get("kind", "1d") != "1d":
-            return None
-        row_labels = list(sp.get("row_labels") or [])
-        if not row_labels:
-            return None
-        first = truncate_display_label(str(row_labels[0]), 34)
-        if len(row_labels) == 1:
-            return first
-        return f"{first} (+{len(row_labels) - 1} more)"
-
     n = bundle["n"]
     indices = list(range(n))
     category_training: Dict[str, Dict[str, Any]] = bundle.get("category_training") or {}
-    category_titles: Dict[str, str] = bundle.get("category_titles") or {}
     use_bar_chart = bundle["use_bar_chart"]
+    bar_keys: List[str] = bundle.get("bar_keys") or []
     bar_display: List[str] = bundle["bar_display"]
     bar_values = bundle["bar_values"]
     overall_adm = bundle["overall_adm"]
@@ -385,19 +389,6 @@ def build_plotly_monitor_figure(
     has_spatial_rnorm = spatial_rnorm is not None
     training_lines = mode_eff == "training" and not use_bar_chart
     polar_full = mode_eff == "test" and not (has_spatial or has_spatial_rnorm)
-
-    palette = [
-        "#4e79a7",
-        "#f28e2b",
-        "#59a14f",
-        "#e15759",
-        "#76b7b2",
-        "#edc948",
-        "#b07aa1",
-        "#ff9da7",
-        "#9c755f",
-        "#bab0ac",
-    ]
 
     if training_lines:
         specs_row_overall = [{"type": "xy", "colspan": 6}, None, None, None, None, None]
@@ -428,30 +419,20 @@ def build_plotly_monitor_figure(
         specs: List[List[Any]] = [specs_row_overall, specs_row_bars, specs_row_lines, specs_row_spatial]
         row_heights = [0.19, 0.19, 0.25, 0.30]
 
-        pos_ax_law = spatial.get("position_axis", "x") if spatial else "x"
-        pos_ax_ic = (spatial_rnorm or {}).get("position_axis", "x")
-        law_main_title = _spatial_panel_subtitle(law_sp_label, spatial if has_spatial else None, pos_ax_law)
-        const_main_title = _spatial_panel_subtitle(
-            const_sp_label,
-            spatial_rnorm if has_spatial_rnorm else None,
-            pos_ax_ic,
+        info_laws_tr = category_training.get(
+            "laws", {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))}
         )
-        law_key_sub = _spatial_rowkey_subtitle_if_1d(spatial if has_spatial else None) or spatial_z_title
-        const_key_sub = _spatial_rowkey_subtitle_if_1d(spatial_rnorm if has_spatial_rnorm else None) or spatial_z_title
+        info_const_tr = category_training.get(
+            "constitutive", {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))}
+        )
         sub_titles = [
             "Overall admissibility",
             "Law R_norm (final step)",
             "Category admissibility (final step)",
-            category_titles.get("laws", "Normalized Governing Laws Residuals"),
-            category_titles.get("constitutive", "Normalized Constitutive Residuals"),
-            _plotly_spatial_panel_title_with_subtitle(
-                law_main_title,
-                law_key_sub,
-            ),
-            _plotly_spatial_panel_title_with_subtitle(
-                const_main_title,
-                const_key_sub,
-            ),
+            _convergence_subplot_title("laws", info_laws_tr),
+            _convergence_subplot_title("constitutive", info_const_tr),
+            _spatial_heatmap_subplot_title(spatial if has_spatial else None, law_sp_full),
+            _spatial_heatmap_subplot_title(spatial_rnorm if has_spatial_rnorm else None, const_sp_full),
         ]
 
         fig = make_subplots(
@@ -536,17 +517,13 @@ def build_plotly_monitor_figure(
             automargin=True,
         )
 
-        info_laws_bar = category_training.get("laws", {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))})
-        lk = info_laws_bar["keys"]
-        ld = info_laws_bar["displays"]
-        mat_lb = np.asarray(info_laws_bar["r_norm_mat"], dtype=float)
-        if not lk or mat_lb.size == 0 or n < 1:
+        if not bar_display or len(bar_values) == 0 or n < 1:
             fig.add_trace(
                 go.Scatter(
                     x=[indices[len(indices) // 2] if indices else 0],
                     y=[0.0],
                     mode="text",
-                    text=["No law keys in this run"],
+                    text=["No residual keys in this run"],
                     textposition="middle center",
                     showlegend=False,
                     hoverinfo="skip",
@@ -555,29 +532,48 @@ def build_plotly_monitor_figure(
                 col=1,
             )
         else:
-            y_lbl = [truncate_display_label(d, 44) for d in ld]
-            x_fin = [float(mat_lb[i, -1]) if np.isfinite(mat_lb[i, -1]) else 0.0 for i in range(len(lk))]
+            x_lbl = [truncate_display_label(d, 44) for d in bar_display]
+            r_last = [float(v) if np.isfinite(v) else float("nan") for v in np.asarray(bar_values, dtype=float)]
+            bar_colors = [
+                _residual_color_from_key(bar_keys[i] if i < len(bar_keys) else "")
+                for i in range(len(x_lbl))
+            ]
+            y_bar = [
+                (
+                    float(np.log10(max(rv, 0.0) + R_NORM_LOG_EPS))
+                    if np.isfinite(rv) and use_log_rnorm
+                    else (float(rv) if np.isfinite(rv) else 0.0)
+                )
+                for rv in r_last
+            ]
             fig.add_trace(
                 go.Bar(
-                    x=x_fin,
-                    y=y_lbl,
-                    orientation="h",
-                    marker_color="#6baed6",
+                    x=x_lbl,
+                    y=y_bar,
+                    marker_color=bar_colors,
                     showlegend=False,
-                    hovertemplate="%{y}<br>R norm=%{x:.4g}<extra></extra>",
+                    hovertemplate="%{x}<br>"
+                    + ("log10(R_norm+ε)=%{y:.4g}<extra></extra>" if use_log_rnorm else "R norm=%{y:.4g}<extra></extra>"),
                 ),
                 row=2,
                 col=1,
             )
         fig.update_xaxes(
-            title_text="Normalized residual (R norm)",
+            title_text="All Residuals",
             row=2,
             col=1,
             showline=True,
             linewidth=1.2,
             automargin=True,
         )
-        fig.update_yaxes(row=2, col=1, showline=True, linewidth=1.2, automargin=True)
+        fig.update_yaxes(
+            title_text=rnorm_y_title,
+            row=2,
+            col=1,
+            showline=True,
+            linewidth=1.2,
+            automargin=True,
+        )
 
         blabels, bvals = _three_pillar_labels_values(metrics)
         bcolors = [_adm_bar_color_plotly(v) for v in bvals]
@@ -600,10 +596,10 @@ def build_plotly_monitor_figure(
             row=2,
             col=4,
         )
-        _adm_x0, _adm_x1 = category_adm_bar_x_range(list(bvals))
+        _adm_full = category_adm_bar_axis_range_percent_full()
         fig.update_xaxes(
             title_text="Admissibility (%)",
-            range=[_adm_x0, _adm_x1],
+            range=list(_adm_full),
             tickformat=".2f%",
             row=2,
             col=4,
@@ -653,7 +649,14 @@ def build_plotly_monitor_figure(
                                 mode="lines",
                                 name=displays[i],
                                 legendgroup=f"cat_{cat}",
-                                line=dict(color=palette[i % len(palette)], width=2.2),
+                                line=dict(
+                                    color=(
+                                        RESIDUAL_COLOR_LAWS
+                                        if cat == "laws"
+                                        else (RESIDUAL_COLOR_CONSTITUTIVE if cat == "constitutive" else RESIDUAL_COLOR_OTHER)
+                                    ),
+                                    width=2.2,
+                                ),
                                 hovertemplate=f"{displays[i]}<br>{step_label}=%{{x}}<br>{ht_y}=%{{y:.4g}}<extra></extra>",
                             ),
                             row=line_row,
@@ -695,7 +698,7 @@ def build_plotly_monitor_figure(
                 mid=mid,
                 colorbar_compact=False,
                 use_log_rnorm=use_log_rnorm,
-                colorbar_title=law_main_title,
+                colorbar_scale_title=spatial_z_title,
             )
         else:
             fig.add_trace(
@@ -724,7 +727,7 @@ def build_plotly_monitor_figure(
                 mid=mid,
                 colorbar_compact=False,
                 use_log_rnorm=use_log_rnorm,
-                colorbar_title=const_main_title,
+                colorbar_scale_title=spatial_z_title,
             )
         else:
             fig.add_trace(
@@ -789,10 +792,10 @@ def build_plotly_monitor_figure(
         st_const = _plotly_spatial_panel_title_with_subtitle(const_sp_full, spatial_z_title)
         specs = [
             [{"type": "xy"}, {"type": "xy"}],
-            [{"type": "xy", "colspan": 2}, None],
+            [{"type": "xy"}, {"type": "xy"}],
             [{"type": "xy", "colspan": 2}, None],
         ]
-        row_heights = [0.30, 0.38, 0.32]
+        row_heights = [0.28, 0.32, 0.40]
         fig = make_subplots(
             rows=3,
             cols=2,
@@ -802,10 +805,9 @@ def build_plotly_monitor_figure(
             subplot_titles=(
                 st_law,
                 st_const,
-                "Normalized residuals (all keys)",
-                "",
+                "Overall admissibility",
                 "Category admissibility (final step)",
-                "",
+                "Normalized residuals (all keys)",
             ),
         )
         fig.update_annotations(font=dict(size=11, family="Arial, sans-serif", color="#1a1a1a"))
@@ -842,27 +844,77 @@ def build_plotly_monitor_figure(
         fig.update_xaxes(visible=False, row=1, col=2)
         fig.update_yaxes(visible=False, row=1, col=2)
 
-        row_bar = 2
-        if mode_eff == "test" or use_bar_chart:
-            y_labels = [truncate_display_label(d, 44) for d in bar_display]
+        last_ov_pf = float(overall_adm[-1]) if len(overall_adm) else float("nan")
+        adm_hover_pf = []
+        for y in overall_adm:
+            try:
+                fy = float(y)
+            except (TypeError, ValueError):
+                adm_hover_pf.append("N/A")
+            else:
+                adm_hover_pf.append(format_admissibility_pct(fy) if math.isfinite(fy) else "N/A")
+        if any(np.isfinite(overall_adm)):
             fig.add_trace(
-                go.Bar(
-                    x=np.where(np.isfinite(bar_values), bar_values, 0.0),
-                    y=y_labels,
-                    orientation="h",
-                    marker_color="#6baed6",
+                go.Scatter(
+                    x=indices,
+                    y=overall_adm,
+                    mode="lines",
+                    name="Overall admissibility",
+                    line=dict(color="#2c3e50", width=2.8),
                     showlegend=False,
-                    hovertemplate="%{y}<br>R norm=%{x:.4g}<extra></extra>",
+                    text=adm_hover_pf,
+                    hovertemplate="Overall<br>%{x}<br>%{text}<extra></extra>",
                 ),
-                row=row_bar,
+                row=2,
                 col=1,
             )
-            fig.update_xaxes(
-                title_text="Normalized residual (R norm)", row=row_bar, col=1, showline=True, linewidth=1.2
-            )
-            fig.update_yaxes(title_text="", row=row_bar, col=1)
+            if math.isfinite(last_ov_pf):
+                lix_pf = indices[-1]
+                fig.add_trace(
+                    go.Scatter(
+                        x=[lix_pf],
+                        y=[last_ov_pf],
+                        mode="markers",
+                        marker=dict(size=12, color="#c0392b", line=dict(width=2, color="white")),
+                        showlegend=False,
+                        text=[format_admissibility_pct(last_ov_pf)],
+                        hovertemplate="Final<br>%{text}<extra></extra>",
+                    ),
+                    row=2,
+                    col=1,
+                )
+                fig.add_annotation(
+                    x=lix_pf,
+                    y=last_ov_pf,
+                    text=f" {format_admissibility_pct(last_ov_pf)}",
+                    showarrow=False,
+                    xanchor="left",
+                    yanchor="bottom",
+                    font=dict(size=11, color="#2c3e50", family="Arial, sans-serif"),
+                    row=2,
+                    col=1,
+                )
+        fig.update_xaxes(
+            title_text=step_label,
+            row=2,
+            col=1,
+            showline=True,
+            linewidth=1.2,
+            mirror=True,
+            automargin=True,
+        )
+        fig.update_yaxes(
+            title_text="Admissibility (%)",
+            tickformat=".2f%",
+            autorange=True,
+            row=2,
+            col=1,
+            showline=True,
+            linewidth=1.2,
+            mirror=True,
+            automargin=True,
+        )
 
-        polar_row = 3
         blabels, bvals = _three_pillar_labels_values(metrics)
         bcolors = [_adm_bar_color_plotly(v) for v in bvals]
         bx = [v if math.isfinite(v) else 0.0 for v in bvals]
@@ -880,30 +932,71 @@ def build_plotly_monitor_figure(
                 customdata=btext,
                 hovertemplate="%{y}<br>admissibility=%{customdata}<extra></extra>",
             ),
-            row=polar_row,
-            col=1,
+            row=2,
+            col=2,
         )
-        _adm2_x0, _adm2_x1 = category_adm_bar_x_range(list(bvals))
+        _adm_pf = category_adm_bar_axis_range_percent_full()
         fig.update_xaxes(
             title_text="Admissibility (%)",
-            range=[_adm2_x0, _adm2_x1],
+            range=list(_adm_pf),
             tickformat=".2f%",
-            row=polar_row,
-            col=1,
+            row=2,
+            col=2,
             showline=True,
             linewidth=1.2,
             automargin=True,
         )
-        fig.update_yaxes(row=polar_row, col=1, automargin=True)
+        fig.update_yaxes(row=2, col=2, automargin=True)
+
+        row_bar = 3
+        if mode_eff == "test" or use_bar_chart:
+            x_labels_pf = [truncate_display_label(d, 44) for d in bar_display]
+            bv = np.asarray(bar_values, dtype=float)
+            bar_colors_pf = [
+                _residual_color_from_key(bar_keys[i] if i < len(bar_keys) else "")
+                for i in range(len(x_labels_pf))
+            ]
+            y_vals_pf = [
+                (
+                    float(np.log10(max(float(rv), 0.0) + R_NORM_LOG_EPS))
+                    if np.isfinite(rv) and use_log_rnorm
+                    else (float(rv) if np.isfinite(rv) else 0.0)
+                )
+                for rv in bv
+            ]
+            fig.add_trace(
+                go.Bar(
+                    x=x_labels_pf,
+                    y=y_vals_pf,
+                    marker_color=bar_colors_pf,
+                    showlegend=False,
+                    hovertemplate="%{x}<br>"
+                    + (
+                        "log10(R_norm+ε)=%{y:.4g}<extra></extra>"
+                        if use_log_rnorm
+                        else "R norm=%{y:.4g}<extra></extra>"
+                    ),
+                ),
+                row=row_bar,
+                col=1,
+            )
+            fig.update_xaxes(
+                title_text="Residual key",
+                row=row_bar,
+                col=1,
+                showline=True,
+                linewidth=1.2,
+                automargin=True,
+            )
+            fig.update_yaxes(
+                title_text=rnorm_y_title,
+                row=row_bar,
+                col=1,
+                automargin=True,
+            )
     else:
-        st_law_c = _plotly_spatial_panel_title_with_subtitle(
-            law_sp_full,
-            _spatial_rowkey_subtitle_if_1d(spatial if has_spatial else None) or spatial_z_title,
-        )
-        st_const_c = _plotly_spatial_panel_title_with_subtitle(
-            const_sp_full,
-            _spatial_rowkey_subtitle_if_1d(spatial_rnorm if has_spatial_rnorm else None) or spatial_z_title,
-        )
+        st_law_c = _spatial_heatmap_subplot_title(spatial if has_spatial else None, law_sp_full)
+        st_const_c = _spatial_heatmap_subplot_title(spatial_rnorm if has_spatial_rnorm else None, const_sp_full)
         nr_compact = bundle.get("nr_title") or "Normalized Residuals"
         specs = [
             [{"type": "xy"}, {"type": "xy"}],
@@ -939,7 +1032,7 @@ def build_plotly_monitor_figure(
                 mid=mid,
                 colorbar_compact=True,
                 use_log_rnorm=use_log_rnorm,
-                colorbar_title=law_sp_full,
+                colorbar_scale_title=spatial_z_title,
             )
         else:
             fig.add_trace(
@@ -968,7 +1061,7 @@ def build_plotly_monitor_figure(
                 mid=mid,
                 colorbar_compact=True,
                 use_log_rnorm=use_log_rnorm,
-                colorbar_title=const_sp_full,
+                colorbar_scale_title=spatial_z_title,
             )
         else:
             fig.add_trace(
@@ -1007,10 +1100,10 @@ def build_plotly_monitor_figure(
             row=2,
             col=1,
         )
-        _adm3_x0, _adm3_x1 = category_adm_bar_x_range(list(bvals))
+        _adm3_full = category_adm_bar_axis_range_percent_full()
         fig.update_xaxes(
             title_text="Admissibility (%)",
-            range=[_adm3_x0, _adm3_x1],
+            range=list(_adm3_full),
             tickformat=".2f%",
             row=2,
             col=1,
@@ -1021,28 +1114,45 @@ def build_plotly_monitor_figure(
         fig.update_yaxes(row=2, col=1, showline=True, linewidth=1.2, automargin=True)
 
         if mode_eff == "test" or use_bar_chart:
-            y_labels_all = [truncate_display_label(d, 44) for d in bar_display]
+            x_labels_c = [truncate_display_label(d, 44) for d in bar_display]
+            bv_c = np.asarray(bar_values, dtype=float)
+            bar_colors_c = [
+                _residual_color_from_key(bar_keys[i] if i < len(bar_keys) else "")
+                for i in range(len(x_labels_c))
+            ]
+            y_vals_c = [
+                (
+                    float(np.log10(max(float(rv), 0.0) + R_NORM_LOG_EPS))
+                    if np.isfinite(rv) and use_log_rnorm
+                    else (float(rv) if np.isfinite(rv) else 0.0)
+                )
+                for rv in bv_c
+            ]
             fig.add_trace(
                 go.Bar(
-                    x=np.where(np.isfinite(bar_values), bar_values, 0.0),
-                    y=y_labels_all,
-                    orientation="h",
-                    marker_color="#6baed6",
+                    x=x_labels_c,
+                    y=y_vals_c,
+                    marker_color=bar_colors_c,
                     showlegend=False,
-                    hovertemplate="%{y}<br>R norm=%{x:.4g}<extra></extra>",
+                    hovertemplate="%{x}<br>"
+                    + (
+                        "log10(R_norm+ε)=%{y:.4g}<extra></extra>"
+                        if use_log_rnorm
+                        else "R norm=%{y:.4g}<extra></extra>"
+                    ),
                 ),
                 row=3,
                 col=1,
             )
             fig.update_xaxes(
-                title_text="Normalized residual (R norm)",
+                title_text="Residual key",
                 row=3,
                 col=1,
                 showline=True,
                 linewidth=1.2,
                 automargin=True,
             )
-            fig.update_yaxes(title_text="", row=3, col=1, automargin=True)
+            fig.update_yaxes(title_text=rnorm_y_title, row=3, col=1, automargin=True)
 
     last_ov_c = float(overall_adm[-1]) if len(overall_adm) else float("nan")
     title_base = figure_title or "Monitor visualization"
@@ -1096,8 +1206,9 @@ def build_plotly_law_rnorm_final_bar_figure(
     bundle: Dict[str, Any],
     *,
     card_height: int = MOJU_STUDIO_DASHBOARD_CARD_HEIGHT,
+    r_norm_scale: str = "log",
 ) -> Any:
-    """Horizontal bar chart: law R_norm at the final log step (Studio card)."""
+    """Vertical bar chart: log10(R_norm+ε) or raw R_norm at the final log step per law key (Studio card)."""
     import numpy as np
     import plotly.graph_objects as go
 
@@ -1110,6 +1221,7 @@ def build_plotly_law_rnorm_final_bar_figure(
     ld = info["displays"]
     mat_lb = np.asarray(info["r_norm_mat"], dtype=float)
     mid = int(indices[len(indices) // 2]) if len(indices) else 0
+    use_log = r_norm_scale == "log"
 
     fig = go.Figure()
     if not lk or mat_lb.size == 0 or n < 1:
@@ -1127,20 +1239,35 @@ def build_plotly_law_rnorm_final_bar_figure(
         fig.update_xaxes(visible=False)
         fig.update_yaxes(visible=False)
     else:
-        y_lbl = [truncate_display_label(d, 44) for d in ld]
-        x_fin = [float(mat_lb[i, -1]) if np.isfinite(mat_lb[i, -1]) else 0.0 for i in range(len(lk))]
+        x_lbl = [truncate_display_label(d, 44) for d in ld]
+        r_last = [float(mat_lb[i, -1]) if np.isfinite(mat_lb[i, -1]) else float("nan") for i in range(len(lk))]
+        bar_colors = [_residual_color_from_key(k) for k in lk]
+        y_bar = [
+            (
+                float(np.log10(max(rv, 0.0) + R_NORM_LOG_EPS))
+                if np.isfinite(rv) and use_log
+                else (float(rv) if np.isfinite(rv) else 0.0)
+            )
+            for rv in r_last
+        ]
         fig.add_trace(
             go.Bar(
-                x=x_fin,
-                y=y_lbl,
-                orientation="h",
-                marker_color="#6baed6",
+                x=x_lbl,
+                y=y_bar,
+                marker_color=bar_colors,
                 showlegend=False,
-                hovertemplate="%{y}<br>R norm=%{x:.4g}<extra></extra>",
+                hovertemplate="%{x}<br>"
+                + ("log10(R_norm+ε)=%{y:.4g}<extra></extra>" if use_log else "R norm=%{y:.4g}<extra></extra>"),
             )
         )
-        fig.update_xaxes(title_text="Normalized residual (R norm)", showline=True, linewidth=1.2, automargin=True)
-        fig.update_yaxes(showline=True, linewidth=1.2, automargin=True)
+        fig.update_xaxes(
+            title_text="Governing law (residual key)",
+            showline=True,
+            linewidth=1.2,
+            automargin=True,
+        )
+        y_ax = "log10(R_norm + ε)" if use_log else "Normalized residual (R norm)"
+        fig.update_yaxes(title_text=y_ax, showline=True, linewidth=1.2, automargin=True)
 
     fig.update_layout(
         title=dict(text="Law R_norm (final step)", font=dict(size=14, family="Arial, sans-serif")),
@@ -1182,10 +1309,10 @@ def build_plotly_category_admissibility_bar_figure(
             hovertemplate="%{y}<br>admissibility=%{customdata}<extra></extra>",
         )
     )
-    _adm_x0, _adm_x1 = category_adm_bar_x_range(list(bvals))
+    _adm_full = category_adm_bar_axis_range_percent_full()
     fig.update_xaxes(
         title_text="Admissibility (%)",
-        range=[_adm_x0, _adm_x1],
+        range=list(_adm_full),
         tickformat=".2f%",
         showline=True,
         linewidth=1.2,
@@ -1207,6 +1334,7 @@ def build_plotly_spatial_rnorm_heatmap_card(
     *,
     colorscale: str = "Jet",
     card_title: str = "Spatial |residual|",
+    colorbar_scale_title: Optional[str] = None,
     card_height: int = MOJU_STUDIO_DASHBOARD_CARD_HEIGHT,
 ) -> Any:
     """
@@ -1214,11 +1342,16 @@ def build_plotly_spatial_rnorm_heatmap_card(
 
     ``spatial_parsed`` is the output of ``_parse_spatial_law_panel`` or
     ``_parse_spatial_rnorm_panel`` (``kind`` ``1d`` / ``2d`` / ``3d``; see parser docstring).
+
+    The figure title uses human names from ``row_labels`` when present; ``card_title`` is the
+    fallback. ``colorbar_scale_title`` defaults to a log-scale residual label (override to match
+    the plotted quantity).
     """
     import numpy as np
     import plotly.graph_objects as go
 
     fig = go.Figure()
+    cb_default = colorbar_scale_title or "log10(|residual| + ε)"
     full_title = card_title
     if spatial_parsed is None:
         fig.add_annotation(
@@ -1233,10 +1366,10 @@ def build_plotly_spatial_rnorm_heatmap_card(
         fig.update_xaxes(visible=False)
         fig.update_yaxes(visible=False)
     else:
-        full_title = card_title + _spatial_log_step_suffix(spatial_parsed)
+        full_title = _spatial_heatmap_subplot_title(spatial_parsed, card_title)
         kind = spatial_parsed.get("kind", "1d")
         cb = dict(
-            title=dict(text=card_title, side="right", font=dict(size=10)),
+            title=dict(text=cb_default, side="right", font=dict(size=10)),
             len=0.72,
             thickness=10,
             x=1.02,
@@ -1246,14 +1379,6 @@ def build_plotly_spatial_rnorm_heatmap_card(
             Z = spatial_parsed["Z"]
             x_sp = spatial_parsed["x"]
             row_labels = spatial_parsed["row_labels"]
-            first = truncate_display_label(str(row_labels[0]), 34) if row_labels else ""
-            key_sub = (
-                first
-                if len(row_labels) <= 1
-                else f"{first} (+{len(row_labels) - 1} more)"
-            )
-            if key_sub:
-                full_title = _plotly_spatial_panel_title_with_subtitle(full_title, key_sub)
             fig.add_trace(
                 go.Heatmap(
                     x=x_sp,

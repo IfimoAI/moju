@@ -4,7 +4,7 @@ ResidualEngine: residuals for governing laws, constitutive, and scaling/similari
 - compute_residuals(state_pred, state_ref=None, *, log_to_python=True)
 - build_loss: cascaded RMS over laws only (training).
 - audit / visualize: same metrics (RMS, R_norm, admissibility) for all residual keys;
-  visualize builds training/test dashboards (optional spatial law panel for x slices).
+  visualize builds Plotly training/test dashboards (optional spatial law panel for x slices).
 
 Constitutive and scaling/similarity audits are tied to Models.* and Groups.* functions via
 **ref_delta**, **implied_delta** (constitutive only), and **π-constant** checks (scaling, Path A).
@@ -43,13 +43,7 @@ from moju.monitor.law_implied_diagnostics import (
     merge_law_implied_audit_specs,
 )
 from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
-from moju.monitor.visualize_labels import (
-    category_adm_bar_x_range,
-    format_admissibility_pct,
-    pretty_category_name,
-    pretty_residual_key,
-    truncate_display_label,
-)
+from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
 
 DEFAULT_VISUALIZE_TITLE_TRAINING = "Physics admissibility audit (model training)"
 DEFAULT_VISUALIZE_TITLE_TEST = "State prediction audit (physics residuals)"
@@ -680,110 +674,6 @@ def _parse_spatial_rnorm_panel(spatial_rnorm_panel: Optional[Any]) -> Optional[D
     return _parse_spatial_values_panel(spatial_rnorm_panel, law_style=False)
 
 
-def _matplotlib_card_axes_styling(ax: Any) -> None:
-    """Light panel framing (card-like) for dashboard axes."""
-    ax.set_facecolor("#f6f7f9")
-    for spine in ax.spines.values():
-        spine.set_edgecolor("#90a4ae")
-        spine.set_linewidth(1.2)
-
-
-def _matplotlib_draw_spatial_panel(
-    fig: Any,
-    ax: Any,
-    spatial: Dict[str, Any],
-    *,
-    cmap: str,
-    title: str,
-    np: Any,
-    rnorm_subtitle: str,
-    use_log_rnorm: bool,
-) -> None:
-    """Draw 1D (keys × position) or 2D spatial heatmap; 3D remains Plotly-oriented."""
-    kind = spatial.get("kind", "1d")
-    if kind == "3d":
-        ax.text(
-            0.5,
-            0.5,
-            "3D spatial panel: use backend=\"plotly\".",
-            ha="center",
-            va="center",
-            fontsize=10,
-            color="#555555",
-            transform=ax.transAxes,
-        )
-        ax.set_axis_off()
-        ax.set_title(f"{title}\n{rnorm_subtitle}", fontsize=10, fontweight="600")
-        return
-
-    ax.set_title(f"{title}\n{rnorm_subtitle}", fontsize=10, fontweight="600")
-
-    if kind == "1d":
-        Z = np.asarray(spatial["Z"], dtype=float)
-        if use_log_rnorm:
-            Z = np.log10(np.maximum(Z, 0.0) + float(R_NORM_LOG_EPS))
-        x_sp = spatial["x"]
-        row_labels = spatial["row_labels"]
-        pos_ax = spatial.get("position_axis") or "x"
-        im = ax.imshow(
-            Z,
-            aspect="auto",
-            cmap=cmap,
-            extent=(float(x_sp[0]), float(x_sp[-1]), len(row_labels) - 0.5, -0.5),
-            interpolation="nearest",
-        )
-        ax.set_yticks(range(len(row_labels)))
-        rl_t = [truncate_display_label(lb, 34) for lb in row_labels]
-        ax.set_yticklabels(rl_t, fontsize=7.5)
-        ax.tick_params(axis="y", pad=5)
-        ax.set_xlabel(f"Position {pos_ax}", labelpad=7)
-        fig.colorbar(im, ax=ax, fraction=0.032, pad=0.055)
-        return
-
-    if kind == "2d":
-        z_stack = np.asarray(spatial["Z"], dtype=float)
-        Z0 = np.asarray(z_stack[0], dtype=float)
-        if use_log_rnorm:
-            Z0 = np.log10(np.maximum(Z0, 0.0) + float(R_NORM_LOG_EPS))
-        x_sp = np.asarray(spatial["x"], dtype=float)
-        y_sp = np.asarray(spatial["y"], dtype=float)
-        row_labels = spatial["row_labels"]
-        hl = truncate_display_label(row_labels[0], 34) if row_labels else ""
-        nk = int(z_stack.shape[0])
-        sub = f"{hl}" + (f" (+{nk - 1} more)" if nk > 1 else "")
-        im2 = ax.imshow(
-            Z0,
-            aspect="auto",
-            cmap=cmap,
-            extent=(
-                float(x_sp[0]),
-                float(x_sp[-1]),
-                float(y_sp[0]),
-                float(y_sp[-1]),
-            ),
-            origin="lower",
-            interpolation="nearest",
-        )
-        ax.set_xlabel("x", labelpad=7)
-        ax.set_ylabel("y", labelpad=7)
-        if sub:
-            ax.text(0.02, 0.98, sub, transform=ax.transAxes, va="top", fontsize=8, color="#333333")
-        fig.colorbar(im2, ax=ax, fraction=0.032, pad=0.055)
-        return
-
-    ax.text(
-        0.5,
-        0.5,
-        f"Unsupported spatial kind: {kind!r}",
-        ha="center",
-        va="center",
-        fontsize=10,
-        color="#555555",
-        transform=ax.transAxes,
-    )
-    ax.set_axis_off()
-
-
 def _build_visualize_bundle(
     log: List[Dict[str, Any]],
     keys: Optional[List[str]],
@@ -796,7 +686,7 @@ def _build_visualize_bundle(
     spatial_normalize: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
-    Shared arrays and metadata for :func:`visualize` (matplotlib or plotly).
+    Shared arrays and metadata for :func:`visualize` (Plotly).
 
     Does not mutate ``log``. Requires ``numpy`` (already a moju dependency).
     """
@@ -895,120 +785,6 @@ def _build_visualize_bundle(
         "np": np,
         "spatial_normalize": bool(spatial_normalize),
     }
-
-
-def _apply_visualize_style() -> Dict[str, Any]:
-    """Publication-oriented matplotlib rcParams (restored by caller context)."""
-    return {
-        "figure.facecolor": "white",
-        "axes.facecolor": "#fafafa",
-        "axes.edgecolor": "#333333",
-        "axes.labelcolor": "#222222",
-        "axes.titlecolor": "#1a1a1a",
-        "text.color": "#222222",
-        "xtick.color": "#333333",
-        "ytick.color": "#333333",
-        "grid.color": "#cccccc",
-        "grid.linestyle": "-",
-        "grid.linewidth": 0.6,
-        "font.size": 10,
-        "axes.titlesize": 11,
-        "axes.labelsize": 10,
-        "legend.fontsize": 8,
-        "lines.linewidth": 1.6,
-    }
-
-
-R_NORM_LOG_EPS = 1e-12
-
-
-def _apply_visualize_style_actionable() -> Dict[str, Any]:
-    """Stronger typography and spines for :func:`visualize` dashboards."""
-    base = _apply_visualize_style()
-    extra: Dict[str, Any] = {
-        "axes.titlesize": 12,
-        "axes.labelsize": 11,
-        "axes.linewidth": 1.2,
-        "xtick.major.width": 1.0,
-        "ytick.major.width": 1.0,
-        "font.size": 10.5,
-        "legend.fontsize": 9,
-        "lines.linewidth": 2.0,
-    }
-    return {**base, **extra}
-
-
-def _admissibility_status_hml(score: float) -> str:
-    """HIGH / MODERATE / LOW band for headline (same bands as former diagnostics plot)."""
-    if not math.isfinite(score):
-        return "N/A"
-    if score >= 0.9:
-        return "HIGH"
-    if score >= 0.7:
-        return "MODERATE"
-    return "LOW"
-
-
-def _category_adm_bar_color(score: float) -> str:
-    if not math.isfinite(score):
-        return "#bdc3c7"
-    if score >= 0.9:
-        return "#27ae60"
-    if score >= 0.7:
-        return "#e67e22"
-    return "#c0392b"
-
-
-def _transform_r_norm_y(ys: Any, np: Any, log_scale: bool) -> Any:
-    """R_norm line-plot values: optional log10(R_norm + eps)."""
-    arr = np.asarray(ys, dtype=float)
-    if not log_scale:
-        return arr
-    return np.log10(np.maximum(arr, 0.0) + R_NORM_LOG_EPS)
-
-
-def _category_three_pillar_scores(metrics: List[Dict[str, Any]]) -> tuple[List[str], List[float]]:
-    """Labels and scores for laws / constitutive pillars (final step)."""
-    last_cat = metrics[-1]["category_admissibility_score"]
-    order = ("laws", "constitutive")
-    labels = [pretty_category_name(c) for c in order]
-    vals = [float(last_cat[c]) if c in last_cat and math.isfinite(float(last_cat[c])) else float("nan") for c in order]
-    return list(labels), vals
-
-
-def _matplotlib_draw_category_adm_three_pillar(ax: Any, metrics: List[Dict[str, Any]], np: Any) -> None:
-    """Horizontal bar chart for laws/constitutive pillars (matplotlib)."""
-    from matplotlib.ticker import PercentFormatter
-
-    clabels, cvals = _category_three_pillar_scores(metrics)
-    y_pos = np.arange(len(clabels))
-    colors_b = [_category_adm_bar_color(v) for v in cvals]
-    bar_lengths = np.array([v if math.isfinite(v) else 0.0 for v in cvals], dtype=float)
-    ax.barh(
-        y_pos,
-        bar_lengths,
-        color=colors_b,
-        edgecolor="#333333",
-        linewidth=0.9,
-        height=0.55,
-    )
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(clabels, fontsize=10)
-    x0, x1 = category_adm_bar_x_range(list(cvals))
-    ax.set_xlim(x0, x1)
-    ax.set_xlabel("Admissibility", fontsize=10)
-    ax.set_title("Category admissibility (final step)", fontsize=11, fontweight="600")
-    for i, v in enumerate(cvals):
-        if math.isfinite(v):
-            tx = min(v + 0.02 * max(x1 - x0, 1e-6), x1 - 1e-6)
-            ax.text(tx, i, format_admissibility_pct(v), va="center", fontsize=9, fontweight="600")
-        else:
-            ax.text(x0 + 0.02 * (x1 - x0), i, "N/A", va="center", fontsize=9, color="#666666")
-    ax.grid(True, axis="x", alpha=0.35)
-    ax.set_axisbelow(True)
-    ax.xaxis.set_major_formatter(PercentFormatter(1.0))
-    for spine in ax.spines.values():
-        spine.set_linewidth(1.05)
 
 
 def _maybe_build_spatial_panels(
@@ -1120,7 +896,7 @@ def build_monitor_visualize_bundle(
 def visualize(
     log: List[Dict[str, Any]],
     keys: Optional[List[str]] = None,
-    backend: str = "matplotlib",
+    backend: str = "plotly",
     *,
     r_ref: Optional[Dict[str, float]] = None,
     max_legend_keys: int = 16,
@@ -1179,14 +955,15 @@ def visualize(
     **3D:** ``x``, ``y``, ``z`` 1D and each ``values[k]`` with shape
     ``(len(x), len(y), len(z))``.
 
-    For constitutive-only slices use ``spatial_rnorm_panel`` (flat keys). **Matplotlib**
-    renders **1D** spatial panels only; use **Plotly** for 2D/3D.
+    For constitutive-only slices use ``spatial_rnorm_panel`` (flat keys). **Plotly**
+    renders 1D/2D/3D spatial panels.
 
     **Backends**
 
-    - ``matplotlib`` — static figure (requires ``matplotlib``).
-    - ``plotly`` — interactive figure (requires ``pip install plotly`` or ``moju[viz]``).
+    - ``plotly`` (default) — interactive figure (requires ``pip install plotly`` or ``moju[viz]``).
     - ``none`` — returns ``None``.
+
+    ``backend="matplotlib"`` is **not supported** (raises ``ValueError``); use ``plotly``.
 
     Parameters
     ----------
@@ -1195,7 +972,7 @@ def visualize(
     keys
         Subset of flat residual keys to plot; default = all keys in the first entry.
     backend
-        ``matplotlib``, ``plotly``, or ``none``.
+        ``plotly`` (default) or ``none``.
     r_ref
         Optional per-key reference scale overrides (same as :func:`audit`).
     max_legend_keys
@@ -1244,6 +1021,13 @@ def visualize(
     """
     if backend == "none":
         return None
+    if backend == "matplotlib":
+        raise ValueError(
+            'visualize(..., backend="matplotlib") is no longer supported; '
+            'use backend="plotly" (default) and pip install plotly or moju[viz].'
+        )
+    if backend != "plotly":
+        raise ValueError(f"Unknown visualize backend {backend!r}; use 'plotly' or 'none'.")
     if mode not in ("training", "test"):
         raise ValueError("mode must be 'training' or 'test'")
     if r_norm_scale not in ("log", "linear"):
@@ -1286,425 +1070,18 @@ def visualize(
 
     resolved_title = _resolve_visualize_figure_title(mode, figure_title)
 
-    if backend == "plotly":
-        try:
-            from moju.monitor.visualize_plotly import build_plotly_monitor_figure
-
-            return build_plotly_monitor_figure(
-                bundle,
-                figure_title=resolved_title,
-                step_label=step_label,
-                r_norm_scale=r_norm_scale,
-                spatial_heatmap_colorscale=spatial_heatmap_colorscale,
-            )
-        except ImportError:
-            return None
-
-    if backend != "matplotlib":
-        return None
-
     try:
-        import matplotlib.pyplot as plt
-        from matplotlib.ticker import PercentFormatter
+        from moju.monitor.visualize_plotly import build_plotly_monitor_figure
+
+        return build_plotly_monitor_figure(
+            bundle,
+            figure_title=resolved_title,
+            step_label=step_label,
+            r_norm_scale=r_norm_scale,
+            spatial_heatmap_colorscale=spatial_heatmap_colorscale,
+        )
     except ImportError:
         return None
-
-    np = bundle["np"]
-    n = bundle["n"]
-    indices = bundle["indices"]
-    use_bar_chart = bundle["use_bar_chart"]
-    bar_display = bundle["bar_display"]
-    bar_values = bundle["bar_values"]
-    overall_adm = bundle["overall_adm"]
-    cats_fin = bundle["cats_fin"]
-    spatial = bundle["spatial"]
-    spatial_rnorm = bundle.get("spatial_rnorm")
-    mode_eff = bundle["mode"]
-
-    has_spatial = spatial is not None
-    has_spatial_rnorm = spatial_rnorm is not None
-    category_training = bundle.get("category_training") or {}
-    category_titles = bundle.get("category_titles") or {}
-    metrics = bundle["metrics"]
-    use_log_rnorm = r_norm_scale == "log"
-    rnorm_ylabel = "log10(R_norm + ε)" if use_log_rnorm else "Normalized residual (R norm)"
-    spatial_norm = bool(bundle.get("spatial_normalize", False))
-    spatial_z_ylabel = (
-        rnorm_ylabel
-        if spatial_norm
-        else ("log10(|residual| + ε)" if use_log_rnorm else "|residual|")
-    )
-    _law_sp_title = (
-        "Governing laws R_norm (spatial, last step)"
-        if spatial_norm
-        else "Governing laws |residual| (spatial, last step)"
-    )
-    _const_sp_title = (
-        "Constitutive R_norm (spatial, last step)"
-        if spatial_norm
-        else "Constitutive |residual| (spatial, last step)"
-    )
-
-    style = _apply_visualize_style_actionable()
-    with plt.rc_context(rc=style):
-        if mode_eff == "training" and not use_bar_chart:
-            fig_h = 13.8
-            fig = plt.figure(figsize=(15.0, fig_h), constrained_layout=True)
-            n_outer = 3
-            hratios = [1.0, 1.12, 1.06]
-            outer = fig.add_gridspec(n_outer, 1, height_ratios=hratios)
-
-            g_top = outer[0].subgridspec(1, 2, wspace=0.30)
-            ax_overall = fig.add_subplot(g_top[0, 0])
-            ax_cat = fig.add_subplot(g_top[0, 1])
-            last_ov = float(overall_adm[-1]) if len(overall_adm) else float("nan")
-            status_hml = _admissibility_status_hml(last_ov)
-            if any(np.isfinite(overall_adm)):
-                ax_overall.plot(
-                    indices,
-                    overall_adm,
-                    color="#2c3e50",
-                    linewidth=2.2,
-                    label="Overall admissibility",
-                )
-                ax_overall.margins(y=0.12)
-                ax_overall.relim()
-                ax_overall.autoscale(axis="y")
-                if math.isfinite(last_ov):
-                    lix = float(indices[-1])
-                    ax_overall.scatter(
-                        [lix],
-                        [last_ov],
-                        s=95,
-                        color="#c0392b",
-                        zorder=5,
-                        edgecolors="white",
-                        linewidths=1.6,
-                    )
-                    ax_overall.annotate(
-                        format_admissibility_pct(last_ov),
-                        xy=(lix, last_ov),
-                        xytext=(10, 4),
-                        textcoords="offset points",
-                        fontsize=10,
-                        fontweight="600",
-                        color="#2c3e50",
-                    )
-            ax_overall.set_xlabel(step_label)
-            ax_overall.set_ylabel("Admissibility (%)")
-            ax_overall.yaxis.set_major_formatter(PercentFormatter(1.0))
-            ax_overall.set_title("Overall admissibility", fontweight="600")
-            ax_overall.grid(True, alpha=0.4)
-            for spine in ax_overall.spines.values():
-                spine.set_linewidth(1.05)
-            if any(np.isfinite(overall_adm)):
-                ax_overall.legend(
-                    loc="upper left",
-                    bbox_to_anchor=(0.02, 0.98),
-                    framealpha=0.92,
-                    fontsize=9,
-                )
-
-            _matplotlib_draw_category_adm_three_pillar(ax_cat, metrics, np)
-            _matplotlib_card_axes_styling(ax_overall)
-            _matplotlib_card_axes_styling(ax_cat)
-
-            g_cat = outer[1].subgridspec(1, 2, wspace=0.52)
-            ax_laws = fig.add_subplot(g_cat[0, 0])
-            ax_const = fig.add_subplot(g_cat[0, 1], sharex=ax_laws, sharey=ax_laws)
-            palette = plt.cm.tab10(np.linspace(0, 0.9, 10))
-            cat_axes = (ax_laws, ax_const)
-            cat_ids = ("laws", "constitutive")
-            for ax_i, cat in enumerate(cat_ids):
-                ax_c = cat_axes[ax_i]
-                info = category_training.get(cat, {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))})
-                ckeys = info["keys"]
-                displays = info["displays"]
-                mat = info["r_norm_mat"]
-                title_c = category_titles.get(
-                    cat,
-                    cat.replace("_", " ").title(),
-                )
-                if not ckeys:
-                    ax_c.text(
-                        0.5,
-                        0.5,
-                        "No keys in this category",
-                        ha="center",
-                        va="center",
-                        transform=ax_c.transAxes,
-                        fontsize=10,
-                        color="#666666",
-                    )
-                    if ax_i == 0:
-                        ax_c.set_xlabel(step_label)
-                        ax_c.set_ylabel(rnorm_ylabel)
-                    else:
-                        ax_c.set_xlabel("")
-                        plt.setp(ax_c.get_yticklabels(), visible=False)
-                else:
-                    for i, _kk in enumerate(ckeys):
-                        ys = mat[i, :]
-                        if np.all(np.isfinite(ys)):
-                            y_plot = _transform_r_norm_y(ys, np, use_log_rnorm)
-                            ax_c.plot(
-                                indices,
-                                y_plot,
-                                label=displays[i],
-                                color=palette[i % len(palette)],
-                                alpha=0.9,
-                                linewidth=1.8,
-                            )
-                    ax_c.legend(
-                        loc="upper right",
-                        framealpha=0.92,
-                        fontsize=7,
-                        labelspacing=0.28,
-                        handlelength=1.05,
-                        borderpad=0.35,
-                    )
-                ax_c.set_title(title_c, fontsize=11, fontweight="600")
-                ax_c.grid(True, alpha=0.4)
-                for spine in ax_c.spines.values():
-                    spine.set_linewidth(1.05)
-                if ax_i == 0:
-                    ax_c.set_xlabel(step_label)
-                    ax_c.set_ylabel(rnorm_ylabel)
-                else:
-                    ax_c.set_xlabel("")
-                    plt.setp(ax_c.get_yticklabels(), visible=False)
-                if ckeys and n > 15:
-                    plt.setp(ax_c.get_xticklabels(), rotation=35, ha="right", fontsize=8.5)
-                _matplotlib_card_axes_styling(ax_c)
-
-            g_sp = outer[2].subgridspec(1, 2, wspace=0.38)
-            ax_sp_law = fig.add_subplot(g_sp[0, 0])
-            ax_sp_rn = fig.add_subplot(g_sp[0, 1])
-            if has_spatial:
-                _matplotlib_draw_spatial_panel(
-                    fig,
-                    ax_sp_law,
-                    spatial,
-                    cmap="cividis",
-                    title=_law_sp_title,
-                    np=np,
-                    rnorm_subtitle=spatial_z_ylabel,
-                    use_log_rnorm=use_log_rnorm,
-                )
-            else:
-                ax_sp_law.text(
-                    0.5,
-                    0.5,
-                    "Pass spatial_law_panel or residuals + state_pred\nwith coordinates.",
-                    ha="center",
-                    va="center",
-                    transform=ax_sp_law.transAxes,
-                    fontsize=10,
-                    color="#666666",
-                )
-                ax_sp_law.set_axis_off()
-                ax_sp_law.set_title(
-                    f"{_law_sp_title}\n{spatial_z_ylabel}",
-                    fontsize=10,
-                    fontweight="600",
-                )
-
-            if has_spatial_rnorm:
-                _matplotlib_draw_spatial_panel(
-                    fig,
-                    ax_sp_rn,
-                    spatial_rnorm,
-                    cmap="magma",
-                    title=_const_sp_title,
-                    np=np,
-                    rnorm_subtitle=spatial_z_ylabel,
-                    use_log_rnorm=use_log_rnorm,
-                )
-            else:
-                ax_sp_rn.text(
-                    0.5,
-                    0.5,
-                    "Pass spatial_rnorm_panel or residuals + state_pred\nwith coordinates.",
-                    ha="center",
-                    va="center",
-                    transform=ax_sp_rn.transAxes,
-                    fontsize=10,
-                    color="#666666",
-                )
-                ax_sp_rn.set_axis_off()
-                ax_sp_rn.set_title(
-                    f"{_const_sp_title}\n{spatial_z_ylabel}",
-                    fontsize=10,
-                    fontweight="600",
-                )
-            _matplotlib_card_axes_styling(ax_sp_law)
-            _matplotlib_card_axes_styling(ax_sp_rn)
-
-            fig.align_ylabels([ax_laws, ax_sp_law])
-
-            fig.suptitle(resolved_title, fontsize=17, fontweight="700", y=0.982)
-            if math.isfinite(last_ov):
-                fig.text(
-                    0.5,
-                    0.898,
-                    f"Overall admissibility (final): {format_admissibility_pct(last_ov)} — {status_hml}",
-                    ha="center",
-                    fontsize=11,
-                    fontweight="600",
-                    color="#1a1a1a",
-                    transform=fig.transFigure,
-                )
-            _le = fig.get_layout_engine()
-            if _le is not None and hasattr(_le, "set"):
-                _le.set(
-                    h_pad=0.05,
-                    w_pad=0.06,
-                    hspace=0.10,
-                    wspace=0.06,
-                    rect=[0.07, 0.048, 0.97, 0.855],
-                )
-            return fig
-
-        polar_span_full = mode_eff == "test" and not (has_spatial or has_spatial_rnorm)
-
-        def _draw_all_keys_bars(ax_all: Any) -> None:
-            valid_b = np.isfinite(bar_values)
-            if np.any(valid_b):
-                y_pos_b = np.arange(len(bar_display))
-                colors_b = plt.cm.Blues(np.linspace(0.35, 0.85, len(bar_display)))
-                ax_all.barh(
-                    y_pos_b,
-                    np.where(valid_b, bar_values, 0.0),
-                    color=colors_b,
-                    edgecolor="white",
-                    linewidth=0.5,
-                )
-                ax_all.set_yticks(y_pos_b)
-                ax_all.set_yticklabels([truncate_display_label(d, 44) for d in bar_display], fontsize=8)
-                ax_all.invert_yaxis()
-            ax_all.set_xlabel("Normalized residual (R norm)")
-            bundle_nr_title = bundle.get("nr_title") or "Normalized Residuals"
-            ax_all.set_title(bundle_nr_title)
-            ax_all.grid(True, axis="x", alpha=0.4)
-
-        def _draw_compact_spatial_row(ax_l: Any, ax_r: Any) -> None:
-            if has_spatial:
-                _matplotlib_draw_spatial_panel(
-                    fig,
-                    ax_l,
-                    spatial,
-                    cmap="cividis",
-                    title=_law_sp_title,
-                    np=np,
-                    rnorm_subtitle=spatial_z_ylabel,
-                    use_log_rnorm=use_log_rnorm,
-                )
-            else:
-                ax_l.text(
-                    0.5,
-                    0.5,
-                    "Pass spatial_law_panel or residuals + state_pred\nwith coordinates.",
-                    ha="center",
-                    va="center",
-                    transform=ax_l.transAxes,
-                    fontsize=10,
-                    color="#666666",
-                )
-                ax_l.set_axis_off()
-                ax_l.set_title(
-                    f"{_law_sp_title}\n{spatial_z_ylabel}",
-                    fontsize=10,
-                    fontweight="600",
-                )
-            if has_spatial_rnorm:
-                _matplotlib_draw_spatial_panel(
-                    fig,
-                    ax_r,
-                    spatial_rnorm,
-                    cmap="magma",
-                    title=_const_sp_title,
-                    np=np,
-                    rnorm_subtitle=spatial_z_ylabel,
-                    use_log_rnorm=use_log_rnorm,
-                )
-            else:
-                ax_r.text(
-                    0.5,
-                    0.5,
-                    "Pass spatial_rnorm_panel or residuals + state_pred\nwith coordinates.",
-                    ha="center",
-                    va="center",
-                    transform=ax_r.transAxes,
-                    fontsize=10,
-                    color="#666666",
-                )
-                ax_r.set_axis_off()
-                ax_r.set_title(
-                    f"{_const_sp_title}\n{spatial_z_ylabel}",
-                    fontsize=10,
-                    fontweight="600",
-                )
-            _matplotlib_card_axes_styling(ax_l)
-            _matplotlib_card_axes_styling(ax_r)
-
-        if polar_span_full:
-            fig_h = 10.2
-            nrows_pf = 3
-            fig = plt.figure(figsize=(10.5, fig_h), constrained_layout=True)
-            height_ratios_pf = [1.0, 1.12, 1.0]
-            gs = fig.add_gridspec(nrows_pf, 2, height_ratios=height_ratios_pf, wspace=0.34)
-            ax_sp_law_pf = fig.add_subplot(gs[0, 0])
-            ax_sp_rn_pf = fig.add_subplot(gs[0, 1])
-            _draw_compact_spatial_row(ax_sp_law_pf, ax_sp_rn_pf)
-            ax0 = fig.add_subplot(gs[1, :])
-            _draw_all_keys_bars(ax0)
-            ax_cat2 = fig.add_subplot(gs[2, :])
-            _matplotlib_draw_category_adm_three_pillar(ax_cat2, metrics, np)
-            _matplotlib_card_axes_styling(ax0)
-            _matplotlib_card_axes_styling(ax_cat2)
-        else:
-            fig_h = 11.2
-            nrows_3 = 3
-            fig = plt.figure(figsize=(10.5, fig_h), constrained_layout=True)
-            height_ratios_c = [0.95, 0.22, 1.05]
-            gs = fig.add_gridspec(nrows_3, 2, height_ratios=height_ratios_c, wspace=0.34)
-
-            ax_sp_law = fig.add_subplot(gs[0, 0])
-            ax_sp_rn = fig.add_subplot(gs[0, 1])
-            _draw_compact_spatial_row(ax_sp_law, ax_sp_rn)
-
-            ax_cat_top = fig.add_subplot(gs[1, :])
-            _matplotlib_draw_category_adm_three_pillar(ax_cat_top, metrics, np)
-
-            ax0 = fig.add_subplot(gs[2, :])
-            _draw_all_keys_bars(ax0)
-            _matplotlib_card_axes_styling(ax_cat_top)
-            _matplotlib_card_axes_styling(ax0)
-
-        fig.suptitle(resolved_title, fontsize=17, fontweight="700", y=0.978)
-        last_ov_c = float(overall_adm[-1]) if len(overall_adm) else float("nan")
-        if math.isfinite(last_ov_c):
-            fig.text(
-                0.5,
-                0.898,
-                f"Overall admissibility (final): {format_admissibility_pct(last_ov_c)} — {_admissibility_status_hml(last_ov_c)}",
-                ha="center",
-                fontsize=10.5,
-                fontweight="600",
-                color="#1a1a1a",
-                transform=fig.transFigure,
-            )
-        _le2 = fig.get_layout_engine()
-        if _le2 is not None and hasattr(_le2, "set"):
-            _le2.set(
-                h_pad=0.05,
-                w_pad=0.06,
-                hspace=0.09,
-                wspace=0.06,
-                rect=[0.08, 0.065, 0.96, 0.845],
-            )
-
-    return fig
 
 
 def _coord_snapshot_from_merged(merged: Mapping[str, Any]) -> Dict[str, List[float]]:
