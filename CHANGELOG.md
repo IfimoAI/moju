@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-27
+
 ### Changed
 
 - **Breaking — `visualize` Matplotlib dashboards removed:** Interactive dashboards use **Plotly** only (`backend="plotly"`, default). **`backend="none"`** skips rendering. **`backend="matplotlib"`** raises **`ValueError`**. The **`moju[viz]`** extra installs **plotly** only (no matplotlib). If Plotly is not installed, **`visualize`** returns **`None`** (unchanged).
