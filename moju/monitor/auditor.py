@@ -913,6 +913,10 @@ def visualize(
     step_label: str = "Step",
     r_norm_scale: str = "log",
     spatial_heatmap_colorscale: Optional[str] = None,
+    dashboard_mode: str = "single-figure",
+    theme: str = "light",
+    baseline_score: Optional[float] = None,
+    export_buttons: bool = True,
 ) -> Any:
     """
     Monitor dashboard from ``ResidualEngine`` log entries (``rms``, ``scale``).
@@ -1032,6 +1036,10 @@ def visualize(
         raise ValueError("mode must be 'training' or 'test'")
     if r_norm_scale not in ("log", "linear"):
         raise ValueError("r_norm_scale must be 'log' or 'linear'")
+    if dashboard_mode not in ("single-figure", "dash-tabs"):
+        raise ValueError("dashboard_mode must be 'single-figure' or 'dash-tabs'")
+    if theme not in ("dark", "light"):
+        raise ValueError("theme must be 'dark' or 'light'")
 
     eff_residuals = residuals
     if eff_residuals is None and engine is not None:
@@ -1079,6 +1087,10 @@ def visualize(
             step_label=step_label,
             r_norm_scale=r_norm_scale,
             spatial_heatmap_colorscale=spatial_heatmap_colorscale,
+            dashboard_mode=dashboard_mode,
+            theme=theme,
+            baseline_score=baseline_score,
+            export_buttons=export_buttons,
         )
     except ImportError:
         return None

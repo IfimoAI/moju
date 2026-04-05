@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`visualize` default Plotly theme:** `theme` now defaults to **`"light"`** (white / `plotly_white` styling). Pass **`theme="dark"`** for the previous dark dashboard look.
+
+- **Plotly monitor report redesign:** `visualize(..., backend="plotly", dashboard_mode="single-figure")` now renders a structured **Physics Admissibility Report** with a hierarchy for header/status, KPI cards, admissibility trend, sorted category breakdown with trust threshold, residual diagnostics (worst-violation emphasis), spatial residual fields with shared colorscale, and an actionable summary block. Training and test modes now share a consistent visual language (theme tokens, typography, watermark, hover metadata including `scale_k`) while preserving mode-specific data semantics.
+
 ## [0.6.0] - 2026-03-27
 
 ### Changed

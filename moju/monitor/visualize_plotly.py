@@ -21,9 +21,11 @@ R_NORM_LOG_EPS = 1e-12
 # Fixed height for Moju Studio Dashboard Plotly cards (law/adm bars + spatial heatmaps).
 MOJU_STUDIO_DASHBOARD_CARD_HEIGHT = 400
 
-RESIDUAL_COLOR_LAWS = "#7e57c2"  # purple
-RESIDUAL_COLOR_CONSTITUTIVE = "#009688"  # teal
+RESIDUAL_COLOR_LAWS = "#8B5CF6"  # royal purple
+RESIDUAL_COLOR_CONSTITUTIVE = "#14B8A6"  # teal
 RESIDUAL_COLOR_OTHER = "#6b7280"  # neutral fallback
+ADMISSIBLE_COLOR = "#10B981"
+DISSONANCE_COLOR = "#EF4444"
 
 
 def _residual_color_from_key(flat_key: str) -> str:
@@ -112,7 +114,7 @@ def align_heatmap_colorbars_to_subplot_domains(fig: Any) -> None:
         x0, x1 = xdom
         y_mid = 0.5 * (y0 + y1)
         y_len = max(0.06, (y1 - y0) * 0.88)
-        x_cb = min(x1 + 0.02, 0.992)
+        x_cb = min(x1 + 0.012, 0.992)
         thick = getattr(cb, "thickness", None)
         if thick is None:
             thick = 12
@@ -210,12 +212,12 @@ def _plotly_add_spatial_panel_to_subplot(
     cb_kw: Dict[str, Any] = dict(
         title=dict(text=colorbar_scale_title, side="right"),
         len=0.38 if colorbar_compact else 0.36,
-        xpad=12,
+        xpad=8,
         thickness=14,
     )
     if not colorbar_compact:
-        cb_kw["x"] = 1.02
-        cb_kw["xpad"] = 14
+        cb_kw["x"] = 1.01
+        cb_kw["xpad"] = 10
 
     def _z_display(z: Any) -> Any:
         a = np.asarray(z, dtype=float)
@@ -255,12 +257,22 @@ def _plotly_add_spatial_panel_to_subplot(
             showticklabels=False,
             row=row,
             col=col,
+            showline=True,
+            linewidth=1.1,
+            mirror=True,
+            linecolor="black",
+            tickcolor="black",
             automargin=True,
         )
         fig.update_xaxes(
             title_text=f"Position {pos_ax}",
             row=row,
             col=col,
+            showline=True,
+            linewidth=1.1,
+            mirror=True,
+            linecolor="black",
+            tickcolor="black",
             automargin=True,
         )
         return
@@ -285,8 +297,8 @@ def _plotly_add_spatial_panel_to_subplot(
             row=row,
             col=col,
         )
-        fig.update_xaxes(title_text="x", row=row, col=col, automargin=True)
-        fig.update_yaxes(title_text="y", row=row, col=col, automargin=True)
+        fig.update_xaxes(title_text="x", row=row, col=col, showline=True, linewidth=1.1, mirror=True, linecolor="black", tickcolor="black", automargin=True)
+        fig.update_yaxes(title_text="y", row=row, col=col, showline=True, linewidth=1.1, mirror=True, linecolor="black", tickcolor="black", automargin=True)
         return
 
     if kind == "3d":
@@ -313,8 +325,8 @@ def _plotly_add_spatial_panel_to_subplot(
             row=row,
             col=col,
         )
-        fig.update_xaxes(title_text="x (z-slice)", row=row, col=col, automargin=True)
-        fig.update_yaxes(title_text="y (z-slice)", row=row, col=col, automargin=True)
+        fig.update_xaxes(title_text="x (z-slice)", row=row, col=col, showline=True, linewidth=1.1, mirror=True, linecolor="black", tickcolor="black", automargin=True)
+        fig.update_yaxes(title_text="y (z-slice)", row=row, col=col, showline=True, linewidth=1.1, mirror=True, linecolor="black", tickcolor="black", automargin=True)
         return
 
     fig.add_trace(
@@ -334,864 +346,504 @@ def _plotly_add_spatial_panel_to_subplot(
     fig.update_yaxes(visible=False, row=row, col=col)
 
 
-def build_plotly_monitor_figure(
+def _build_plotly_monitor_figure_single(
     bundle: Dict[str, Any],
     *,
     figure_title: Optional[str] = None,
     step_label: str = "Step",
     r_norm_scale: str = "log",
     spatial_heatmap_colorscale: Optional[str] = None,
+    theme: str = "light",
+    baseline_score: Optional[float] = None,
+    export_buttons: bool = True,
 ) -> Any:
-    """
-    Build a ``plotly.graph_objects.Figure`` from a bundle produced by
-    :func:`moju.monitor.auditor._build_visualize_bundle`.
-    """
+    """Build a decision-oriented Plotly physics admissibility report."""
     import numpy as np
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
     if r_norm_scale not in ("log", "linear"):
         raise ValueError("r_norm_scale must be 'log' or 'linear'")
+    if theme not in ("dark", "light"):
+        raise ValueError("theme must be 'dark' or 'light'")
+
     use_log_rnorm = r_norm_scale == "log"
     rnorm_y_title = "log10(R_norm + ε)" if use_log_rnorm else "Normalized residual (R norm)"
-    spatial_norm = bool(bundle.get("spatial_normalize", False))
-    spatial_z_title = (
-        rnorm_y_title
-        if spatial_norm
-        else ("log10(|residual| + ε)" if use_log_rnorm else "|residual|")
-    )
-    law_sp_full = (
-        "Governing laws R_norm (spatial, last step)"
-        if spatial_norm
-        else "Governing laws |residual| (spatial, last step)"
-    )
-    const_sp_full = (
-        "Constitutive R_norm (spatial, last step)"
-        if spatial_norm
-        else "Constitutive |residual| (spatial, last step)"
-    )
-    hm_cs = spatial_heatmap_colorscale or "Jet"
+    hm_cs = spatial_heatmap_colorscale or "Viridis"
 
-    n = bundle["n"]
+    n = int(bundle["n"])
     indices = list(range(n))
-    category_training: Dict[str, Dict[str, Any]] = bundle.get("category_training") or {}
-    use_bar_chart = bundle["use_bar_chart"]
-    bar_keys: List[str] = bundle.get("bar_keys") or []
-    bar_display: List[str] = bundle["bar_display"]
-    bar_values = bundle["bar_values"]
-    overall_adm = bundle["overall_adm"]
-    metrics = bundle["metrics"]
-    spatial = bundle["spatial"]
-    spatial_rnorm = bundle.get("spatial_rnorm")
     mode_eff = bundle["mode"]
+    bar_keys: List[str] = bundle.get("bar_keys") or []
+    bar_display: List[str] = bundle.get("bar_display") or []
+    _bar_values_raw = bundle.get("bar_values")
+    bar_values = np.asarray([] if _bar_values_raw is None else _bar_values_raw, dtype=float)
+    _overall_raw = bundle.get("overall_adm")
+    overall_adm = np.asarray([] if _overall_raw is None else _overall_raw, dtype=float)
+    metrics = list(bundle.get("metrics") or [])
+    category_training: Dict[str, Dict[str, Any]] = bundle.get("category_training") or {}
+    spatial = bundle.get("spatial")
+    spatial_rnorm = bundle.get("spatial_rnorm")
+    log_entries = list(bundle.get("log") or [])
+    first_rms_map = (log_entries[0].get("rms") if log_entries else {}) or {}
+    last_scale_map = (log_entries[-1].get("scale") if log_entries else {}) or {}
 
-    has_spatial = spatial is not None
-    has_spatial_rnorm = spatial_rnorm is not None
-    training_lines = mode_eff == "training" and not use_bar_chart
-    polar_full = mode_eff == "test" and not (has_spatial or has_spatial_rnorm)
+    def _scale_for_key(flat_key: str) -> float:
+        sv = last_scale_map.get(flat_key)
+        if sv is None:
+            sv = first_rms_map.get(flat_key)
+        try:
+            fv = float(sv)
+        except (TypeError, ValueError):
+            fv = 1.0
+        if not math.isfinite(fv) or fv <= 0.0:
+            fv = 1.0
+        return fv
 
-    if training_lines:
-        specs_row_overall = [{"type": "xy", "colspan": 6}, None, None, None, None, None]
-        specs_row_bars = [
-            {"type": "xy", "colspan": 3},
-            None,
-            None,
-            {"type": "xy", "colspan": 3},
-            None,
-            None,
-        ]
-        specs_row_lines = [
-            {"type": "xy", "colspan": 3},
-            None,
-            None,
-            {"type": "xy", "colspan": 3},
-            None,
-            None,
-        ]
-        specs_row_spatial = [
-            {"type": "xy", "colspan": 3},
-            None,
-            None,
-            {"type": "xy", "colspan": 3},
-            None,
-            None,
-        ]
-        specs: List[List[Any]] = [specs_row_overall, specs_row_bars, specs_row_lines, specs_row_spatial]
-        row_heights = [0.19, 0.19, 0.25, 0.30]
+    dark = theme == "dark"
+    paper_bg = "#0b1220" if dark else "#ffffff"
+    plot_bg = "#111827" if dark else "#f7f8fa"
+    font_color = "#e5e7eb" if dark else "#111827"
+    muted = "#94a3b8" if dark else "#6b7280"
+    warn_color = "#F59E0B"
 
-        info_laws_tr = category_training.get(
-            "laws", {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))}
+    specs = [
+        [{"type": "xy", "colspan": 8}, None, None, None, None, None, None, None],
+        [{"type": "domain", "colspan": 2}, None, {"type": "domain", "colspan": 2}, None, {"type": "domain", "colspan": 2}, None, {"type": "domain", "colspan": 2}, None],
+        [{"type": "xy", "colspan": 4}, None, None, None, {"type": "xy", "colspan": 4}, None, None, None],
+        [{"type": "xy", "colspan": 4}, None, None, None, {"type": "xy", "colspan": 4}, None, None, None],
+        [{"type": "xy", "colspan": 4}, None, None, None, {"type": "xy", "colspan": 4}, None, None, None],
+    ]
+    fig = make_subplots(
+        rows=5,
+        cols=8,
+        specs=specs,
+        row_heights=[0.12, 0.16, 0.22, 0.24, 0.26],
+        vertical_spacing=0.07,
+        horizontal_spacing=0.08,
+        subplot_titles=(
+            "",
+            "Overall Admissibility",
+            "Governing Score",
+            "Constitutive Score",
+            "Scaling Score",
+            "Admissibility Trend",
+            "Category Breakdown",
+            "Governing Residuals",
+            "Constitutive Residuals",
+            "Governing Residual Field",
+            "Constitutive Residual Field",
+        ),
+    )
+
+    # Header band
+    fig.update_xaxes(visible=False, row=1, col=1)
+    fig.update_yaxes(visible=False, row=1, col=1)
+    last_ov = float(overall_adm[-1]) if len(overall_adm) else float("nan")
+    first_ov = float(overall_adm[0]) if len(overall_adm) else float("nan")
+    status = _admissibility_status_hml_plotly(last_ov)
+    status_color = ADMISSIBLE_COLOR if status == "HIGH" else (warn_color if status == "MODERATE" else DISSONANCE_COLOR)
+    trend_arrow = "↑" if (math.isfinite(last_ov) and math.isfinite(first_ov) and last_ov >= first_ov) else "↓"
+    final_idx = indices[-1] if indices else 0
+    fig.add_annotation(
+        x=0.01,
+        y=1.0,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        align="left",
+        text=(
+            f"<span style='font-size:28px;font-weight:700'>{format_admissibility_pct(last_ov) if math.isfinite(last_ov) else 'N/A'}</span>"
+            f" <span style='font-size:14px;color:{status_color};font-weight:700'>[{status}]</span>"
+            f"<br><span style='font-size:12px;color:{muted}'>Final Step: {final_idx} | Trend: {trend_arrow}</span>"
+        ),
+        font=dict(family="Inter, Arial, sans-serif", color=font_color),
+    )
+
+    # KPI cards as indicators
+    last_cat = (metrics[-1].get("category_admissibility_score") if metrics else {}) or {}
+    first_cat = (metrics[0].get("category_admissibility_score") if metrics else {}) or {}
+
+    def _kpi_indicator(value: float, title: str, ref: Optional[float]) -> Any:
+        v = float(value) if math.isfinite(float(value)) else 0.0
+        card_color = ADMISSIBLE_COLOR if v >= 0.9 else (warn_color if v >= 0.7 else DISSONANCE_COLOR)
+        ind_kwargs: Dict[str, Any] = dict(
+            mode=("number+delta" if ref is not None and math.isfinite(float(ref)) else "number"),
+            value=v,
+            number={"valueformat": ".1%", "font": {"size": 30, "color": card_color}},
+            title={"text": title, "font": {"size": 13, "color": muted}},
         )
-        info_const_tr = category_training.get(
-            "constitutive", {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))}
-        )
-        sub_titles = [
-            "Overall admissibility",
-            "Law R_norm (final step)",
-            "Category admissibility (final step)",
-            _convergence_subplot_title("laws", info_laws_tr),
-            _convergence_subplot_title("constitutive", info_const_tr),
-            _spatial_heatmap_subplot_title(spatial if has_spatial else None, law_sp_full),
-            _spatial_heatmap_subplot_title(spatial_rnorm if has_spatial_rnorm else None, const_sp_full),
-        ]
+        ind = go.Indicator(**ind_kwargs)
+        if ref is not None and math.isfinite(float(ref)):
+            ind.delta = {"reference": float(ref), "increasing": {"color": ADMISSIBLE_COLOR}, "decreasing": {"color": DISSONANCE_COLOR}, "valueformat": ".1%"}
+        return ind
 
-        fig = make_subplots(
-            rows=len(specs),
-            cols=6,
-            specs=specs,
-            vertical_spacing=0.152,
-            horizontal_spacing=0.115,
-            row_heights=row_heights,
-            subplot_titles=tuple(sub_titles),
-        )
-        fig.update_annotations(font=dict(size=11, family="Arial, sans-serif", color="#1a1a1a"))
+    overall_ref = float(baseline_score) if baseline_score is not None else (first_ov if math.isfinite(first_ov) else None)
+    laws_last = float(last_cat.get("laws", float("nan")))
+    laws_ref = float(first_cat.get("laws", float("nan"))) if "laws" in first_cat else None
+    const_last = float(last_cat.get("constitutive", float("nan")))
+    const_ref = float(first_cat.get("constitutive", float("nan"))) if "constitutive" in first_cat else None
+    scaling_last = float(last_cat.get("data", float("nan")))
+    scaling_ref = float(first_cat.get("data", float("nan"))) if "data" in first_cat else None
 
-        last_ov = float(overall_adm[-1]) if len(overall_adm) else float("nan")
-        adm_hover = []
-        for y in overall_adm:
-            try:
-                fy = float(y)
-            except (TypeError, ValueError):
-                adm_hover.append("N/A")
-            else:
-                adm_hover.append(format_admissibility_pct(fy) if math.isfinite(fy) else "N/A")
-        if any(np.isfinite(overall_adm)):
+    # Bind indicators to row-2 domain subplot cells (cols 1,3,5,7) so Plotly does not assign cartesian xaxis/yaxis.
+    fig.add_trace(_kpi_indicator(last_ov if math.isfinite(last_ov) else 0.0, "Overall Admissibility", overall_ref), row=2, col=1)
+    fig.add_trace(_kpi_indicator(laws_last if math.isfinite(laws_last) else 0.0, "Governing Score", laws_ref), row=2, col=3)
+    fig.add_trace(_kpi_indicator(const_last if math.isfinite(const_last) else 0.0, "Constitutive Score", const_ref), row=2, col=5)
+    fig.add_trace(_kpi_indicator(scaling_last if math.isfinite(scaling_last) else 0.0, "Scaling Score", scaling_ref), row=2, col=7)
+
+    # Trend analysis (test mode: no vs-step plot)
+    if mode_eff == "test":
+        fig.add_trace(
+            go.Scatter(
+                x=[0],
+                y=[last_ov if math.isfinite(last_ov) else 0.0],
+                mode="text",
+                text=[
+                    (
+                        f"Final admissibility: {format_admissibility_pct(last_ov)}<br>"
+                        f"Status: {status}"
+                    )
+                    if math.isfinite(last_ov)
+                    else "Final admissibility unavailable"
+                ],
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            row=3,
+            col=1,
+        )
+        fig.update_xaxes(visible=False, row=3, col=1)
+        fig.update_yaxes(visible=False, row=3, col=1)
+    elif any(np.isfinite(overall_adm)):
+        adm_hover = [format_admissibility_pct(float(y)) if np.isfinite(y) else "N/A" for y in overall_adm]
+        fig.add_trace(
+            go.Scatter(
+                x=indices,
+                y=overall_adm,
+                mode="lines",
+                name="Overall admissibility",
+                    line=dict(color="black", width=2.8),
+                text=adm_hover,
+                hovertemplate="Overall<br>%{x}<br>%{text}<extra></extra>",
+                showlegend=False,
+            ),
+            row=3,
+            col=1,
+        )
+        if len(overall_adm) >= 4:
+            kernel = np.ones(3, dtype=float) / 3.0
+            smooth = np.convolve(overall_adm, kernel, mode="same")
             fig.add_trace(
                 go.Scatter(
                     x=indices,
-                    y=overall_adm,
+                    y=smooth,
                     mode="lines",
-                    name="Overall admissibility",
-                    line=dict(color="#2c3e50", width=2.8),
+                    name="Smoothed",
+                    line=dict(color="#93C5FD", width=2, dash="dot"),
+                    hovertemplate="Smoothed<br>%{x}<br>%{y:.2%}<extra></extra>",
                     showlegend=False,
-                    text=adm_hover,
-                    hovertemplate="Overall<br>%{x}<br>%{text}<extra></extra>",
                 ),
-                row=1,
+                row=3,
                 col=1,
             )
-            if math.isfinite(last_ov):
-                lix = indices[-1]
-                fig.add_trace(
-                    go.Scatter(
-                        x=[lix],
-                        y=[last_ov],
-                        mode="markers",
-                        marker=dict(size=12, color="#c0392b", line=dict(width=2, color="white")),
-                        showlegend=False,
-                        text=[format_admissibility_pct(last_ov)],
-                        hovertemplate="Final<br>%{text}<extra></extra>",
-                    ),
-                    row=1,
-                    col=1,
-                )
-                fig.add_annotation(
-                    x=lix,
-                    y=last_ov,
-                    text=f" {format_admissibility_pct(last_ov)}",
-                    showarrow=False,
-                    xanchor="left",
-                    yanchor="bottom",
-                    font=dict(size=11, color="#2c3e50", family="Arial, sans-serif"),
-                    row=1,
-                    col=1,
-                )
-        fig.update_xaxes(
-            title_text=step_label,
-            row=1,
-            col=1,
-            showline=True,
-            linewidth=1.2,
-            mirror=True,
-            automargin=True,
-        )
-        fig.update_yaxes(
-            title_text="Admissibility (%)",
-            tickformat=".2f%",
-            autorange=True,
-            row=1,
-            col=1,
-            showline=True,
-            linewidth=1.2,
-            mirror=True,
-            automargin=True,
-        )
-
-        if not bar_display or len(bar_values) == 0 or n < 1:
+        if math.isfinite(last_ov):
             fig.add_trace(
                 go.Scatter(
-                    x=[indices[len(indices) // 2] if indices else 0],
-                    y=[0.0],
-                    mode="text",
-                    text=["No residual keys in this run"],
-                    textposition="middle center",
+                    x=[final_idx],
+                    y=[last_ov],
+                    mode="markers",
+                    marker=dict(size=10, color=DISSONANCE_COLOR, line=dict(width=1.5, color="white")),
+                    hovertemplate="Final<br>%{y:.2%}<extra></extra>",
                     showlegend=False,
-                    hoverinfo="skip",
                 ),
-                row=2,
+                row=3,
                 col=1,
             )
-        else:
-            x_lbl = [truncate_display_label(d, 44) for d in bar_display]
-            r_last = [float(v) if np.isfinite(v) else float("nan") for v in np.asarray(bar_values, dtype=float)]
-            bar_colors = [
-                _residual_color_from_key(bar_keys[i] if i < len(bar_keys) else "")
-                for i in range(len(x_lbl))
-            ]
-            y_bar = [
-                (
-                    float(np.log10(max(rv, 0.0) + R_NORM_LOG_EPS))
-                    if np.isfinite(rv) and use_log_rnorm
-                    else (float(rv) if np.isfinite(rv) else 0.0)
+        finite = overall_adm[np.isfinite(overall_adm)]
+        if finite.size:
+            ymin = max(0.0, float(np.min(finite)) - 0.05)
+            ymax = min(1.0, float(np.max(finite)) + 0.05)
+            if ymax - ymin < 0.08:
+                mid = 0.5 * (ymin + ymax)
+                ymin = max(0.0, mid - 0.04)
+                ymax = min(1.0, mid + 0.04)
+            fig.update_yaxes(range=[ymin, ymax], row=3, col=1)
+        if len(overall_adm) >= 5:
+            delta = np.diff(overall_adm.astype(float))
+            if np.nanstd(delta) > 0.03:
+                # Do not use add_hrect(row=..., col=...): Plotly scans all fig.data for axis
+                # refs and reads xaxis/yaxis on every trace; Indicator traces have no xaxis.
+                trend_ref = next(
+                    (
+                        tr
+                        for tr in fig.data
+                        if getattr(tr, "type", None) == "scatter"
+                        and getattr(tr, "name", "") == "Overall admissibility"
+                    ),
+                    None,
                 )
-                for rv in r_last
-            ]
-            fig.add_trace(
-                go.Bar(
-                    x=x_lbl,
-                    y=y_bar,
-                    marker_color=bar_colors,
-                    showlegend=False,
-                    hovertemplate="%{x}<br>"
-                    + ("log10(R_norm+ε)=%{y:.4g}<extra></extra>" if use_log_rnorm else "R norm=%{y:.4g}<extra></extra>"),
-                ),
-                row=2,
-                col=1,
-            )
+                if trend_ref is not None:
+                    xa = getattr(trend_ref, "xaxis", None) or "x"
+                    ya = getattr(trend_ref, "yaxis", None) or "y"
+                    fig.add_shape(
+                        type="rect",
+                        x0=0,
+                        x1=1,
+                        xref=f"{xa} domain",
+                        y0=max(0.0, float(np.nanmin(overall_adm))),
+                        y1=min(1.0, float(np.nanmax(overall_adm))),
+                        yref=ya,
+                        fillcolor=DISSONANCE_COLOR,
+                        opacity=0.07,
+                        line_width=0,
+                        layer="below",
+                    )
+
+    if mode_eff != "test":
         fig.update_xaxes(
-            title_text="All Residuals",
-            row=2,
+            title_text=step_label,
+            row=3,
             col=1,
             showline=True,
             linewidth=1.2,
+            mirror=True,
+            linecolor="black",
+            tickcolor="black",
             automargin=True,
         )
         fig.update_yaxes(
-            title_text=rnorm_y_title,
-            row=2,
+            title_text="Admissibility (%)",
+            tickformat=".2f%",
+            row=3,
             col=1,
             showline=True,
             linewidth=1.2,
+            mirror=True,
+            linecolor="black",
+            tickcolor="black",
             automargin=True,
         )
 
-        blabels, bvals = _three_pillar_labels_values(metrics)
-        bcolors = [_adm_bar_color_plotly(v) for v in bvals]
-        bx = [v if math.isfinite(v) else 0.0 for v in bvals]
-        btext = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for v in bvals]
-        adm_ht = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for v in bx]
-        fig.add_trace(
-            go.Bar(
-                x=bx,
-                y=blabels,
-                orientation="h",
-                marker=dict(color=bcolors, line=dict(color="#333333", width=1)),
-                text=btext,
-                textposition="outside",
-                cliponaxis=False,
-                showlegend=False,
-                customdata=adm_ht,
-                hovertemplate="%{y}<br>admissibility=%{customdata}<extra></extra>",
-            ),
-            row=2,
-            col=4,
-        )
-        _adm_full = category_adm_bar_axis_range_percent_full()
-        fig.update_xaxes(
-            title_text="Admissibility (%)",
-            range=list(_adm_full),
-            tickformat=".2f%",
-            row=2,
-            col=4,
-            showline=True,
-            linewidth=1.2,
-            automargin=True,
-        )
-        fig.update_yaxes(row=2, col=4, showline=True, linewidth=1.2, automargin=True)
+    # Category breakdown (worst -> best)
+    order_keys = []
+    order_vals = []
+    for k, v in last_cat.items():
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            continue
+        order_keys.append(k)
+        order_vals.append(fv)
+    if not order_keys:
+        order_keys = ["laws", "constitutive"]
+        order_vals = [laws_last, const_last]
+    labels_vals = sorted(zip(order_keys, order_vals), key=lambda kv: kv[1] if math.isfinite(kv[1]) else 2.0)
+    cat_labels_raw = [pretty_category_name(k) for k, _ in labels_vals]
+    cat_labels = ["Constitutive<br>Relations" if v == "Constitutive Relations" else v for v in cat_labels_raw]
+    cat_vals = [float(v) if math.isfinite(v) else 0.0 for _, v in labels_vals]
+    cat_text = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for _, v in labels_vals]
+    cat_colors = [ADMISSIBLE_COLOR if v >= 0.9 else (warn_color if v >= 0.7 else DISSONANCE_COLOR) for v in cat_vals]
+    fig.add_trace(
+        go.Bar(
+            x=cat_vals,
+            y=cat_labels,
+            orientation="h",
+            marker=dict(color=cat_colors, line=dict(color="#374151", width=1)),
+            text=cat_text,
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate="%{y}<br>admissibility=%{text}<extra></extra>",
+            showlegend=False,
+        ),
+        row=3,
+        col=5,
+    )
+    cat_axis = getattr(fig.data[-1], "xaxis", "x2")
+    cat_yaxis = getattr(fig.data[-1], "yaxis", "y2")
+    fig.add_shape(
+        type="line",
+        x0=0.9,
+        x1=0.9,
+        y0=0,
+        y1=1,
+        xref=cat_axis,
+        yref=f"{cat_yaxis} domain",
+        line=dict(color=warn_color, dash="dash"),
+    )
+    worst_label = cat_labels_raw[0] if cat_labels_raw else "N/A"
+    fig.add_annotation(
+        x=0.02,
+        y=1.04,
+        xref=f"{cat_axis} domain",
+        yref=f"{cat_yaxis} domain",
+        text=f"Primary Issue: {worst_label}",
+        showarrow=False,
+        align="left",
+        font=dict(size=11, color=DISSONANCE_COLOR, family="Inter, Arial, sans-serif"),
+    )
+    fig.update_xaxes(
+        title_text="Admissibility (%)",
+        range=list(category_adm_bar_axis_range_percent_full()),
+        tickformat=".2f%",
+        row=3,
+        col=5,
+        showline=True,
+        linewidth=1.2,
+        linecolor="black",
+        tickcolor="black",
+        automargin=True,
+    )
+    fig.update_yaxes(row=3, col=5, showline=True, linewidth=1.2, linecolor="black", tickcolor="black", automargin=True, tickfont=dict(size=10))
 
-        cat_order = ("laws", "constitutive")
-        plot_cols = (1, 4)
-        line_row = 3
-        for ci, cat in enumerate(cat_order):
-            col = plot_cols[ci]
-            info = category_training.get(cat, {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))})
-            ckeys: List[str] = info["keys"]
-            displays: List[str] = info["displays"]
-            mat = info["r_norm_mat"]
-            if not ckeys:
+    # Residual diagnostics
+    def _plot_residual_panel(cat: str, row: int, col: int, title_prefix: str) -> None:
+        info = category_training.get(cat, {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))})
+        ckeys: List[str] = list(info.get("keys") or [])
+        displays: List[str] = list(info.get("displays") or [])
+        mat = np.asarray(info.get("r_norm_mat") if info.get("r_norm_mat") is not None else np.zeros((0, n)), dtype=float)
+        if mode_eff != "test" and mat.size and len(ckeys):
+            terminal = mat[:, -1]
+            worst_i = int(np.nanargmax(terminal)) if np.any(np.isfinite(terminal)) else 0
+            unstable = np.nanstd(np.diff(mat, axis=1), axis=1) if mat.shape[1] > 1 else np.zeros(mat.shape[0])
+            unstable_i = int(np.nanargmax(unstable)) if unstable.size else -1
+            for i, key in enumerate(ckeys):
+                ys = mat[i, :]
+                if not np.all(np.isfinite(ys)):
+                    continue
+                y_plot = np.log10(np.maximum(ys, 0.0) + R_NORM_LOG_EPS) if use_log_rnorm else ys
+                colr = RESIDUAL_COLOR_LAWS if cat == "laws" else RESIDUAL_COLOR_CONSTITUTIVE
+                width = 3.4 if i == worst_i else 2.0
+                dash = "dash" if i == unstable_i and i != worst_i else "solid"
+                scale_k = _scale_for_key(key)
+                customdata = np.full(len(indices), scale_k)
+                name = displays[i] if i < len(displays) else key
                 fig.add_trace(
                     go.Scatter(
-                        x=[indices[len(indices) // 2] if indices else 0],
-                        y=[0.0],
-                        mode="text",
-                        text=["No keys in this category"],
-                        textposition="middle center",
+                        x=indices,
+                        y=y_plot,
+                        mode="lines",
+                        name=name,
+                        line=dict(color=colr, width=width, dash=dash),
                         showlegend=False,
-                        hoverinfo="skip",
+                        customdata=customdata,
+                        hovertemplate=f"{name}<br>{step_label}=%{{x}}<br>{'log10(R_norm+ε)' if use_log_rnorm else 'R_norm'}=%{{y:.4g}}<br>scale_k=%{{customdata:.4g}}<extra></extra>",
                     ),
-                    row=line_row,
+                    row=row,
+                    col=col,
+                )
+            worst_name = displays[worst_i] if worst_i < len(displays) else (ckeys[worst_i] if ckeys else "N/A")
+            if len(ckeys) > 1:
+                fig.add_annotation(
+                    x=0.01,
+                    y=1.02,
+                    xref=("x3 domain" if col == 1 else "x4 domain"),
+                    yref=("y3 domain" if col == 1 else "y4 domain"),
+                    text=f"Worst violation: {truncate_display_label(worst_name, 44)}",
+                    showarrow=False,
+                    align="left",
+                    font=dict(size=10, color=DISSONANCE_COLOR, family="Inter, Arial, sans-serif"),
+                    row=row,
+                    col=col,
+                )
+        else:
+            fk = [i for i, k in enumerate(bar_keys) if str(k).startswith(f"{cat}/")]
+            if fk:
+                xs = [truncate_display_label(bar_display[i], 40) for i in fk]
+                vals = [float(bar_values[i]) if i < len(bar_values) and np.isfinite(bar_values[i]) else 0.0 for i in fk]
+                ys = [float(np.log10(max(v, 0.0) + R_NORM_LOG_EPS)) if use_log_rnorm else v for v in vals]
+                cds = [_scale_for_key(bar_keys[i]) for i in fk]
+                fig.add_trace(
+                    go.Bar(
+                        x=xs,
+                        y=ys,
+                        marker_color=(RESIDUAL_COLOR_LAWS if cat == "laws" else RESIDUAL_COLOR_CONSTITUTIVE),
+                        customdata=cds,
+                        showlegend=False,
+                        hovertemplate="%{x}<br>" + (("log10(R_norm+ε)=%{y:.4g}") if use_log_rnorm else ("R_norm=%{y:.4g}")) + "<br>scale_k=%{customdata:.4g}<extra></extra>",
+                    ),
+                    row=row,
                     col=col,
                 )
             else:
-                for i, _kk in enumerate(ckeys):
-                    ys = mat[i, :]
-                    if np.all(np.isfinite(ys)):
-                        y_plot = (
-                            np.log10(np.maximum(ys, 0.0) + R_NORM_LOG_EPS)
-                            if use_log_rnorm
-                            else ys
-                        )
-                        ht_y = "log10 R_norm" if use_log_rnorm else "R norm"
-                        fig.add_trace(
-                            go.Scatter(
-                                x=indices,
-                                y=y_plot,
-                                mode="lines",
-                                name=displays[i],
-                                legendgroup=f"cat_{cat}",
-                                line=dict(
-                                    color=(
-                                        RESIDUAL_COLOR_LAWS
-                                        if cat == "laws"
-                                        else (RESIDUAL_COLOR_CONSTITUTIVE if cat == "constitutive" else RESIDUAL_COLOR_OTHER)
-                                    ),
-                                    width=2.2,
-                                ),
-                                hovertemplate=f"{displays[i]}<br>{step_label}=%{{x}}<br>{ht_y}=%{{y:.4g}}<extra></extra>",
-                            ),
-                            row=line_row,
-                            col=col,
-                        )
-            fig.update_xaxes(
-                title_text=step_label,
-                row=line_row,
-                col=col,
-                showline=True,
-                linewidth=1.2,
-                mirror=True,
-                automargin=True,
-            )
-            fig.update_yaxes(
-                title_text=rnorm_y_title if ci == 0 else "",
-                row=line_row,
-                col=col,
-                showline=True,
-                linewidth=1.2,
-                mirror=True,
-                automargin=True,
-            )
-
-        if n > 15:
-            fig.update_xaxes(tickangle=-35, row=line_row, col=1, automargin=True)
-            fig.update_xaxes(tickangle=-35, row=line_row, col=4, automargin=True)
-
-        spatial_row = 4
-        mid = indices[len(indices) // 2] if indices else 0
-
-        if has_spatial:
-            _plotly_add_spatial_panel_to_subplot(
-                fig,
-                row=spatial_row,
-                col=1,
-                spatial=spatial,
-                hm_cs=hm_cs,
-                mid=mid,
-                colorbar_compact=False,
-                use_log_rnorm=use_log_rnorm,
-                colorbar_scale_title=spatial_z_title,
-            )
-        else:
-            fig.add_trace(
-                go.Scatter(
-                    x=[mid],
-                    y=[0.0],
-                    mode="text",
-                    text=["No law spatial slice<br>(pass spatial_law_panel or residuals + state_pred)"],
-                    textposition="middle center",
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=spatial_row,
-                col=1,
-            )
-            fig.update_xaxes(visible=False, row=spatial_row, col=1)
-            fig.update_yaxes(visible=False, row=spatial_row, col=1)
-
-        if has_spatial_rnorm:
-            _plotly_add_spatial_panel_to_subplot(
-                fig,
-                row=spatial_row,
-                col=4,
-                spatial=spatial_rnorm,
-                hm_cs=hm_cs,
-                mid=mid,
-                colorbar_compact=False,
-                use_log_rnorm=use_log_rnorm,
-                colorbar_scale_title=spatial_z_title,
-            )
-        else:
-            fig.add_trace(
-                go.Scatter(
-                    x=[mid],
-                    y=[0.0],
-                    mode="text",
-                    text=["No constitutive spatial<br>|residual| (pass panel or residuals + state_pred)"],
-                    textposition="middle center",
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=spatial_row,
-                col=4,
-            )
-            fig.update_xaxes(visible=False, row=spatial_row, col=4)
-            fig.update_yaxes(visible=False, row=spatial_row, col=4)
-
-        title_base = figure_title or "Monitor visualization"
-        status_line = ""
-        if math.isfinite(last_ov):
-            status_line = (
-                f"<br><span style='font-size:14px;font-weight:600'>"
-                f"Overall admissibility (final): {format_admissibility_pct(last_ov)} — "
-                f"{_admissibility_status_hml_plotly(last_ov)}"
-                f"</span>"
-            )
-        title_text = f"<b>{title_base}</b>{status_line}"
-
-        n_rows = len(specs)
-        fig.update_layout(
-            title=dict(
-                text=title_text,
-                x=0.5,
-                xanchor="center",
-                pad=dict(t=18, b=24),
-                font=dict(size=19, family="Arial, sans-serif"),
-            ),
-            height=330 + 325 * n_rows,
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="top",
-                y=-0.06,
-                x=0.5,
-                xanchor="center",
-                font=dict(size=9, family="Arial, sans-serif"),
-                tracegroupgap=10,
-                itemsizing="constant",
-            ),
-            margin=dict(l=100, r=100, t=205, b=150),
-            hovermode="closest",
-            template="plotly_white",
-            plot_bgcolor="#f7f8fa",
-            font=dict(size=12, family="Arial, sans-serif"),
-        )
-        align_heatmap_colorbars_to_subplot_domains(fig)
-        return fig
-
-    if polar_full:
-        st_law = _plotly_spatial_panel_title_with_subtitle(law_sp_full, spatial_z_title)
-        st_const = _plotly_spatial_panel_title_with_subtitle(const_sp_full, spatial_z_title)
-        specs = [
-            [{"type": "xy"}, {"type": "xy"}],
-            [{"type": "xy"}, {"type": "xy"}],
-            [{"type": "xy", "colspan": 2}, None],
-        ]
-        row_heights = [0.28, 0.32, 0.40]
-        fig = make_subplots(
-            rows=3,
-            cols=2,
-            specs=specs,
-            vertical_spacing=0.10,
-            row_heights=row_heights,
-            subplot_titles=(
-                st_law,
-                st_const,
-                "Overall admissibility",
-                "Category admissibility (final step)",
-                "Normalized residuals (all keys)",
-            ),
-        )
-        fig.update_annotations(font=dict(size=11, family="Arial, sans-serif", color="#1a1a1a"))
-
-        mid_pf = indices[len(indices) // 2] if indices else 0
-        fig.add_trace(
-            go.Scatter(
-                x=[mid_pf],
-                y=[0.0],
-                mode="text",
-                text=["No law spatial slice<br>(pass panel or residuals + state_pred)"],
-                textposition="middle center",
-                showlegend=False,
-                hoverinfo="skip",
-            ),
-            row=1,
-            col=1,
-        )
-        fig.update_xaxes(visible=False, row=1, col=1)
-        fig.update_yaxes(visible=False, row=1, col=1)
-        fig.add_trace(
-            go.Scatter(
-                x=[mid_pf],
-                y=[0.0],
-                mode="text",
-                text=["No constitutive spatial<br>|residual| rows"],
-                textposition="middle center",
-                showlegend=False,
-                hoverinfo="skip",
-            ),
-            row=1,
-            col=2,
-        )
-        fig.update_xaxes(visible=False, row=1, col=2)
-        fig.update_yaxes(visible=False, row=1, col=2)
-
-        last_ov_pf = float(overall_adm[-1]) if len(overall_adm) else float("nan")
-        adm_hover_pf = []
-        for y in overall_adm:
-            try:
-                fy = float(y)
-            except (TypeError, ValueError):
-                adm_hover_pf.append("N/A")
-            else:
-                adm_hover_pf.append(format_admissibility_pct(fy) if math.isfinite(fy) else "N/A")
-        if any(np.isfinite(overall_adm)):
-            fig.add_trace(
-                go.Scatter(
-                    x=indices,
-                    y=overall_adm,
-                    mode="lines",
-                    name="Overall admissibility",
-                    line=dict(color="#2c3e50", width=2.8),
-                    showlegend=False,
-                    text=adm_hover_pf,
-                    hovertemplate="Overall<br>%{x}<br>%{text}<extra></extra>",
-                ),
-                row=2,
-                col=1,
-            )
-            if math.isfinite(last_ov_pf):
-                lix_pf = indices[-1]
                 fig.add_trace(
-                    go.Scatter(
-                        x=[lix_pf],
-                        y=[last_ov_pf],
-                        mode="markers",
-                        marker=dict(size=12, color="#c0392b", line=dict(width=2, color="white")),
-                        showlegend=False,
-                        text=[format_admissibility_pct(last_ov_pf)],
-                        hovertemplate="Final<br>%{text}<extra></extra>",
-                    ),
-                    row=2,
-                    col=1,
-                )
-                fig.add_annotation(
-                    x=lix_pf,
-                    y=last_ov_pf,
-                    text=f" {format_admissibility_pct(last_ov_pf)}",
-                    showarrow=False,
-                    xanchor="left",
-                    yanchor="bottom",
-                    font=dict(size=11, color="#2c3e50", family="Arial, sans-serif"),
-                    row=2,
-                    col=1,
+                    go.Scatter(x=[indices[len(indices)//2] if indices else 0], y=[0.0], mode="text", text=["No residual keys in this category"], showlegend=False, hoverinfo="skip"),
+                    row=row,
+                    col=col,
                 )
         fig.update_xaxes(
-            title_text=step_label,
-            row=2,
-            col=1,
+            title_text=("Residual key" if mode_eff == "test" else (step_label if mat.size else "Residual key")),
+            row=row,
+            col=col,
             showline=True,
             linewidth=1.2,
             mirror=True,
+            linecolor="black",
+            tickcolor="black",
             automargin=True,
         )
         fig.update_yaxes(
-            title_text="Admissibility (%)",
-            tickformat=".2f%",
-            autorange=True,
-            row=2,
-            col=1,
+            title_text=rnorm_y_title if col == 1 else "",
+            row=row,
+            col=col,
             showline=True,
             linewidth=1.2,
             mirror=True,
+            linecolor="black",
+            tickcolor="black",
             automargin=True,
         )
 
-        blabels, bvals = _three_pillar_labels_values(metrics)
-        bcolors = [_adm_bar_color_plotly(v) for v in bvals]
-        bx = [v if math.isfinite(v) else 0.0 for v in bvals]
-        btext = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for v in bvals]
-        fig.add_trace(
-            go.Bar(
-                x=bx,
-                y=blabels,
-                orientation="h",
-                marker=dict(color=bcolors, line=dict(color="#333333", width=1)),
-                text=btext,
-                textposition="outside",
-                cliponaxis=False,
-                showlegend=False,
-                customdata=btext,
-                hovertemplate="%{y}<br>admissibility=%{customdata}<extra></extra>",
-            ),
-            row=2,
-            col=2,
-        )
-        _adm_pf = category_adm_bar_axis_range_percent_full()
-        fig.update_xaxes(
-            title_text="Admissibility (%)",
-            range=list(_adm_pf),
-            tickformat=".2f%",
-            row=2,
-            col=2,
-            showline=True,
-            linewidth=1.2,
-            automargin=True,
-        )
-        fig.update_yaxes(row=2, col=2, automargin=True)
+    _plot_residual_panel("laws", 4, 1, "Governing")
+    _plot_residual_panel("constitutive", 4, 5, "Constitutive")
 
-        row_bar = 3
-        if mode_eff == "test" or use_bar_chart:
-            x_labels_pf = [truncate_display_label(d, 44) for d in bar_display]
-            bv = np.asarray(bar_values, dtype=float)
-            bar_colors_pf = [
-                _residual_color_from_key(bar_keys[i] if i < len(bar_keys) else "")
-                for i in range(len(x_labels_pf))
-            ]
-            y_vals_pf = [
-                (
-                    float(np.log10(max(float(rv), 0.0) + R_NORM_LOG_EPS))
-                    if np.isfinite(rv) and use_log_rnorm
-                    else (float(rv) if np.isfinite(rv) else 0.0)
-                )
-                for rv in bv
-            ]
-            fig.add_trace(
-                go.Bar(
-                    x=x_labels_pf,
-                    y=y_vals_pf,
-                    marker_color=bar_colors_pf,
-                    showlegend=False,
-                    hovertemplate="%{x}<br>"
-                    + (
-                        "log10(R_norm+ε)=%{y:.4g}<extra></extra>"
-                        if use_log_rnorm
-                        else "R norm=%{y:.4g}<extra></extra>"
-                    ),
-                ),
-                row=row_bar,
-                col=1,
-            )
-            fig.update_xaxes(
-                title_text="Residual key",
-                row=row_bar,
-                col=1,
-                showline=True,
-                linewidth=1.2,
-                automargin=True,
-            )
-            fig.update_yaxes(
-                title_text=rnorm_y_title,
-                row=row_bar,
-                col=1,
-                automargin=True,
-            )
+    # Spatial maps
+    mid = indices[len(indices) // 2] if indices else 0
+    if spatial is not None:
+        _plotly_add_spatial_panel_to_subplot(fig, row=5, col=1, spatial=spatial, hm_cs=hm_cs, mid=mid, colorbar_compact=False, use_log_rnorm=use_log_rnorm, colorbar_scale_title="log10 residual")
     else:
-        st_law_c = _spatial_heatmap_subplot_title(spatial if has_spatial else None, law_sp_full)
-        st_const_c = _spatial_heatmap_subplot_title(spatial_rnorm if has_spatial_rnorm else None, const_sp_full)
-        nr_compact = bundle.get("nr_title") or "Normalized Residuals"
-        specs = [
-            [{"type": "xy"}, {"type": "xy"}],
-            [{"type": "xy", "colspan": 2}, None],
-            [{"type": "xy", "colspan": 2}, None],
-        ]
-        row_heights = [0.32, 0.20, 0.48]
-        fig = make_subplots(
-            rows=3,
-            cols=2,
-            specs=specs,
-            vertical_spacing=0.085,
-            row_heights=row_heights,
-            subplot_titles=(
-                st_law_c,
-                st_const_c,
-                "Category admissibility (final step)",
-                "",
-                nr_compact,
-                "",
-            ),
-        )
-        fig.update_annotations(font=dict(size=11, family="Arial, sans-serif", color="#1a1a1a"))
+        fig.add_trace(go.Scatter(x=[mid], y=[0.0], mode="text", text=["No governing spatial field"], showlegend=False, hoverinfo="skip"), row=5, col=1)
+        fig.update_xaxes(visible=False, row=5, col=1)
+        fig.update_yaxes(visible=False, row=5, col=1)
 
-        mid = indices[len(indices) // 2] if indices else 0
-        if has_spatial:
-            _plotly_add_spatial_panel_to_subplot(
-                fig,
-                row=1,
-                col=1,
-                spatial=spatial,
-                hm_cs=hm_cs,
-                mid=mid,
-                colorbar_compact=True,
-                use_log_rnorm=use_log_rnorm,
-                colorbar_scale_title=spatial_z_title,
-            )
-        else:
-            fig.add_trace(
-                go.Scatter(
-                    x=[mid],
-                    y=[0.0],
-                    mode="text",
-                    text=["No law spatial slice<br>(need coord in state_pred)"],
-                    textposition="middle center",
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=1,
-                col=1,
-            )
-            fig.update_xaxes(visible=False, row=1, col=1)
-            fig.update_yaxes(visible=False, row=1, col=1)
+    if spatial_rnorm is not None:
+        _plotly_add_spatial_panel_to_subplot(fig, row=5, col=5, spatial=spatial_rnorm, hm_cs=hm_cs, mid=mid, colorbar_compact=False, use_log_rnorm=use_log_rnorm, colorbar_scale_title="log10 residual")
+    else:
+        fig.add_trace(go.Scatter(x=[mid], y=[0.0], mode="text", text=["No constitutive spatial field"], showlegend=False, hoverinfo="skip"), row=5, col=5)
+        fig.update_xaxes(visible=False, row=5, col=5)
+        fig.update_yaxes(visible=False, row=5, col=5)
 
-        if has_spatial_rnorm:
-            _plotly_add_spatial_panel_to_subplot(
-                fig,
-                row=1,
-                col=2,
-                spatial=spatial_rnorm,
-                hm_cs=hm_cs,
-                mid=mid,
-                colorbar_compact=True,
-                use_log_rnorm=use_log_rnorm,
-                colorbar_scale_title=spatial_z_title,
-            )
-        else:
-            fig.add_trace(
-                go.Scatter(
-                    x=[mid],
-                    y=[0.0],
-                    mode="text",
-                    text=["No constitutive spatial<br>|residual| rows"],
-                    textposition="middle center",
-                    showlegend=False,
-                    hoverinfo="skip",
-                ),
-                row=1,
-                col=2,
-            )
-            fig.update_xaxes(visible=False, row=1, col=2)
-            fig.update_yaxes(visible=False, row=1, col=2)
+    # Actionable summary
+    summary_lines = []
+    if math.isfinite(laws_last):
+        summary_lines.append("Governing laws satisfied" if laws_last >= 0.9 else "Governing-law violations detected")
+    if math.isfinite(const_last):
+        summary_lines.append("Constitutive consistency acceptable" if const_last >= 0.9 else "Constitutive inconsistency detected")
+    if math.isfinite(last_ov) and math.isfinite(first_ov):
+        summary_lines.append("Training trend improving" if last_ov >= first_ov else "Training trend degrading")
+    if status != "HIGH":
+        summary_lines.append("Recommend: adjust optimizer, residual weighting, or data scaling")
+    summary_text = "Summary:<br>- " + "<br>- ".join(summary_lines[:4]) if summary_lines else "Summary: insufficient diagnostics"
 
-        blabels, bvals = _three_pillar_labels_values(metrics)
-        bcolors = [_adm_bar_color_plotly(v) for v in bvals]
-        bx = [v if math.isfinite(v) else 0.0 for v in bvals]
-        btext = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for v in bvals]
-        fig.add_trace(
-            go.Bar(
-                x=bx,
-                y=blabels,
-                orientation="h",
-                marker=dict(color=bcolors, line=dict(color="#333333", width=1)),
-                text=btext,
-                textposition="outside",
-                cliponaxis=False,
-                showlegend=False,
-                customdata=btext,
-                hovertemplate="%{y}<br>admissibility=%{customdata}<extra></extra>",
-            ),
-            row=2,
-            col=1,
-        )
-        _adm3_full = category_adm_bar_axis_range_percent_full()
-        fig.update_xaxes(
-            title_text="Admissibility (%)",
-            range=list(_adm3_full),
-            tickformat=".2f%",
-            row=2,
-            col=1,
-            showline=True,
-            linewidth=1.2,
-            automargin=True,
-        )
-        fig.update_yaxes(row=2, col=1, showline=True, linewidth=1.2, automargin=True)
-
-        if mode_eff == "test" or use_bar_chart:
-            x_labels_c = [truncate_display_label(d, 44) for d in bar_display]
-            bv_c = np.asarray(bar_values, dtype=float)
-            bar_colors_c = [
-                _residual_color_from_key(bar_keys[i] if i < len(bar_keys) else "")
-                for i in range(len(x_labels_c))
-            ]
-            y_vals_c = [
-                (
-                    float(np.log10(max(float(rv), 0.0) + R_NORM_LOG_EPS))
-                    if np.isfinite(rv) and use_log_rnorm
-                    else (float(rv) if np.isfinite(rv) else 0.0)
-                )
-                for rv in bv_c
-            ]
-            fig.add_trace(
-                go.Bar(
-                    x=x_labels_c,
-                    y=y_vals_c,
-                    marker_color=bar_colors_c,
-                    showlegend=False,
-                    hovertemplate="%{x}<br>"
-                    + (
-                        "log10(R_norm+ε)=%{y:.4g}<extra></extra>"
-                        if use_log_rnorm
-                        else "R norm=%{y:.4g}<extra></extra>"
-                    ),
-                ),
-                row=3,
-                col=1,
-            )
-            fig.update_xaxes(
-                title_text="Residual key",
-                row=3,
-                col=1,
-                showline=True,
-                linewidth=1.2,
-                automargin=True,
-            )
-            fig.update_yaxes(title_text=rnorm_y_title, row=3, col=1, automargin=True)
-
-    last_ov_c = float(overall_adm[-1]) if len(overall_adm) else float("nan")
-    title_base = figure_title or "Monitor visualization"
-    status_c = ""
-    if math.isfinite(last_ov_c):
-        status_c = (
-            f"<br><span style='font-size:14px;font-weight:600'>"
-            f"Overall admissibility (final): {format_admissibility_pct(last_ov_c)} — "
-            f"{_admissibility_status_hml_plotly(last_ov_c)}"
-            f"</span>"
-        )
-    title_text = f"<b>{title_base}</b>{status_c}"
-
+    # Intentionally remove the report-level layout title text (enterprise dashboard feel).
+    title_text = ""
     fig.update_layout(
-        title=dict(
-            text=title_text,
-            x=0.5,
-            xanchor="center",
-            pad=dict(t=18, b=20),
-            font=dict(size=19, family="Arial, sans-serif"),
-        ),
-        height=280 + 305 * len(specs),
-        margin=dict(t=155, r=88, l=88, b=88),
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.01,
-            xanchor="right",
-            x=1,
-            font=dict(size=9, family="Arial, sans-serif"),
-        ),
+        title=dict(text=title_text, x=0.5, xanchor="center", pad=dict(t=14, b=8), font=dict(size=21, family="Inter, Arial, sans-serif")),
+        height=1680,
+        showlegend=False,
+        margin=dict(l=90, r=90, t=130, b=165),
         hovermode="closest",
-        template="plotly_white",
-        plot_bgcolor="#f7f8fa",
-        font=dict(size=12, family="Arial, sans-serif"),
+        template=("plotly_dark" if dark else "plotly_white"),
+        plot_bgcolor=plot_bg,
+        paper_bgcolor=paper_bg,
+        font=dict(size=12, family="Inter, Arial, sans-serif", color=font_color),
     )
-    align_heatmap_colorbars_to_subplot_domains(fig)
+    if export_buttons:
+        fig.update_layout(modebar_add=["toImage"])
+    fig.add_annotation(text="Ifimo Lab: Moju Forensic Suite", x=0.995, y=1.08, xref="paper", yref="paper", showarrow=False, xanchor="right", font=dict(size=10, color=muted, family="Inter, Arial, sans-serif"))
+    fig.add_annotation(text=summary_text, x=0.01, y=-0.12, xref="paper", yref="paper", showarrow=False, align="left", font=dict(size=12, color=font_color, family="Inter, Arial, sans-serif"), bordercolor="#334155", borderwidth=1, borderpad=8, bgcolor=("rgba(30,41,59,0.35)" if dark else "rgba(241,245,249,0.85)"))
 
+    align_heatmap_colorbars_to_subplot_domains(fig)
     return fig
 
 
@@ -1201,6 +853,169 @@ def _pos_axis_title_card(sp: Optional[Dict[str, Any]]) -> str:
     ax = sp.get("position_axis") or "x"
     return f"Position {ax}"
 
+
+
+def _build_kpi_figure(
+    overall_adm: List[float],
+    *,
+    baseline_score: Optional[float],
+    theme: str,
+) -> Any:
+    import plotly.graph_objects as go
+    value = float(overall_adm[-1]) if overall_adm else float("nan")
+    dark = theme == "dark"
+    paper = "#0f172a" if dark else "#ffffff"
+    fontc = "#e5e7eb" if dark else "#111827"
+    fig = go.Figure()
+    ind_kwargs = dict(mode="gauge+number", value=max(0.0, min(1.0, value if math.isfinite(value) else 0.0)))
+    if baseline_score is not None and math.isfinite(float(baseline_score)):
+        ind_kwargs["mode"] = "gauge+number+delta"
+        ind_kwargs["delta"] = {"reference": float(baseline_score), "increasing": {"color": ADMISSIBLE_COLOR}, "decreasing": {"color": DISSONANCE_COLOR}}
+    ind_kwargs["gauge"] = {
+        "axis": {"range": [0, 1], "tickformat": ".0%"},
+        "bar": {"color": ADMISSIBLE_COLOR if (math.isfinite(value) and value >= 0.9) else DISSONANCE_COLOR},
+        "steps": [{"range": [0, 0.9], "color": "#1f2937" if dark else "#fee2e2"}, {"range": [0.9, 1.0], "color": "#064e3b" if dark else "#d1fae5"}],
+    }
+    fig.add_trace(go.Indicator(**ind_kwargs, title={"text": "Overall Admissibility A"}))
+    fig.add_annotation(text="A = 1 / (1 + R_norm)", x=0.5, y=-0.08, xref="paper", yref="paper", showarrow=False, font=dict(size=11, family="Inter, Arial, sans-serif", color=fontc))
+    fig.update_layout(template="plotly_dark" if dark else "plotly_white", paper_bgcolor=paper, plot_bgcolor=paper, font=dict(family="Inter, Arial, sans-serif", color=fontc), margin=dict(l=40, r=40, t=80, b=50), height=360)
+    return fig
+
+
+def _build_forensic_heatmap_figure(bundle: Dict[str, Any], *, theme: str = "light") -> Any:
+    import plotly.graph_objects as go
+    import numpy as np
+
+    log_entries = list(bundle.get("log") or [])
+    n = len(log_entries)
+    if n == 0:
+        return go.Figure()
+    # Use coord snapshot x if available; fallback to index-like x.
+    snap = (log_entries[-1].get("coord_snapshot") if log_entries else {}) or {}
+    x = np.asarray(snap.get("x") or list(range(max(2, n))), dtype=float)
+    if x.size == 0:
+        x = np.asarray(list(range(max(2, n))), dtype=float)
+
+    # pick first law or constitutive key for forensic trace
+    keys = []
+    for ent in log_entries:
+        keys.extend(list((ent.get("rms") or {}).keys()))
+    target = next((k for k in keys if str(k).startswith("laws/")), None) or next((k for k in keys if str(k).startswith("constitutive/")), None) or keys[0]
+
+    z_rows = []
+    scales = []
+    for ent in log_entries:
+        rms = ent.get("rms") or {}
+        scale = (ent.get("scale") or {}).get(target, 1.0)
+        try:
+            rv = float(rms.get(target, float("nan")))
+        except Exception:
+            rv = float("nan")
+        try:
+            sv = float(scale)
+        except Exception:
+            sv = 1.0
+        if not math.isfinite(sv) or sv <= 0:
+            sv = 1.0
+        scales.append(sv)
+        display = np.log10(abs(rv) + R_NORM_LOG_EPS) if math.isfinite(rv) else float("nan")
+        z_rows.append(np.full((x.size,), display, dtype=float))
+    Z = np.asarray(z_rows, dtype=float)
+
+    fig = go.Figure(
+        data=[
+            go.Heatmap(
+                x=x,
+                y=list(range(n)),
+                z=Z,
+                colorscale="Viridis",
+                colorbar=dict(title="log10(|residual| + ε)"),
+                customdata=np.broadcast_to(np.asarray(scales, dtype=float)[:, None], Z.shape),
+                hovertemplate="step=%{y}<br>x=%{x:.4g}<br>log10(|r|+ε)=%{z:.4g}<br>scale_k=%{customdata:.4g}<extra></extra>",
+            )
+        ]
+    )
+    dark = theme == "dark"
+    fig.update_layout(
+        title=f"Forensic Spatial Dissonance — {truncate_display_label(str(target), 64)}",
+        xaxis_title="Spatial position x",
+        yaxis_title="Logged Step / Epoch",
+        template="plotly_dark" if dark else "plotly_white",
+        font=dict(family="Inter, Arial, sans-serif"),
+    )
+    return fig
+
+
+def build_plotly_monitor_dash_payload(
+    bundle: Dict[str, Any],
+    *,
+    figure_title: Optional[str] = None,
+    step_label: str = "Step",
+    r_norm_scale: str = "log",
+    spatial_heatmap_colorscale: Optional[str] = None,
+    theme: str = "light",
+    baseline_score: Optional[float] = None,
+    export_buttons: bool = True,
+) -> Dict[str, Any]:
+    full = _build_plotly_monitor_figure_single(
+        bundle,
+        figure_title=figure_title,
+        step_label=step_label,
+        r_norm_scale=r_norm_scale,
+        spatial_heatmap_colorscale=spatial_heatmap_colorscale,
+        theme=theme,
+        baseline_score=baseline_score,
+        export_buttons=export_buttons,
+    )
+    kpi = _build_kpi_figure(bundle.get("overall_adm") or [], baseline_score=baseline_score, theme=theme)
+    forensic = _build_forensic_heatmap_figure(bundle, theme=theme)
+    return {
+        "mode": "dash-tabs",
+        "tabs": {
+            "kpi": kpi,
+            "admissibility": full,
+            "forensic_heatmaps": forensic,
+            "convergence": full,
+        },
+        "filter_contract": {"bar_customdata_field": "category", "threshold": 0.99},
+        "toggles": {"mode": ["training", "test"]},
+        "export": {"html": True, "pdf": True, "export_buttons": bool(export_buttons)},
+    }
+
+
+def build_plotly_monitor_figure(
+    bundle: Dict[str, Any],
+    *,
+    figure_title: Optional[str] = None,
+    step_label: str = "Step",
+    r_norm_scale: str = "log",
+    spatial_heatmap_colorscale: Optional[str] = None,
+    dashboard_mode: str = "single-figure",
+    theme: str = "light",
+    baseline_score: Optional[float] = None,
+    export_buttons: bool = True,
+) -> Any:
+    if dashboard_mode == "dash-tabs":
+        return build_plotly_monitor_dash_payload(
+            bundle,
+            figure_title=figure_title,
+            step_label=step_label,
+            r_norm_scale=r_norm_scale,
+            spatial_heatmap_colorscale=spatial_heatmap_colorscale,
+            theme=theme,
+            baseline_score=baseline_score,
+            export_buttons=export_buttons,
+        )
+    return _build_plotly_monitor_figure_single(
+        bundle,
+        figure_title=figure_title,
+        step_label=step_label,
+        r_norm_scale=r_norm_scale,
+        spatial_heatmap_colorscale=spatial_heatmap_colorscale,
+        theme=theme,
+        baseline_score=baseline_score,
+        export_buttons=export_buttons,
+    )
 
 def build_plotly_law_rnorm_final_bar_figure(
     bundle: Dict[str, Any],

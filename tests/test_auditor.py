@@ -470,9 +470,9 @@ class TestVisualize:
         assert law_bar is not None
         marker_color = getattr(getattr(law_bar, "marker", None), "color", None)
         if isinstance(marker_color, (list, tuple)):
-            assert all(c == "#7e57c2" for c in marker_color)
+            assert all(c == "#8B5CF6" for c in marker_color)
         else:
-            assert marker_color == "#7e57c2"
+            assert marker_color == "#8B5CF6"
         f3 = build_plotly_spatial_rnorm_heatmap_card(bundle["spatial"], colorscale="Jet")
         f4 = build_plotly_spatial_rnorm_heatmap_card(bundle["spatial_rnorm"], colorscale="Jet")
         assert f3 is not None and f4 is not None
@@ -725,9 +725,16 @@ class TestVisualize:
             },
         ]
         fig_tr = visualize(log, backend="plotly", mode="training")
-        assert DEFAULT_VISUALIZE_TITLE_TRAINING in (fig_tr.layout.title.text or "")
+        assert not (fig_tr.layout.title.text or "")
         fig_te = visualize(log, backend="plotly", mode="test")
-        assert DEFAULT_VISUALIZE_TITLE_TEST in (fig_te.layout.title.text or "")
+        assert not (fig_te.layout.title.text or "")
+
+    def test_visualize_plotly_default_theme_is_light(self):
+        pytest.importorskip("plotly")
+        log = [{"index": 0, "rms": {"laws/a": 1.0}, "scale": {}}]
+        fig = visualize(log, backend="plotly", mode="training")
+        assert fig is not None
+        assert getattr(fig.layout, "paper_bgcolor", None) == "#ffffff"
 
     def test_visualize_plotly_test_mode_spatial_row_placeholders_without_coords(self):
         pytest.importorskip("plotly")
@@ -846,7 +853,51 @@ class TestVisualize:
             {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25}, "scale": {}},
         ]
         fig = visualize(log, backend="plotly", mode="training", figure_title="Custom dashboard title")
-        assert "Custom dashboard title" in (fig.layout.title.text or "")
+        assert not (fig.layout.title.text or "")
+
+    def test_visualize_plotly_overall_admissibility_line_is_black(self):
+        pytest.importorskip("plotly")
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25}, "scale": {}},
+        ]
+        fig = visualize(log, backend="plotly", mode="training", dashboard_mode="single-figure")
+        assert fig is not None
+        tr = next((t for t in fig.data if getattr(t, "name", "") == "Overall admissibility"), None)
+        assert tr is not None
+        line = getattr(tr, "line", None)
+        color = getattr(line, "color", None) if line is not None else None
+        assert str(color).lower() in {"black", "#000000", "rgb(0, 0, 0)"}
+
+    def test_visualize_plotly_worst_violation_annotation_only_when_multiple_keys(self):
+        pytest.importorskip("plotly")
+        # Case 1: single key per category -> no "Worst violation:" annotation.
+        log1 = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25}, "scale": {}},
+        ]
+        fig1 = visualize(log1, backend="plotly", mode="training", dashboard_mode="single-figure")
+        anns1 = list(getattr(fig1.layout, "annotations", []) or [])
+        worst_anns1 = [a for a in anns1 if "Worst violation:" in str(getattr(a, "text", "") or "")]
+        assert len(worst_anns1) == 0
+
+        # Case 2: two law keys, one constitutive key -> exactly one "Worst violation:" annotation.
+        log2 = [
+            {
+                "index": 0,
+                "rms": {"laws/a": 1.0, "laws/b": 0.8, "constitutive/m/c": 0.5},
+                "scale": {},
+            },
+            {
+                "index": 1,
+                "rms": {"laws/a": 0.5, "laws/b": 0.3, "constitutive/m/c": 0.25},
+                "scale": {},
+            },
+        ]
+        fig2 = visualize(log2, backend="plotly", mode="training", dashboard_mode="single-figure")
+        anns2 = list(getattr(fig2.layout, "annotations", []) or [])
+        worst_anns2 = [a for a in anns2 if "Worst violation:" in str(getattr(a, "text", "") or "")]
+        assert len(worst_anns2) == 1
 
     def test_visualize_training_all_residuals_bar_and_category_colors(self):
         pytest.importorskip("plotly")
@@ -879,15 +930,14 @@ class TestVisualize:
             for ax in yaxes
         )
 
-        # Vertical training residual bar includes constitutive implied residual too.
-        vbars = [t for t in fig.data if getattr(t, "type", None) == "bar" and getattr(t, "orientation", None) != "h"]
-        assert vbars
-        x_labels = [str(x) for x in (vbars[0].x or [])]
-        assert any("Fourier Conduction" in x for x in x_labels)
-        assert any("Thermal diffusivity (implied)" in x for x in x_labels)
-
-        xaxes = [getattr(fig.layout, k) for k in dir(fig.layout) if k.startswith("xaxis")]
-        assert any(getattr(getattr(ax, "title", None), "text", None) == "All Residuals" for ax in xaxes)
+        # Residual diagnostics include law/constitutive traces.
+        line_names = [
+            str(getattr(tr, "name", "") or "")
+            for tr in fig.data
+            if getattr(tr, "type", None) == "scatter" and getattr(tr, "mode", None) == "lines"
+        ]
+        assert any("Fourier Conduction" in n for n in line_names)
+        assert any("Thermal diffusivity (implied)" in n for n in line_names)
 
         # Color mapping: laws=purple, constitutive=teal on non-overall residual traces.
         color_by_name = {}
@@ -898,8 +948,104 @@ class TestVisualize:
                 color = getattr(line, "color", None)
                 if nm:
                     color_by_name[nm] = color
-        assert color_by_name.get("Fourier Conduction") == "#7e57c2"
-        assert color_by_name.get("Thermal diffusivity (implied)") == "#009688"
+        assert color_by_name.get("Fourier Conduction") == "#8B5CF6"
+        assert color_by_name.get("Thermal diffusivity (implied)") == "#14B8A6"
+
+
+    def test_visualize_dash_tabs_payload_contract(self):
+        pytest.importorskip("plotly")
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/b/implied_delta": 0.5}, "scale": {"laws/a": 2.0}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/b/implied_delta": 0.25}, "scale": {"laws/a": 2.0}},
+        ]
+        out = visualize(log, backend="plotly", mode="training", dashboard_mode="dash-tabs", baseline_score=0.6)
+        assert isinstance(out, dict)
+        assert out.get("mode") == "dash-tabs"
+        tabs = out.get("tabs") or {}
+        assert set(["kpi", "admissibility", "forensic_heatmaps", "convergence"]).issubset(set(tabs.keys()))
+        kpi_fig = tabs["kpi"]
+        assert any(getattr(tr, "type", None) == "indicator" for tr in getattr(kpi_fig, "data", []))
+
+    def test_visualize_enterprise_threshold_line_and_scale_hover(self):
+        pytest.importorskip("plotly")
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/b/implied_delta": 0.5}, "scale": {"laws/a": 2.0, "constitutive/b/implied_delta": 3.0}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/b/implied_delta": 0.25}, "scale": {"laws/a": 2.0, "constitutive/b/implied_delta": 3.0}},
+        ]
+        fig = visualize(log, backend="plotly", mode="training", dashboard_mode="single-figure", theme="dark")
+        assert fig is not None
+        shapes = list(getattr(fig.layout, "shapes", []) or [])
+        assert any(abs(float(getattr(s, "x0", -1)) - 0.9) < 1e-9 for s in shapes if getattr(s, "type", None) == "line")
+        hover_templates = [str(getattr(t, "hovertemplate", "")) for t in fig.data]
+        assert any("scale_k=" in h for h in hover_templates)
+
+
+    def test_visualize_training_kpi_domain_does_not_overlap_overall_chart(self):
+        pytest.importorskip("plotly")
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/b/implied_delta": 0.5}, "scale": {}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/b/implied_delta": 0.25}, "scale": {}},
+        ]
+        fig = visualize(log, backend="plotly", mode="training", dashboard_mode="single-figure", baseline_score=0.7)
+        assert fig is not None
+        ind = next((tr for tr in fig.data if getattr(tr, "type", None) == "indicator"), None)
+        assert ind is not None
+        kpi_y0, kpi_y1 = float(ind.domain.y[0]), float(ind.domain.y[1])
+        trend_trace = next(
+            (
+                tr
+                for tr in fig.data
+                if getattr(tr, "type", None) == "scatter"
+                and getattr(tr, "name", "") == "Overall admissibility"
+            ),
+            None,
+        )
+        assert trend_trace is not None
+        trend_yaxis_ref = getattr(trend_trace, "yaxis", "y")
+        trend_axis_name = "yaxis" if trend_yaxis_ref == "y" else f"yaxis{trend_yaxis_ref[1:]}"
+        trend_axis = getattr(fig.layout, trend_axis_name, None)
+        assert trend_axis is not None and getattr(trend_axis, "domain", None) is not None
+        ty0, ty1 = float(trend_axis.domain[0]), float(trend_axis.domain[1])
+        assert kpi_y1 <= ty0 or kpi_y0 >= ty1
+
+    def test_visualize_training_instability_shade_does_not_raise_with_indicator_traces(self):
+        """High-variance trend uses add_shape, not add_hrect(row,col), so Indicator traces are not scanned for xaxis."""
+        pytest.importorskip("plotly")
+        log = [
+            {"index": i, "rms": {"laws/a": (10.0 if i % 2 == 0 else 0.01)}, "scale": {"laws/a": 1.0}}
+            for i in range(6)
+        ]
+        fig = visualize(log, backend="plotly", mode="training", dashboard_mode="single-figure")
+        assert fig is not None
+        shapes = list(getattr(fig.layout, "shapes", []) or [])
+        assert any(getattr(s, "type", None) == "rect" for s in shapes)
+
+    def test_visualize_training_indicator_traces_have_no_cartesian_axis_refs(self):
+        """go.Indicator must not receive xaxis/yaxis (PlotlyKeyError in some subplot paths)."""
+        pytest.importorskip("plotly")
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/b/implied_delta": 0.5}, "scale": {}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/b/implied_delta": 0.25}, "scale": {}},
+        ]
+        fig = visualize(log, backend="plotly", mode="training", dashboard_mode="single-figure")
+        assert fig is not None
+        for tr in fig.data:
+            if getattr(tr, "type", None) == "indicator":
+                assert getattr(tr, "xaxis", None) is None
+                assert getattr(tr, "yaxis", None) is None
+
+    def test_visualize_test_mode_style_parity_threshold_and_watermark(self):
+        pytest.importorskip("plotly")
+        log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/b/implied_delta": 0.5}, "scale": {"laws/a": 2.0}}]
+        fig = visualize(log, backend="plotly", mode="test", theme="dark")
+        assert fig is not None
+        assert getattr(fig.layout, "paper_bgcolor", None) == "#0b1220"
+        anns = list(getattr(fig.layout, "annotations", []) or [])
+        assert any("Ifimo Lab: Moju Forensic Suite" in str(getattr(a, "text", "")) for a in anns)
+        shapes = list(getattr(fig.layout, "shapes", []) or [])
+        assert any(getattr(s, "type", None) == "line" and abs(float(getattr(s, "x0", -1)) - 0.9) < 1e-9 for s in shapes)
+        hovers = [str(getattr(tr, "hovertemplate", "")) for tr in fig.data]
+        assert any("scale_k=" in ht for ht in hovers)
 
     def test_compute_log_step_metrics_includes_data_category(self):
         log = [
