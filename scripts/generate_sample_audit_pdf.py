@@ -23,13 +23,13 @@ def _sample_report() -> dict:
     """Build a sample report dict matching the structure returned by audit()."""
     # per_key r_norm = RMS(r)/scale with scale state-derived by default or overridden via r_ref
     return {
-        "overall_admissibility_score": 0.92,
+        "overall_admissibility_score": 0.965,
         "overall_admissibility_level": "High Admissibility",
         "per_key": {
             "laws/mass_incompressible": {
                 "rms": 0.02,
-                "r_norm": 0.08,
-                "admissibility_score": 0.92,
+                "r_norm": 0.036,
+                "admissibility_score": 0.965,
                 "admissibility_level": "High Admissibility",
             },
             "laws/navier_stokes": {
@@ -40,15 +40,15 @@ def _sample_report() -> dict:
             },
             "scaling/re/chain_dx": {
                 "rms": 0.01,
-                "r_norm": 0.05,
-                "admissibility_score": 0.95,
+                "r_norm": 0.036,
+                "admissibility_score": 0.965,
                 "admissibility_level": "High Admissibility",
             },
             "scaling/pe/chain_dx": {
                 "rms": 0.12,
                 "r_norm": 0.43,
                 "admissibility_score": 0.70,
-                "admissibility_level": "Moderate Admissibility",
+                "admissibility_level": "Low Admissibility",
             },
             "scaling/pr/chain_dx": {
                 "rms": 0.25,
@@ -58,8 +58,8 @@ def _sample_report() -> dict:
             },
             "constitutive/sutherland_mu/chain_dt": {
                 "rms": 0.02,
-                "r_norm": 0.09,
-                "admissibility_score": 0.92,
+                "r_norm": 0.036,
+                "admissibility_score": 0.965,
                 "admissibility_level": "High Admissibility",
             },
             "constitutive/ideal_gas_rho/ref_delta": {

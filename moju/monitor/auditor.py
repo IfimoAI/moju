@@ -12,7 +12,8 @@ Constitutive and scaling/similarity audits are tied to Models.* and Groups.* fun
 ``moju.monitor.closure_registry.apply_closure_discrepancy_normalize``). For **R_norm**, default
 **scale_k** is **≈ 1** (plus ``_SCALE_EPS``) for **laws/** and for nondimensional closure keys;
 other **constitutive/** / **scaling/** residuals and **data/** use state- or reference-derived scales. Optional ``audit(..., r_ref=...)`` overrides
-**scale_k** per key. Per-key **admissibility_score** is ``1 / (1 + R_norm)`` when finite. Metrics are
+**scale_k** per key. Per-key **admissibility_score** is ``1 / (1 + R_norm)`` when finite.
+:func:`admissibility_level` maps scores in ``[0, 1]`` to four bands (see its docstring). Metrics are
 consistency indicators, not certification.
 """
 
@@ -45,17 +46,33 @@ from moju.monitor.law_implied_diagnostics import (
 from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
 
-DEFAULT_VISUALIZE_TITLE_TRAINING = "Physics admissibility audit (model training)"
-DEFAULT_VISUALIZE_TITLE_TEST = "State prediction audit (physics residuals)"
+DEFAULT_VISUALIZE_TITLE_TRAINING = "Physics Admissibility Audit (model training)"
+DEFAULT_VISUALIZE_TITLE_TEST = "State Prediction Audit"
+
+# Admissibility score in [0, 1]; "High" is strictly above this threshold.
+ADM_HIGH_THRESHOLD = 0.95
+
+
+def _visualize_capitalize_first_word(title: str) -> str:
+    """Ensure the first word starts with an uppercase letter (rest unchanged)."""
+    t = title.strip()
+    if not t:
+        return t
+    parts = t.split(None, 1)
+    first = parts[0]
+    if not first:
+        return t
+    head = first[0].upper() + first[1:] if len(first) > 1 else first.upper()
+    return head + (" " + parts[1] if len(parts) > 1 else "")
 
 
 def _resolve_visualize_figure_title(mode: str, figure_title: Optional[str]) -> str:
     """Figure title for :func:`visualize`; non-empty ``figure_title`` overrides mode default."""
     if figure_title is not None and str(figure_title).strip():
-        return str(figure_title).strip()
+        return _visualize_capitalize_first_word(str(figure_title).strip())
     if mode == "training":
-        return DEFAULT_VISUALIZE_TITLE_TRAINING
-    return DEFAULT_VISUALIZE_TITLE_TEST
+        return _visualize_capitalize_first_word(DEFAULT_VISUALIZE_TITLE_TRAINING)
+    return _visualize_capitalize_first_word(DEFAULT_VISUALIZE_TITLE_TEST)
 
 
 def _state_key_suggests_law_fd_fill(key: str) -> bool:
@@ -154,15 +171,27 @@ def _rms_scalar(x: jnp.ndarray) -> jnp.ndarray:
 
 
 def admissibility_level(score: float) -> str:
+    """
+    Map admissibility score in ``[0, 1]`` to a qualitative label (``Unknown`` if non-finite).
+
+    Bands: below 50% Non-Admissible; 50–75% Low; 75–95% Moderate; above 95% High.
+    Boundaries: ``0.5`` and ``0.75`` start Low and Moderate; ``0.95`` is still Moderate; High requires
+    ``score > 0.95``.
+    """
     if not math.isfinite(score):
         return "Unknown"
-    if score >= 0.90:
+    if score > ADM_HIGH_THRESHOLD:
         return "High Admissibility"
-    if score >= 0.70:
+    if score >= 0.75:
         return "Moderate Admissibility"
-    if score >= 0.40:
+    if score >= 0.5:
         return "Low Admissibility"
     return "Non-Admissible"
+
+
+def is_high_admissibility(score: float) -> bool:
+    """True if ``score`` is finite and above :data:`ADM_HIGH_THRESHOLD` (strictly greater)."""
+    return math.isfinite(score) and score > ADM_HIGH_THRESHOLD
 
 
 def _geom_mean_admissibility(values: Sequence[float]) -> float:
@@ -940,7 +969,8 @@ def visualize(
       ``y`` / ``z`` / ``t``).
     - ``training`` (single log entry) — horizontal bars for normalized residuals, category
       admissibility bars, spatial row (|residual| vs position by default).
-    - ``test`` — Uses the **last** log entry for scalar metrics; **spatial row** shows
+    - ``test`` — Uses the **last** log entry for scalar metrics; **no vs-step admissibility
+      panel** (category breakdown is **full width** on its row). **Spatial row** shows
       |residual| vs position by default (same log/linear display scale as training for heatmaps), plus
       horizontal bar chart of normalized residuals and category admissibility.
 
@@ -1011,8 +1041,9 @@ def visualize(
         when ``residuals`` is omitted, so ``visualize(engine.log, engine=engine)`` can build
         spatial heatmaps using log ``coord_snapshot`` (same convenience as Moju Studio).
     figure_title
-        Optional override for the figure title. If omitted or blank, a mode-specific
-        default is used (training vs test).
+        Optional override for the Plotly figure layout title. If omitted or blank, a mode-specific
+        default is used (training vs test). The single-figure dashboard shows this as the report
+        header (training default: :data:`DEFAULT_VISUALIZE_TITLE_TRAINING`).
     step_label
         X-axis label for training step axis (e.g. ``Iteration`` or ``Epoch``).
     r_norm_scale
@@ -1022,6 +1053,9 @@ def visualize(
     spatial_heatmap_colorscale
         Plotly colorscale name for optional spatial heatmaps (e.g. ``\"Jet\"``, ``\"Viridis\"``).
         Default ``None`` uses ``Jet`` in the Plotly backend.
+    theme
+        Must be ``\"light\"`` (default). Plotly monitor figures use a single light enterprise style;
+        ``\"dark\"`` is not supported.
     """
     if backend == "none":
         return None
@@ -1038,8 +1072,8 @@ def visualize(
         raise ValueError("r_norm_scale must be 'log' or 'linear'")
     if dashboard_mode not in ("single-figure", "dash-tabs"):
         raise ValueError("dashboard_mode must be 'single-figure' or 'dash-tabs'")
-    if theme not in ("dark", "light"):
-        raise ValueError("theme must be 'dark' or 'light'")
+    if theme != "light":
+        raise ValueError("visualize Plotly styling supports theme='light' only; dark mode is no longer supported.")
 
     eff_residuals = residuals
     if eff_residuals is None and engine is not None:

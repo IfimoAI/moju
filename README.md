@@ -135,7 +135,7 @@ Moju gives you physics diagnostics, not just a loss. The audit report looks like
 | Scaling and similarity | 0.96 |
 
 **Overall admissibility score** — geometric mean across categories (e.g. 0.94).  
-**Overall admissibility level** — e.g. "High Admissibility".
+**Overall admissibility level** — derived from the overall score in **`[0, 1]`** by `admissibility_level`: **&lt; 0.5** Non-Admissible; **0.5–0.75** Low Admissibility; **0.75–0.95** Moderate Admissibility; **&gt; 0.95** High Admissibility (same bands for per-key scores in `per_key`).
 
 Report keys: `report["per_category"]` (`laws`, `constitutive`, `scaling`), `report["overall_admissibility_score"]`, `report["overall_admissibility_level"]`. Per-key RMS, R_norm, and admissibility are in `report["per_key"]`.
 
@@ -180,7 +180,7 @@ Optional extras:
 - `pip install moju[ref_foam]` — OpenFOAM snapshot loaders (meshio).
 - `pip install moju[ref_hdf5]` — HDF5 loaders (h5py).
 - `pip install moju[report]` — PDF Physics Admissibility Report from `audit(..., export_dir=...)`.
-- `pip install moju[viz]` — **plotly** for **`visualize(engine.log, backend="plotly"|"none")`** (default **`plotly`**), with `mode="training"|"test"`, optional **`spatial_law_panel`**, **`step_label`**, **`r_norm_scale="log"|"linear"`**, **`figure_title`**, `dashboard_mode`, **`theme`** (default **`"light"`**; use **`"dark"`** for dark mode), `baseline_score`, and **`ResidualEngine.clear_log()`** between runs. The single-figure output is a decision-oriented **Physics Admissibility Report** with header status, KPI cards, trend panel, category breakdown (threshold line), residual diagnostics, spatial residual fields, and summary recommendations. Pass **`keys=[...]`** or **`r_ref=...`** to subset or rescale like `audit`. In **Jupyter or Colab**, **restart the kernel** after upgrading or reinstalling `moju` so `visualize` loads the matching `moju.monitor.visualize_plotly` code.
+- `pip install moju[viz]` — **plotly** for **`visualize(engine.log, backend="plotly"|"none")`** (default **`plotly`**), with `mode="training"|"test"`, optional **`spatial_law_panel`**, **`step_label`**, **`r_norm_scale="log"|"linear"`**, **`figure_title`**, `dashboard_mode`, **`theme="light"`** (only supported value; light enterprise styling), `baseline_score`, and **`ResidualEngine.clear_log()`** between runs. The single-figure output is a decision-oriented **Physics Admissibility Report** with a **figure title** (training default **Physics Admissibility Audit (model training)**), header status, KPI cards, trend panel with extra y-axis headroom, category breakdown with a **95%** reference line and **Primary Issue** only when a category is not above that bar, residual diagnostics, spatial residual fields, and summary recommendations. Pass **`keys=[...]`** or **`r_ref=...`** to subset or rescale like `audit`. In **Jupyter or Colab**, **restart the kernel** after upgrading or reinstalling `moju` so `visualize` loads the matching `moju.monitor.visualize_plotly` code.
 - `pip install moju[studio]` — Streamlit + Plotly for **Moju Studio** (`streamlit run apps/moju_studio/Home.py` from a source checkout; see `apps/moju_studio/README.md`).
 - `pip install moju[studio-science]` — optional **HDF5 / NetCDF** state uploads in Studio (`h5py`, `xarray`, `netCDF4`); `.npz` / `.npy` work with `studio` alone.
 

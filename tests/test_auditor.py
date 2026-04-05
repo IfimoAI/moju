@@ -28,12 +28,12 @@ from moju.piratio.models import Models
 class TestAdmissibilityLevel:
     def test_four_levels(self):
         assert admissibility_level(0.0) == "Non-Admissible"
-        assert admissibility_level(0.39) == "Non-Admissible"
-        assert admissibility_level(0.40) == "Low Admissibility"
-        assert admissibility_level(0.69) == "Low Admissibility"
-        assert admissibility_level(0.70) == "Moderate Admissibility"
-        assert admissibility_level(0.89) == "Moderate Admissibility"
-        assert admissibility_level(0.90) == "High Admissibility"
+        assert admissibility_level(0.49) == "Non-Admissible"
+        assert admissibility_level(0.5) == "Low Admissibility"
+        assert admissibility_level(0.74) == "Low Admissibility"
+        assert admissibility_level(0.75) == "Moderate Admissibility"
+        assert admissibility_level(0.95) == "Moderate Admissibility"
+        assert admissibility_level(0.9500001) == "High Admissibility"
         assert admissibility_level(1.0) == "High Admissibility"
 
     def test_non_finite_unknown(self):
@@ -725,9 +725,13 @@ class TestVisualize:
             },
         ]
         fig_tr = visualize(log, backend="plotly", mode="training")
-        assert not (fig_tr.layout.title.text or "")
+        ttr = str(fig_tr.layout.title.text or "")
+        assert DEFAULT_VISUALIZE_TITLE_TRAINING in ttr
+        assert "Overall admissibility (final)" in ttr
         fig_te = visualize(log, backend="plotly", mode="test")
-        assert not (fig_te.layout.title.text or "")
+        tte = str(fig_te.layout.title.text or "")
+        assert DEFAULT_VISUALIZE_TITLE_TEST in tte
+        assert "Overall admissibility (final)" in tte
 
     def test_visualize_plotly_default_theme_is_light(self):
         pytest.importorskip("plotly")
@@ -735,6 +739,13 @@ class TestVisualize:
         fig = visualize(log, backend="plotly", mode="training")
         assert fig is not None
         assert getattr(fig.layout, "paper_bgcolor", None) == "#ffffff"
+        assert getattr(fig.layout, "plot_bgcolor", None) == "#ffffff"
+
+    def test_visualize_plotly_theme_dark_rejected(self):
+        pytest.importorskip("plotly")
+        log = [{"index": 0, "rms": {"laws/a": 1.0}, "scale": {}}]
+        with pytest.raises(ValueError, match="theme='light' only"):
+            visualize(log, backend="plotly", mode="training", theme="dark")
 
     def test_visualize_plotly_test_mode_spatial_row_placeholders_without_coords(self):
         pytest.importorskip("plotly")
@@ -853,7 +864,9 @@ class TestVisualize:
             {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25}, "scale": {}},
         ]
         fig = visualize(log, backend="plotly", mode="training", figure_title="Custom dashboard title")
-        assert not (fig.layout.title.text or "")
+        lt = str(fig.layout.title.text or "")
+        assert "Custom dashboard title" in lt
+        assert "Overall admissibility (final)" in lt
 
     def test_visualize_plotly_overall_admissibility_line_is_black(self):
         pytest.importorskip("plotly")
@@ -863,11 +876,11 @@ class TestVisualize:
         ]
         fig = visualize(log, backend="plotly", mode="training", dashboard_mode="single-figure")
         assert fig is not None
-        tr = next((t for t in fig.data if getattr(t, "name", "") == "Overall admissibility"), None)
+        tr = next((t for t in fig.data if getattr(t, "name", "") == "Overall Admissibility"), None)
         assert tr is not None
         line = getattr(tr, "line", None)
         color = getattr(line, "color", None) if line is not None else None
-        assert str(color).lower() in {"black", "#000000", "rgb(0, 0, 0)"}
+        assert str(color).lower() in {"#000000", "rgb(0, 0, 0)"}
 
     def test_visualize_plotly_worst_violation_annotation_only_when_multiple_keys(self):
         pytest.importorskip("plotly")
@@ -922,7 +935,7 @@ class TestVisualize:
         fig = visualize(log, backend="plotly", mode="training")
         assert fig is not None
 
-        # Overall admissibility axis stays percentage with two decimals.
+        # Overall Admissibility axis stays percentage with two decimals.
         yaxes = [getattr(fig.layout, k) for k in dir(fig.layout) if k.startswith("yaxis")]
         assert any(
             getattr(getattr(ax, "title", None), "text", None) == "Admissibility (%)"
@@ -972,13 +985,102 @@ class TestVisualize:
             {"index": 0, "rms": {"laws/a": 1.0, "constitutive/b/implied_delta": 0.5}, "scale": {"laws/a": 2.0, "constitutive/b/implied_delta": 3.0}},
             {"index": 1, "rms": {"laws/a": 0.5, "constitutive/b/implied_delta": 0.25}, "scale": {"laws/a": 2.0, "constitutive/b/implied_delta": 3.0}},
         ]
-        fig = visualize(log, backend="plotly", mode="training", dashboard_mode="single-figure", theme="dark")
+        fig = visualize(log, backend="plotly", mode="training", dashboard_mode="single-figure")
         assert fig is not None
+        lt = str(getattr(getattr(fig.layout, "title", None), "text", None) or "")
+        assert DEFAULT_VISUALIZE_TITLE_TRAINING in lt
+        assert "Overall admissibility (final)" in lt
+        inds = [t for t in fig.data if getattr(t, "type", None) == "indicator"]
+        assert len(inds) == 3
+        anns = list(getattr(fig.layout, "annotations", []) or [])
+        assert not any(
+            "Overall admissibility (final)" in str(getattr(a, "text", "") or "") for a in anns
+        ), "overall line is merged into layout title, not a separate annotation"
+        assert not any("Final Step:" in str(getattr(a, "text", "") or "") for a in anns)
         shapes = list(getattr(fig.layout, "shapes", []) or [])
-        assert any(abs(float(getattr(s, "x0", -1)) - 0.9) < 1e-9 for s in shapes if getattr(s, "type", None) == "line")
+        assert any(abs(float(getattr(s, "x0", -1)) - 0.95) < 1e-9 for s in shapes if getattr(s, "type", None) == "line")
         hover_templates = [str(getattr(t, "hovertemplate", "")) for t in fig.data]
         assert any("scale_k=" in h for h in hover_templates)
 
+    def test_visualize_test_mode_combined_residual_bars_and_spatial_row_four(self):
+        """Test single-figure: one combined residual bar chart beside category; spatial maps on row 4."""
+        pytest.importorskip("plotly")
+        import numpy as np
+
+        log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5, "scaling/pe/x": 0.2}, "scale": {}}]
+        x = np.linspace(0, 1, 8)
+        spatial_law = {"x": x, "values": {"laws/a": np.ones(8) * 0.01}}
+        spatial_c = {"x": x, "values": {"constitutive/m/c": np.ones(8) * 0.5}}
+        fig = visualize(
+            log,
+            backend="plotly",
+            mode="test",
+            dashboard_mode="single-figure",
+            spatial_law_panel=spatial_law,
+            spatial_rnorm_panel=spatial_c,
+        )
+        bars = [t for t in fig.data if getattr(t, "type", None) == "bar"]
+        assert len(bars) == 2, "category breakdown + single combined residual bar chart"
+        combined = bars[-1]
+        mcol = getattr(getattr(combined, "marker", None), "color", None)
+        assert isinstance(mcol, (list, tuple)) and len(mcol) >= 2
+        assert len(set(mcol)) >= 2, "per-key colors distinguish categories"
+        yref = getattr(combined, "yaxis", "y")
+        yaxis_name = "yaxis" if yref == "y" else f"yaxis{yref[1:]}"
+        yax = getattr(fig.layout, yaxis_name)
+        assert getattr(yax, "type", None) == "log"
+        assert getattr(yax, "exponentformat", None) == "power"
+        hms = [
+            t
+            for t in fig.data
+            if getattr(t, "type", None) == "heatmap"
+            and isinstance(getattr(t, "meta", None), dict)
+        ]
+        assert len(hms) == 2
+        assert all(int(t.meta.get("subplot_row", 0)) == 4 for t in hms)
+
+    def test_visualize_single_figure_spatial_heatmaps_share_colorbar_range(self):
+        pytest.importorskip("plotly")
+        import numpy as np
+
+        log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}}]
+        x = np.linspace(0, 1, 8)
+        spatial_law = {"x": x, "values": {"laws/a": np.ones(8) * 0.01}}
+        spatial_c = {"x": x, "values": {"constitutive/m/c": np.ones(8) * 0.5}}
+        fig = visualize(
+            log,
+            backend="plotly",
+            mode="training",
+            dashboard_mode="single-figure",
+            spatial_law_panel=spatial_law,
+            spatial_rnorm_panel=spatial_c,
+        )
+        hms = [
+            t
+            for t in fig.data
+            if getattr(t, "type", None) == "heatmap"
+            and isinstance(getattr(t, "meta", None), dict)
+            and int(t.meta.get("subplot_row", 0)) == 5
+        ]
+        assert len(hms) == 2
+        z0 = (getattr(hms[0], "zmin", None), getattr(hms[0], "zmax", None))
+        z1 = (getattr(hms[1], "zmin", None), getattr(hms[1], "zmax", None))
+        assert z0 == z1
+        assert z0[0] is not None and z0[1] is not None
+
+    def test_visualize_forensic_tab_heatmap_has_data_driven_zlim(self):
+        pytest.importorskip("plotly")
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/b/implied_delta": 0.5}, "scale": {"laws/a": 2.0}},
+            {"index": 1, "rms": {"laws/a": 0.2, "constitutive/b/implied_delta": 0.25}, "scale": {"laws/a": 2.0}},
+        ]
+        out = visualize(log, backend="plotly", mode="training", dashboard_mode="dash-tabs")
+        ff = (out.get("tabs") or {}).get("forensic_heatmaps")
+        assert ff is not None
+        hm = next((t for t in ff.data if getattr(t, "type", None) == "heatmap"), None)
+        assert hm is not None
+        assert getattr(hm, "zmin", None) is not None
+        assert getattr(hm, "zmax", None) is not None
 
     def test_visualize_training_kpi_domain_does_not_overlap_overall_chart(self):
         pytest.importorskip("plotly")
@@ -996,7 +1098,7 @@ class TestVisualize:
                 tr
                 for tr in fig.data
                 if getattr(tr, "type", None) == "scatter"
-                and getattr(tr, "name", "") == "Overall admissibility"
+                and getattr(tr, "name", "") == "Overall Admissibility"
             ),
             None,
         )
@@ -1008,8 +1110,8 @@ class TestVisualize:
         ty0, ty1 = float(trend_axis.domain[0]), float(trend_axis.domain[1])
         assert kpi_y1 <= ty0 or kpi_y0 >= ty1
 
-    def test_visualize_training_instability_shade_does_not_raise_with_indicator_traces(self):
-        """High-variance trend uses add_shape, not add_hrect(row,col), so Indicator traces are not scanned for xaxis."""
+    def test_visualize_training_high_variance_log_no_pink_overlay(self):
+        """Volatile admissibility logs still build single-figure; no high-variance pink background tint."""
         pytest.importorskip("plotly")
         log = [
             {"index": i, "rms": {"laws/a": (10.0 if i % 2 == 0 else 0.01)}, "scale": {"laws/a": 1.0}}
@@ -1018,7 +1120,102 @@ class TestVisualize:
         fig = visualize(log, backend="plotly", mode="training", dashboard_mode="single-figure")
         assert fig is not None
         shapes = list(getattr(fig.layout, "shapes", []) or [])
-        assert any(getattr(s, "type", None) == "rect" for s in shapes)
+        assert not any(
+            getattr(s, "type", None) == "rect"
+            and abs(float(getattr(s, "opacity", 0) or 0) - 0.07) < 1e-6
+            for s in shapes
+        )
+
+    def test_visualize_overall_admissibility_y_grid_and_white_underlay(self):
+        """Trend panel: major y-grid, full-domain white underlay, no pink opacity-0.07 overlay."""
+        pytest.importorskip("plotly")
+        from moju.monitor.visualize_plotly import _ENTERPRISE_THEME
+
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25}, "scale": {}},
+        ]
+        fig = visualize(log, backend="plotly", mode="training", dashboard_mode="single-figure")
+        trend_trace = next(
+            (
+                tr
+                for tr in fig.data
+                if getattr(tr, "type", None) == "scatter"
+                and getattr(tr, "name", "") == "Overall Admissibility"
+                and getattr(tr, "mode", "") == "lines"
+            ),
+            None,
+        )
+        assert trend_trace is not None
+        yref = getattr(trend_trace, "yaxis", "y")
+        yaxis_name = "yaxis" if yref == "y" else f"yaxis{yref[1:]}"
+        yax = getattr(fig.layout, yaxis_name, None)
+        assert yax is not None
+        assert getattr(yax, "showgrid", None) is True
+        assert getattr(yax, "gridcolor", None) == _ENTERPRISE_THEME["grid_color"]
+        shapes = list(getattr(fig.layout, "shapes", []) or [])
+        full_domain_white = [
+            s
+            for s in shapes
+            if getattr(s, "type", None) == "rect"
+            and str(getattr(s, "xref", "") or "").endswith(" domain")
+            and str(getattr(s, "yref", "") or "").endswith(" domain")
+            and float(getattr(s, "x0", -1)) == 0.0
+            and float(getattr(s, "x1", -1)) == 1.0
+            and float(getattr(s, "y0", -1)) == 0.0
+            and float(getattr(s, "y1", -1)) == 1.0
+            and str(getattr(s, "fillcolor", "") or "").lower() in {"#ffffff", "rgb(255, 255, 255)"}
+        ]
+        assert len(full_domain_white) == 1
+        assert not any(
+            getattr(s, "type", None) == "rect"
+            and abs(float(getattr(s, "opacity", 0) or 0) - 0.07) < 1e-6
+            for s in shapes
+        )
+
+    def test_visualize_forensic_tab_heatmap_colorbar_uses_domain_alignment(self):
+        pytest.importorskip("plotly")
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/b/implied_delta": 0.5}, "scale": {}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/b/implied_delta": 0.25}, "scale": {}},
+        ]
+        out = visualize(log, backend="plotly", mode="training", dashboard_mode="dash-tabs")
+        figf = (out.get("tabs") or {}).get("forensic_heatmaps")
+        assert figf is not None
+        hm = next((t for t in figf.data if getattr(t, "type", None) == "heatmap"), None)
+        assert hm is not None
+        cbd = hm.to_plotly_json().get("colorbar") or {}
+        assert cbd.get("xanchor") == "left"
+        assert cbd.get("x") is not None and float(cbd["x"]) <= 1.0
+
+    def test_visualize_spatial_right_heatmap_insets_x_domain_for_colorbar(self):
+        pytest.importorskip("plotly")
+        import numpy as np
+
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25}, "scale": {}},
+        ]
+        residuals = {"laws": {"a": np.ones(5) * 0.1}, "constitutive": {"m/c": np.ones(5) * 0.05}}
+        fig = visualize(log, backend="plotly", mode="training", residuals=residuals)
+        right_hm = next(
+            (
+                t
+                for t in fig.data
+                if getattr(t, "type", None) == "heatmap"
+                and isinstance(getattr(t, "meta", None), dict)
+                and int(t.meta.get("subplot_col", 0)) == 5
+            ),
+            None,
+        )
+        assert right_hm is not None
+        xref = getattr(right_hm, "xaxis", "x")
+        ax_name = "xaxis" if xref == "x" else f"xaxis{xref[1:]}"
+        xax = getattr(fig.layout, ax_name, None)
+        assert xax is not None and xax.domain is not None
+        assert float(xax.domain[1]) < 0.98
+        cbx = float((right_hm.to_plotly_json().get("colorbar") or {}).get("x", 0))
+        assert cbx > float(xax.domain[1])
 
     def test_visualize_training_indicator_traces_have_no_cartesian_axis_refs(self):
         """go.Indicator must not receive xaxis/yaxis (PlotlyKeyError in some subplot paths)."""
@@ -1037,13 +1234,14 @@ class TestVisualize:
     def test_visualize_test_mode_style_parity_threshold_and_watermark(self):
         pytest.importorskip("plotly")
         log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/b/implied_delta": 0.5}, "scale": {"laws/a": 2.0}}]
-        fig = visualize(log, backend="plotly", mode="test", theme="dark")
+        fig = visualize(log, backend="plotly", mode="test")
         assert fig is not None
-        assert getattr(fig.layout, "paper_bgcolor", None) == "#0b1220"
+        assert getattr(fig.layout, "paper_bgcolor", None) == "#ffffff"
+        assert getattr(fig.layout, "plot_bgcolor", None) == "#ffffff"
         anns = list(getattr(fig.layout, "annotations", []) or [])
         assert any("Ifimo Lab: Moju Forensic Suite" in str(getattr(a, "text", "")) for a in anns)
         shapes = list(getattr(fig.layout, "shapes", []) or [])
-        assert any(getattr(s, "type", None) == "line" and abs(float(getattr(s, "x0", -1)) - 0.9) < 1e-9 for s in shapes)
+        assert any(getattr(s, "type", None) == "line" and abs(float(getattr(s, "x0", -1)) - 0.95) < 1e-9 for s in shapes)
         hovers = [str(getattr(tr, "hovertemplate", "")) for tr in fig.data]
         assert any("scale_k=" in ht for ht in hovers)
 
