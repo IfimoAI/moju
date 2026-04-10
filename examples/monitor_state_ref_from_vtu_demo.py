@@ -25,7 +25,9 @@ def main(vtu_path: str):
 
     # Dummy prediction (same key must exist to produce a data residual).
     state_pred = {"phi": jnp.asarray(0.0)}
-    residuals = engine.compute_residuals(state_pred, state_ref=state_ref)
+    residuals = engine.compute_residuals(
+        state_pred, state_ref=state_ref, run_mode="eval"
+    )
     print("Computed keys:", sorted(residuals.keys()))
     if "data" in residuals:
         print("Data residual keys:", sorted(residuals["data"].keys()))

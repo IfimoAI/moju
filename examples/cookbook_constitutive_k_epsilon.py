@@ -32,7 +32,9 @@ def main() -> Dict[str, Any]:
         ],
     )
     engine = ResidualEngine(config=cfg)
-    residuals = engine.compute_residuals(state_pred, state_ref=dict(state_pred))
+    residuals = engine.compute_residuals(
+        state_pred, state_ref=dict(state_pred), run_mode="eval"
+    )
     report = audit(engine.log)
     flat_key = "constitutive/k_epsilon_nu_t/ref_delta"
     rms = engine.log[-1]["rms"][flat_key]

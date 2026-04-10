@@ -21,6 +21,8 @@ There is **no** raw SI-difference mode. **`Models.*`** still uses your physical 
 This answers: *“Does the constitutive closure in the catalog agree with what the PDE fields imply locally?”* without requiring **`state_ref`**. It is **not** a claim that the closure matches experiment—only that it matches the **same predicted state** you pass to the law.
 These implied residual keys are included in normal category/overall admissibility scoring by default (same as other constitutive/scaling residual keys).
 
+**Training vs eval:** **`implied_delta`** law-linked rows run in both **`run_mode="training"`** (default) and **`run_mode="eval"`**. **`ref_delta`** on those rows (and separate scaling **`ref_delta`** / **`data/`** pred−ref) runs only when you call **`compute_residuals(..., run_mode="eval", state_ref=...)`**. See [monitor_training_vs_eval.md](monitor_training_vs_eval.md).
+
 ## Configuration
 
 | Mechanism | Behavior |
@@ -37,7 +39,7 @@ Each auto row sets **`residual_basename`** so keys stay unique when multiple law
 
 - Example: `constitutive/thermal_diffusivity/law_fourier_conduction/implied_delta`
 
-If **`state_ref`** is passed to **`compute_residuals`**, **`ref_delta`** is computed for the same row **unless** the spec sets **`include_ref_delta: false`**. It uses the same nondimensional rules as **`implied_delta`** (symmetric scale, or **`ref_delta_ref_key`** / **`{output_key}_ref`** for the \(|\text{ref}|\) denominator).
+If **`state_ref`** is passed and **`run_mode="eval"`**, **`ref_delta`** is computed for the same row **unless** the spec sets **`include_ref_delta: false`**. With **`run_mode="training"`**, **`state_ref`** is ignored for **`ref_delta`** (use an eval pass after training). Nondimensional rules match **`implied_delta`** (symmetric scale, or **`ref_delta_ref_key`** / **`{output_key}_ref`** for the \(|\text{ref}|\) denominator).
 
 ## Constitutive-only policy
 

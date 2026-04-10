@@ -40,7 +40,7 @@ def main():
         method="linear",
     )
 
-    engine.compute_residuals(state_pred, state_ref=state_ref)
+    engine.compute_residuals(state_pred, state_ref=state_ref, run_mode="eval")
     report = audit(engine.log, export_dir="exports", model_name="xarray_state_ref_demo")
     print("Wrote report with overall admissibility:", report.get("overall_admissibility_score"))
 

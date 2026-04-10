@@ -49,7 +49,9 @@ def main() -> Dict[str, Any]:
         state_builder=state_builder,
     )
     engine = ResidualEngine(config=cfg)
-    engine.compute_residuals(None, model=0, params=0, collocation={})
+    engine.compute_residuals(
+        None, model=0, params=0, collocation={}, run_mode="eval"
+    )
     report = audit(engine.log)
     pi_key = "scaling/pr/pi_constant"
     return {

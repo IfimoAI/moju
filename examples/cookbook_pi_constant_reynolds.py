@@ -57,7 +57,9 @@ def main() -> Dict[str, Any]:
     )
     engine = ResidualEngine(config=cfg)
     # Path A requires non-None placeholders; this stub ignores model/params/collocation.
-    engine.compute_residuals(None, model=0, params=0, collocation={})
+    engine.compute_residuals(
+        None, model=0, params=0, collocation={}, run_mode="eval"
+    )
     report = audit(engine.log)
     pi_key = "scaling/re/pi_constant"
     return {

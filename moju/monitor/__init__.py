@@ -32,6 +32,12 @@ from moju.monitor.law_implied_diagnostics import (
 from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
 from moju.monitor.closure_registry import apply_closure_discrepancy_normalize
 from moju.monitor.pi_constant_recipes import list_pi_constant_group_names
+from moju.monitor.law_group_defaults import (
+    LAW_PRIMARY_PI_GROUPS,
+    build_residual_engine_for_pi_constant_eval,
+    merge_scaling_audit_with_pi_law_defaults,
+    resolve_pi_groups_for_laws,
+)
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
 
 __all__ = [
@@ -61,6 +67,10 @@ __all__ = [
     "merge_fragment_law_implied_audit_specs",
     "apply_closure_discrepancy_normalize",
     "list_pi_constant_group_names",
+    "LAW_PRIMARY_PI_GROUPS",
+    "resolve_pi_groups_for_laws",
+    "merge_scaling_audit_with_pi_law_defaults",
+    "build_residual_engine_for_pi_constant_eval",
     "pretty_residual_key",
     "pretty_category_name",
     "build_spatial_rnorm_panels_from_residuals",

@@ -987,12 +987,14 @@ with tab_run:
                         with st.expander("Dependency detail", expanded=False):
                             st.markdown(dep_plan.to_markdown())
 
+                    run_mode = "eval" if ref is not None else "training"
                     if path_b:
                         residuals = engine.compute_residuals(
                             pred,
                             ref,
                             auto_path_b_derivatives=fd_arg,
                             fill_law_fd=fill_law,
+                            run_mode=run_mode,
                         )
                     else:
                         residuals = engine.compute_residuals(
@@ -1002,6 +1004,7 @@ with tab_run:
                             collocation=col,
                             auto_path_b_derivatives=fd_arg,
                             fill_law_fd=fill_law,
+                            run_mode=run_mode,
                         )
 
                     elapsed = time.perf_counter() - t0
@@ -1075,7 +1078,7 @@ with tab_dash:
     if rep:
         path_b_hdr = bool(st.session_state.get("last_path_b", True))
         dash_title = (
-            "State Prediction Audit (Physics Residuals)"
+            "Physics Admissibility Audit (model evaluation) (Physics Residuals)"
             if path_b_hdr
             else "Model Audit (Physics Residuals)"
         )

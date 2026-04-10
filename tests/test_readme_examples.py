@@ -68,7 +68,9 @@ def test_readme_five_minute_example_runs():
         "Pe": Pe,
     }
 
-    residuals = engine.compute_residuals(dict(base), state_ref=dict(base))
+    residuals = engine.compute_residuals(
+        dict(base), state_ref=dict(base), run_mode="eval"
+    )
     loss = build_loss(residuals)
     report = audit(engine.log)
 

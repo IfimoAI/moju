@@ -123,6 +123,7 @@ def write_audit_pdf(
     per_category = report.get("per_category", {})
     overall_score = report.get("overall_admissibility_score", 0.0)
     overall_level = report.get("overall_admissibility_level", "Non-Admissible")
+    training_doc = report.get("monitor_run_mode") == "training"
 
     doc = SimpleDocTemplate(
         path,
@@ -174,6 +175,16 @@ def write_audit_pdf(
         )
     )
     story.append(Spacer(1, 12))
+    if training_doc:
+        story.append(
+            Paragraph(
+                "<i>Training-style summary: reference (data/) and scaling similarity sections are "
+                "omitted. Use <b>compute_residuals(..., run_mode='eval')</b> with <b>state_ref</b> "
+                "for ground-truth and ref-based scaling in the report.</i>",
+                body_style,
+            )
+        )
+        story.append(Spacer(1, 8))
 
     # Overall score and level
     story.append(Paragraph("Overall", heading_style))
@@ -184,7 +195,18 @@ def write_audit_pdf(
     if per_category:
         story.append(Paragraph("Category summary", heading_style))
         table_data = [["Category", "Score"]]
-        for key, label in (("laws", "Governing laws"), ("constitutive", "Constitutive"), ("scaling", "Scaling/similarity")):
+        cat_rows: List[Tuple[str, str]] = [
+            ("laws", "Governing laws"),
+            ("constitutive", "Constitutive"),
+        ]
+        if not training_doc:
+            cat_rows.extend(
+                (
+                    ("scaling", "Scaling/similarity"),
+                    ("data", "Data / ground truth"),
+                )
+            )
+        for key, label in cat_rows:
             if key in per_category:
                 table_data.append([label, format_admissibility_pct(float(per_category[key]))])
         t = Table(table_data, colWidths=[3.0 * inch, 1.2 * inch])
@@ -212,7 +234,14 @@ def write_audit_pdf(
         story.append(Spacer(1, 16))
 
     # Per-key metrics by category
-    grouped = _group_keys_by_category(per_key)
+    per_key_filtered = dict(per_key)
+    if training_doc:
+        per_key_filtered = {
+            k: v
+            for k, v in per_key_filtered.items()
+            if not (k.startswith("scaling/") or k.startswith("data/"))
+        }
+    grouped = _group_keys_by_category(per_key_filtered)
     for section_header, items in grouped:
         story.append(Paragraph(section_header, heading_style))
         table_data = [["Metric", "Score", "Level"]]

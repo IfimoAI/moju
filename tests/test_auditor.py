@@ -15,7 +15,11 @@ from moju.monitor import (
     list_scaling_closure_ids,
     visualize,
 )
-from moju.monitor.auditor import DEFAULT_VISUALIZE_TITLE_TEST, DEFAULT_VISUALIZE_TITLE_TRAINING
+from moju.monitor.auditor import (
+    DEFAULT_VISUALIZE_TITLE_EVAL,
+    DEFAULT_VISUALIZE_TITLE_TEST,
+    DEFAULT_VISUALIZE_TITLE_TRAINING,
+)
 from moju.monitor.closure_registry import (
     apply_closure_discrepancy_normalize,
     GROUP_FNS,
@@ -83,6 +87,32 @@ class TestNanTolerantAuditMetrics:
         assert rep["per_category"]["constitutive"] == 0.0
         assert rep["overall_admissibility_score"] == 0.0
         assert rep["overall_admissibility_level"] == "Non-Admissible"
+
+    def test_training_overall_uses_only_laws_and_constitutive(self):
+        import math
+
+        from moju.monitor.auditor import _compute_log_step_metrics
+
+        log = [
+            {
+                "run_mode": "training",
+                "rms": {
+                    "laws/laplace_equation": 0.1,
+                    "constitutive/x/implied_delta": 0.1,
+                    "scaling/pe/ref_delta": 5.0,
+                },
+                "scale": {
+                    "laws/laplace_equation": 1.0,
+                    "constitutive/x/implied_delta": 1.0,
+                    "scaling/pe/ref_delta": 1.0,
+                },
+            }
+        ]
+        m = _compute_log_step_metrics(log)
+        cl = m[0]["category_admissibility_score"]["laws"]
+        cc = m[0]["category_admissibility_score"]["constitutive"]
+        expected = math.exp(0.5 * (math.log(cl) + math.log(cc)))
+        assert abs(m[0]["overall_admissibility_score"] - expected) < 1e-9
 
     def test_rms_scalar_uses_nanmean(self):
         import math
@@ -172,7 +202,9 @@ class TestResidualEngineResidualDict:
         mu_ref = 1.8e-5 * (T_ref / 273) ** 1.5 * (273 + 110.4) / (T_ref + 110.4)
         state_pred = {"mu": mu_pred, "T": T_pred}
         state_ref = {"mu": mu_ref, "T": T_ref}
-        residuals = core.compute_residuals(state_pred, state_ref=state_ref)
+        residuals = core.compute_residuals(
+            state_pred, state_ref=state_ref, run_mode="eval"
+        )
         assert "constitutive" in residuals
         assert "sutherland_mu/ref_delta" in residuals["constitutive"]
         assert abs(float(residuals["constitutive"]["sutherland_mu/ref_delta"])) > 0.0
@@ -191,7 +223,9 @@ class TestResidualEngineResidualDict:
         Re, Pr = 100.0, 0.7
         Pe = Re * Pr
         state_pred = {"Pe": Pe, "Re": Re, "Pr": Pr}
-        residuals = core.compute_residuals(state_pred, state_ref=dict(state_pred))
+        residuals = core.compute_residuals(
+            state_pred, state_ref=dict(state_pred), run_mode="eval"
+        )
         assert "scaling" in residuals
         assert jnp.allclose(residuals["scaling"]["pe/ref_delta"], 0.0, rtol=rtol, atol=atol)
 
@@ -201,9 +235,20 @@ class TestResidualEngineResidualDict:
         )
         state_pred = {"phi_laplacian": jnp.array(0.5)}
         state_ref = {"phi_laplacian": jnp.array(0.0)}
-        residuals = core.compute_residuals(state_pred, state_ref=state_ref)
+        residuals = core.compute_residuals(
+            state_pred, state_ref=state_ref, run_mode="eval"
+        )
         assert "data" in residuals
         assert jnp.allclose(residuals["data"]["phi_laplacian"], -0.5, rtol=rtol, atol=atol)
+
+    def test_state_ref_ignored_in_training_mode(self, rtol, atol):
+        core = ResidualEngine(
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
+        )
+        state_pred = {"phi_laplacian": jnp.array(0.5)}
+        state_ref = {"phi_laplacian": jnp.array(0.0)}
+        residuals = core.compute_residuals(state_pred, state_ref=state_ref, run_mode="training")
+        assert "data" not in residuals
 
 class TestBuildLoss:
     def test_cascaded_loss_scalar(self, rtol, atol):
@@ -534,13 +579,13 @@ class TestVisualize:
         assert rn_p is not None
         assert "values" in rn_p and any(k.startswith("constitutive/") for k in (rn_p.get("values") or {}))
 
-    def test_visualize_test_mode_uses_last_log_entry(self):
+    def test_visualize_eval_mode_uses_last_log_entry(self):
         pytest.importorskip("plotly")
         log = [
             {"index": 0, "rms": {"laws/a": 10.0}, "scale": {"laws/a": 1.0}},
             {"index": 1, "rms": {"laws/a": 0.1}, "scale": {"laws/a": 1.0}},
         ]
-        fig = visualize(log, mode="test")
+        fig = visualize(log, mode="eval")
         assert fig is not None
         assert hasattr(fig, "data")
 
@@ -728,10 +773,25 @@ class TestVisualize:
         ttr = str(fig_tr.layout.title.text or "")
         assert DEFAULT_VISUALIZE_TITLE_TRAINING in ttr
         assert "Overall admissibility (final)" in ttr
-        fig_te = visualize(log, backend="plotly", mode="test")
+        fig_te = visualize(log, backend="plotly", mode="eval")
         tte = str(fig_te.layout.title.text or "")
+        assert DEFAULT_VISUALIZE_TITLE_EVAL in tte
         assert DEFAULT_VISUALIZE_TITLE_TEST in tte
         assert "Overall admissibility (final)" in tte
+
+    def test_visualize_mode_test_alias_matches_eval(self):
+        pytest.importorskip("plotly")
+        from moju.monitor.auditor import build_monitor_visualize_bundle
+
+        log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}}]
+        fig_e = visualize(log, backend="plotly", mode="eval")
+        fig_t = visualize(log, backend="plotly", mode="test")
+        assert fig_e.layout.height == fig_t.layout.height
+        assert len(fig_e.data) == len(fig_t.data)
+        b_e = build_monitor_visualize_bundle(log, mode="eval")
+        b_t = build_monitor_visualize_bundle(log, mode="test")
+        assert b_e is not None and b_t is not None
+        assert b_e["mode"] == "eval" and b_t["mode"] == "eval"
 
     def test_visualize_plotly_default_theme_is_light(self):
         pytest.importorskip("plotly")
@@ -747,28 +807,28 @@ class TestVisualize:
         with pytest.raises(ValueError, match="theme='light' only"):
             visualize(log, backend="plotly", mode="training", theme="dark")
 
-    def test_visualize_plotly_test_mode_spatial_row_placeholders_without_coords(self):
+    def test_visualize_plotly_eval_mode_spatial_row_placeholders_without_coords(self):
         pytest.importorskip("plotly")
         log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}}]
-        fig = visualize(log, backend="plotly", mode="test")
+        fig = visualize(log, backend="plotly", mode="eval")
         assert fig is not None
         hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
         assert len(hm) == 0
         sc = [t for t in fig.data if getattr(t, "type", None) == "scatter"]
         assert any("spatial" in str(getattr(t, "text", "") or "").lower() for t in sc)
 
-    def test_visualize_plotly_test_mode_heatmaps_with_residuals_only(self):
+    def test_visualize_plotly_eval_mode_heatmaps_with_residuals_only(self):
         pytest.importorskip("plotly")
         import numpy as np
 
         log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}}]
         residuals = {"laws": {"a": np.ones(5) * 0.1}, "constitutive": {"m/c": np.ones(5) * 0.05}}
-        fig = visualize(log, backend="plotly", mode="test", residuals=residuals)
+        fig = visualize(log, backend="plotly", mode="eval", residuals=residuals)
         assert fig is not None
         hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
         assert len(hm) >= 2
 
-    def test_visualize_plotly_test_mode_dual_spatial_heatmaps(self):
+    def test_visualize_plotly_eval_mode_dual_spatial_heatmaps(self):
         pytest.importorskip("plotly")
         import numpy as np
 
@@ -779,7 +839,7 @@ class TestVisualize:
         fig = visualize(
             log,
             backend="plotly",
-            mode="test",
+            mode="eval",
             spatial_law_panel=spatial_law,
             spatial_rnorm_panel=spatial_c,
         )
@@ -974,6 +1034,7 @@ class TestVisualize:
         out = visualize(log, backend="plotly", mode="training", dashboard_mode="dash-tabs", baseline_score=0.6)
         assert isinstance(out, dict)
         assert out.get("mode") == "dash-tabs"
+        assert out.get("toggles", {}).get("mode") == ["training", "eval"]
         tabs = out.get("tabs") or {}
         assert set(["kpi", "admissibility", "forensic_heatmaps", "convergence"]).issubset(set(tabs.keys()))
         kpi_fig = tabs["kpi"]
@@ -991,7 +1052,7 @@ class TestVisualize:
         assert DEFAULT_VISUALIZE_TITLE_TRAINING in lt
         assert "Overall admissibility (final)" in lt
         inds = [t for t in fig.data if getattr(t, "type", None) == "indicator"]
-        assert len(inds) == 3
+        assert len(inds) == 2
         anns = list(getattr(fig.layout, "annotations", []) or [])
         assert not any(
             "Overall admissibility (final)" in str(getattr(a, "text", "") or "") for a in anns
@@ -1002,8 +1063,8 @@ class TestVisualize:
         hover_templates = [str(getattr(t, "hovertemplate", "")) for t in fig.data]
         assert any("scale_k=" in h for h in hover_templates)
 
-    def test_visualize_test_mode_combined_residual_bars_and_spatial_row_four(self):
-        """Test single-figure: one combined residual bar chart beside category; spatial maps on row 4."""
+    def test_visualize_eval_mode_combined_residual_bars_and_spatial_row_four(self):
+        """Eval single-figure: one combined residual bar chart beside category; spatial maps on row 4."""
         pytest.importorskip("plotly")
         import numpy as np
 
@@ -1014,7 +1075,7 @@ class TestVisualize:
         fig = visualize(
             log,
             backend="plotly",
-            mode="test",
+            mode="eval",
             dashboard_mode="single-figure",
             spatial_law_panel=spatial_law,
             spatial_rnorm_panel=spatial_c,
@@ -1231,10 +1292,10 @@ class TestVisualize:
                 assert getattr(tr, "xaxis", None) is None
                 assert getattr(tr, "yaxis", None) is None
 
-    def test_visualize_test_mode_style_parity_threshold_and_watermark(self):
+    def test_visualize_eval_mode_style_parity_threshold_and_watermark(self):
         pytest.importorskip("plotly")
         log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/b/implied_delta": 0.5}, "scale": {"laws/a": 2.0}}]
-        fig = visualize(log, backend="plotly", mode="test")
+        fig = visualize(log, backend="plotly", mode="eval")
         assert fig is not None
         assert getattr(fig.layout, "paper_bgcolor", None) == "#ffffff"
         assert getattr(fig.layout, "plot_bgcolor", None) == "#ffffff"
@@ -1398,7 +1459,9 @@ class TestImpliedDeltaClosure:
         rho2 = Models.ideal_gas_rho(P * 1.01, R, T)
         state_pred = {"P": P, "R": R, "T": T, "rho": rho1}
         state_ref = {"P": P * 1.01, "R": R, "T": T, "rho": rho2}
-        res = core.compute_residuals(state_pred, state_ref=state_ref)
+        res = core.compute_residuals(
+            state_pred, state_ref=state_ref, run_mode="eval"
+        )
         assert "ideal_gas_rho/ref_delta" in res["constitutive"]
 
     def test_implied_both_key_and_fn_raises(self):
@@ -1482,6 +1545,40 @@ class TestMonitorConfig:
         cfg2 = MonitorConfig.from_dict(d)
         assert cfg2.to_dict() == d
 
+    def test_pi_constant_fields_roundtrip(self):
+        cfg = MonitorConfig(
+            pi_constant_law_defaults_enabled=True,
+            pi_constant_default_c=7.0,
+            pi_constant_law_group_overrides={"fourier_conduction": ["pr"]},
+            pi_constant_extra_groups=["nu"],
+            pi_constant_default_compare_keys=["T"],
+        )
+        cfg2 = MonitorConfig.from_dict(cfg.to_dict())
+        assert cfg2.pi_constant_law_defaults_enabled is True
+        assert cfg2.pi_constant_default_c == 7.0
+        assert cfg2.pi_constant_law_group_overrides["fourier_conduction"] == ["pr"]
+        assert cfg2.pi_constant_extra_groups == ["nu"]
+        assert cfg2.pi_constant_default_compare_keys == ["T"]
+
+
+class TestLawGroupDefaults:
+    def test_resolve_pi_groups_fourier(self):
+        from moju.monitor.law_group_defaults import resolve_pi_groups_for_laws
+
+        laws = [{"name": "fourier_conduction", "state_map": {}}]
+        g = resolve_pi_groups_for_laws(laws, law_group_overrides={}, extra_groups=[])
+        assert g == ["fo"]
+
+    def test_merge_scaling_disabled_unchanged_length(self):
+        from moju.monitor.law_group_defaults import merge_scaling_audit_with_pi_law_defaults
+
+        cfg = MonitorConfig(
+            laws=[{"name": "fourier_conduction", "state_map": {}}],
+            scaling_audit=[],
+            pi_constant_law_defaults_enabled=False,
+        )
+        assert len(merge_scaling_audit_with_pi_law_defaults(cfg)) == 0
+
 
 class TestRequiredKeys:
     def test_required_state_keys_union(self):
@@ -1511,7 +1608,9 @@ class TestRequiredKeys:
             ],
         )
         state_pred = {"u": 1.0, "T": 2.0, "Pe": 2.0}
-        residuals = engine.compute_residuals(state_pred, state_ref=dict(state_pred))
+        residuals = engine.compute_residuals(
+            state_pred, state_ref=dict(state_pred), run_mode="eval"
+        )
         assert "scaling" in residuals
         assert jnp.allclose(residuals["scaling"]["pe/ref_delta"], 0.0, rtol=rtol, atol=atol)
 
@@ -1583,6 +1682,24 @@ class TestPiConstantClosure:
                 state_builder=lambda m, p, col, ct: {"out": ct["L"] / ct["mu"]},
             )
 
+    def test_pi_constant_skipped_when_run_mode_training(self, rtol, atol):
+        def sb(model, params, collocation, constants):
+            return {"out": constants["L"] / constants["mu"]}
+
+        engine = ResidualEngine(
+            constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
+            laws=[],
+            groups=[],
+            scaling_audit=[_re_pi_spec()],
+            state_builder=sb,
+        )
+        residuals = engine.compute_residuals(
+            None, model=0, params=0, collocation={}, run_mode="training"
+        )
+        assert "scaling" not in residuals or "re/pi_constant" not in residuals.get(
+            "scaling", {}
+        )
+
     def test_path_b_forbidden_when_pi_enabled(self):
         def sb(model, params, collocation, constants):
             return {"out": constants["L"] / constants["mu"]}
@@ -1608,7 +1725,9 @@ class TestPiConstantClosure:
             scaling_audit=[_re_pi_spec()],
             state_builder=sb,
         )
-        residuals = engine.compute_residuals(None, model=0, params=0, collocation={})
+        residuals = engine.compute_residuals(
+            None, model=0, params=0, collocation={}, run_mode="eval"
+        )
         r = residuals["scaling"]["re/pi_constant"]
         assert jnp.allclose(r, 0.0, rtol=rtol, atol=atol)
 
@@ -1623,7 +1742,9 @@ class TestPiConstantClosure:
             scaling_audit=[_re_pi_spec()],
             state_builder=sb,
         )
-        engine.compute_residuals(None, model=0, params=0, collocation={})
+        engine.compute_residuals(
+            None, model=0, params=0, collocation={}, run_mode="eval"
+        )
         entry = engine.log[-1]
         scale = entry["scale"]["scaling/re/pi_constant"]
         assert scale > 5.0

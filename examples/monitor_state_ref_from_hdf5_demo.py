@@ -23,7 +23,9 @@ def main(h5_path: str):
     state_ref = from_hdf5(h5_path, var_map={"phi": "phi"}, strict=False)
 
     state_pred = {"phi": jnp.asarray(0.0)}
-    residuals = engine.compute_residuals(state_pred, state_ref=state_ref)
+    residuals = engine.compute_residuals(
+        state_pred, state_ref=state_ref, run_mode="eval"
+    )
     print("Computed keys:", sorted(residuals.keys()))
     if "data" in residuals:
         print("Data residual keys:", sorted(residuals["data"].keys()))

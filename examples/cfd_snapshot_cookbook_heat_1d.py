@@ -107,7 +107,9 @@ def main(n: int = 200, noise: float = 0.05, smooth_window: int = 9, export_dir: 
         "w_x": jnp.asarray(w_x),
     }
 
-    engine.compute_residuals(state_pred, state_ref={"Re": jnp.asarray(Re)})
+    engine.compute_residuals(
+        state_pred, state_ref={"Re": jnp.asarray(Re)}, run_mode="eval"
+    )
     report = audit(engine.log, export_dir=export_dir, model_name="cfd_snapshot_cookbook_heat_1d")
 
     pe_score = report["per_key"].get("scaling/pe/chain_dx", {})

@@ -1,10 +1,10 @@
 """
 ResidualEngine: residuals for governing laws, constitutive, and scaling/similarity audits.
 
-- compute_residuals(state_pred, state_ref=None, *, log_to_python=True)
+- compute_residuals(..., state_ref=None, run_mode=\"training\"|\"eval\", ...)
 - build_loss: cascaded RMS over laws only (training).
 - audit / visualize: same metrics (RMS, R_norm, admissibility) for all residual keys;
-  visualize builds Plotly training/test dashboards (optional spatial law panel for x slices).
+  visualize builds Plotly training/eval dashboards (optional spatial law panel for x slices).
 
 Constitutive and scaling/similarity audits are tied to Models.* and Groups.* functions via
 **ref_delta**, **implied_delta** (constitutive only), and **π-constant** checks (scaling, Path A).
@@ -47,10 +47,18 @@ from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_re
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
 
 DEFAULT_VISUALIZE_TITLE_TRAINING = "Physics Admissibility Audit (model training)"
-DEFAULT_VISUALIZE_TITLE_TEST = "State Prediction Audit"
+DEFAULT_VISUALIZE_TITLE_EVAL = "Physics Admissibility Audit (model evaluation)"
+DEFAULT_VISUALIZE_TITLE_TEST = DEFAULT_VISUALIZE_TITLE_EVAL
 
 # Admissibility score in [0, 1]; "High" is strictly above this threshold.
 ADM_HIGH_THRESHOLD = 0.95
+
+
+def _normalize_visualize_mode(mode: str) -> str:
+    """Map legacy ``mode='test'`` to ``'eval'`` (silent); otherwise return ``mode`` unchanged."""
+    if mode == "test":
+        return "eval"
+    return mode
 
 
 def _visualize_capitalize_first_word(title: str) -> str:
@@ -72,7 +80,7 @@ def _resolve_visualize_figure_title(mode: str, figure_title: Optional[str]) -> s
         return _visualize_capitalize_first_word(str(figure_title).strip())
     if mode == "training":
         return _visualize_capitalize_first_word(DEFAULT_VISUALIZE_TITLE_TRAINING)
-    return _visualize_capitalize_first_word(DEFAULT_VISUALIZE_TITLE_TEST)
+    return _visualize_capitalize_first_word(DEFAULT_VISUALIZE_TITLE_EVAL)
 
 
 def _state_key_suggests_law_fd_fill(key: str) -> bool:
@@ -469,10 +477,23 @@ def _compute_log_step_metrics(
             else:
                 category_scores[cat] = _geom_mean_admissibility(vals)
         cats_present = list(category_scores.keys())
-        if not cats_present:
-            overall = float("nan")
+        rm = entry.get("run_mode")
+        if rm == "training":
+            train_cats = [c for c in ("laws", "constitutive") if c in category_scores]
+            if not train_cats:
+                overall = float("nan")
+            else:
+                overall = _geom_mean_admissibility(
+                    [float(category_scores[c]) for c in train_cats]
+                )
         else:
-            overall = _geom_mean_admissibility([float(category_scores[c]) for c in cats_present])
+            # ``eval`` or legacy logs without ``run_mode``: all present categories.
+            if not cats_present:
+                overall = float("nan")
+            else:
+                overall = _geom_mean_admissibility(
+                    [float(category_scores[c]) for c in cats_present]
+                )
         out.append(
             {
                 "r_norm": r_norm,
@@ -511,8 +532,12 @@ def audit(
     ``laws``, ``constitutive``, ``scaling``, ``data`` — only when **every** per-key
     admissibility in that category is finite; if any key is non-finite (NaN/Inf) or
     non-numeric, the category score is **0** (inadmissible for that bucket); empty
-    categories omitted; (3) overall score — geometric mean of present category scores
-    (any category at **0** drives overall to **0**).
+    categories omitted;     (3) overall score — geometric mean of category scores. For log entries with
+    ``run_mode == \"training\"``, only **laws** and **constitutive** enter the overall;
+    for ``run_mode == \"eval\"`` or legacy entries (no ``run_mode``), all present categories
+    are included.
+
+    The returned dict includes ``monitor_run_mode`` from the last log entry when present.
     """
     if not log:
         return {"per_key": {}, "overall_admissibility_score": 0.0, "overall_admissibility_level": "Non-Admissible"}
@@ -530,6 +555,7 @@ def audit(
         "per_category": log[-1].get("category_admissibility_score", {}) if log else {},
         "overall_admissibility_score": overall,
         "overall_admissibility_level": admissibility_level(overall),
+        "monitor_run_mode": (log[-1].get("run_mode") if log else None),
     }
 
     if export_dir:
@@ -731,7 +757,7 @@ def _build_visualize_bundle(
     n = len(log)
     indices = np.arange(n, dtype=float)
     cap = max(1, int(max_legend_keys))
-    use_bar_chart = mode == "test" or (mode == "training" and n == 1)
+    use_bar_chart = mode == "eval" or (mode == "training" and n == 1)
     bar_keys = plot_keys[: min(48, len(plot_keys))]
 
     buckets = _keys_by_category(plot_keys)
@@ -890,6 +916,8 @@ def build_monitor_visualize_bundle(
     default False uses absolute :math:`|r|` vs position (labels match).
 
     ``engine``: when ``residuals`` is omitted, use :attr:`ResidualEngine.last_residuals` if given.
+
+    ``mode``: same as :func:`visualize` — ``training`` or ``eval``; ``test`` is a silent alias for ``eval``.
     """
     eff_residuals = residuals
     if eff_residuals is None and engine is not None:
@@ -905,8 +933,9 @@ def build_monitor_visualize_bundle(
         spatial_prefer_last_t,
         spatial_normalize=spatial_normalize,
     )
+    mode = _normalize_visualize_mode(mode)
     work_log = list(log)
-    if mode == "test" and len(work_log) > 1:
+    if mode == "eval" and len(work_log) > 1:
         work_log = work_log[-1:]
     spatial_parsed = _parse_spatial_law_panel(law_panel)
     spatial_rnorm_parsed = _parse_spatial_rnorm_panel(rnorm_panel)
@@ -957,10 +986,11 @@ def visualize(
 
     - ``training`` (multi-step) — **Top row:** overall admissibility vs step (with final
       value marker) and **horizontal category admissibility bars** (laws / constitutive,
-      final step). **Second row:** two panels — :math:`R_{\\mathrm{norm}}` vs
+      final step). **Second row:** **two** KPI indicators (Governing, Constitutive) only.
+      **Third row:** two panels — :math:`R_{\\mathrm{norm}}` vs
       step for **governing laws** and **constitutive** (``data/`` and ``scaling/`` omitted);
       **y-axis** is ``log10(R_{\\mathrm{norm}} + \\varepsilon)`` by default, or linear if
-      ``r_norm_scale="linear"``. **Third row:** **vs spatial coordinate** (last logged step)
+      ``r_norm_scale="linear"``. **Fourth row:** **vs spatial coordinate** (last logged step)
       for laws and constitutive: by default :math:`|r|` (**absolute residual**); set
       ``spatial_normalize=True`` for :math:`R_{\\mathrm{norm}}`-style :math:`|r|/s_k`.
       Placeholders if no spatial data. Pass ``spatial_*_panel``, or ``residuals`` with coordinates from
@@ -969,10 +999,12 @@ def visualize(
       ``y`` / ``z`` / ``t``).
     - ``training`` (single log entry) — horizontal bars for normalized residuals, category
       admissibility bars, spatial row (|residual| vs position by default).
-    - ``test`` — Uses the **last** log entry for scalar metrics; **no vs-step admissibility
-      panel** (category breakdown is **full width** on its row). **Spatial row** shows
-      |residual| vs position by default (same log/linear display scale as training for heatmaps), plus
-      horizontal bar chart of normalized residuals and category admissibility.
+    - ``eval`` — Uses the **last** log entry for scalar metrics; **no vs-step admissibility
+      panel** (category breakdown is **full width** on its row). **Second row:** up to **four**
+      KPI indicators (Governing, Constitutive, Scaling, Data) when category scores exist.
+      **Spatial row** shows |residual| vs position by default (same log/linear display scale as
+      training for heatmaps), plus horizontal bar chart of normalized residuals and category
+      admissibility. The legacy value ``mode="test"`` is accepted and treated like ``eval``.
 
     **Spatial panel**
 
@@ -1012,7 +1044,8 @@ def visualize(
     max_legend_keys
         Cap legend entries on per-key line plots for readability (training mode, multi-step).
     mode
-        ``training`` or ``test``. Test mode slices to the last entry when ``len(log) > 1``.
+        ``training`` or ``eval``. Eval mode slices to the last entry when ``len(log) > 1``.
+        ``test`` is accepted as a silent alias for ``eval``.
     spatial_law_panel
         Optional ``dict`` with ``x`` and ``values`` (see above).
     spatial_rnorm_panel
@@ -1024,7 +1057,7 @@ def visualize(
         ``coord_snapshot`` (lists of floats), merged so snapshot fills only missing axes.
         If coordinates are still missing but law/constitutive arrays share a consistent 1D
         length, a neutral ``linspace(0, 1, n)`` axis is inferred so ``residuals=`` alone can
-        suffice (e.g. ``visualize(log, mode=\"test\", residuals=...)``).
+        suffice (e.g. ``visualize(log, mode=\"eval\", residuals=...)``).
     state_pred
         Optional state dict with coordinate arrays (``x``, optional ``y`` / ``z``, ``t``) for
         auto spatial panels. May be omitted or partial when ``log[-1]["coord_snapshot"]``
@@ -1042,8 +1075,9 @@ def visualize(
         spatial heatmaps using log ``coord_snapshot`` (same convenience as Moju Studio).
     figure_title
         Optional override for the Plotly figure layout title. If omitted or blank, a mode-specific
-        default is used (training vs test). The single-figure dashboard shows this as the report
-        header (training default: :data:`DEFAULT_VISUALIZE_TITLE_TRAINING`).
+        default is used (training vs eval). The single-figure dashboard shows this as the report
+        header (training default: :data:`DEFAULT_VISUALIZE_TITLE_TRAINING`;
+        eval default: :data:`DEFAULT_VISUALIZE_TITLE_EVAL`).
     step_label
         X-axis label for training step axis (e.g. ``Iteration`` or ``Epoch``).
     r_norm_scale
@@ -1066,8 +1100,9 @@ def visualize(
         )
     if backend != "plotly":
         raise ValueError(f"Unknown visualize backend {backend!r}; use 'plotly' or 'none'.")
-    if mode not in ("training", "test"):
-        raise ValueError("mode must be 'training' or 'test'")
+    mode = _normalize_visualize_mode(mode)
+    if mode not in ("training", "eval"):
+        raise ValueError("mode must be 'training' or 'eval' (or 'test' as an alias for 'eval')")
     if r_norm_scale not in ("log", "linear"):
         raise ValueError("r_norm_scale must be 'log' or 'linear'")
     if dashboard_mode not in ("single-figure", "dash-tabs"):
@@ -1092,7 +1127,7 @@ def visualize(
     )
 
     work_log = list(log)
-    if mode == "test" and len(work_log) > 1:
+    if mode == "eval" and len(work_log) > 1:
         work_log = work_log[-1:]
 
     spatial_parsed = _parse_spatial_law_panel(law_panel)
@@ -1166,10 +1201,12 @@ class ResidualEngine:
       - Path B (advanced): provide state_pred directly.
 
     Closure policy:
-      - **ref_delta** runs when ``state_ref`` is provided, unless the spec sets ``include_ref_delta=False``.
+      - **ref_delta** runs when ``state_ref`` is provided **and** :meth:`compute_residuals` is called
+        with ``run_mode=\"eval\"`` (default ``run_mode=\"training\"`` ignores ``state_ref`` for
+        ref_delta and for the ``data/`` pred−ref block). Unless the spec sets ``include_ref_delta=False``.
       - **implied_delta** runs for **constitutive** specs when ``implied_value_key`` or ``implied_fn``
         is set; omitted if implied is missing. **Scaling** audits support **ref_delta** and **π-constant**
-        (Path A) only—not **implied_delta**.
+        (Path A) only—not **implied_delta**. **π-constant** runs only for ``run_mode=\"eval\"`` and Path A.
       - **ref_delta** / **implied_delta** residuals are nondimensional (see ``closure_registry``).
       - A spec with no applicable closure does nothing (optional omit log).
       - Law-linked implied rows (see ``moju.monitor.law_implied_diagnostics``) are prepended when
@@ -1351,12 +1388,18 @@ class ResidualEngine:
         log_to_python: bool = True,
         auto_path_b_derivatives: Any = False,
         fill_law_fd: bool = False,
+        run_mode: str = "training",
     ) -> Dict[str, Any]:
         """
         Compute residuals.
 
         Path A: pass (model, params, collocation) and configure engine.state_builder.
         Path B: pass state_pred directly.
+
+        ``run_mode``:
+          - ``\"training\"`` (default): **ref_delta**, ``data/`` pred−ref, and **π-constant** are
+            skipped even if ``state_ref`` is passed (use for the optimization loop).
+          - ``\"eval\"``: reference and π-constant audits run when configured.
 
         If ``auto_path_b_derivatives`` is True, uses default ``PathBGridConfig``; if a
         ``PathBGridConfig`` instance, uses that layout. When ``fill_law_fd`` is also True, missing
@@ -1366,6 +1409,8 @@ class ResidualEngine:
 
         If ``fill_law_fd`` is True, ``auto_path_b_derivatives`` must also be enabled.
         """
+        if run_mode not in ("training", "eval"):
+            raise ValueError("run_mode must be 'training' or 'eval'")
         path_a = state_pred is None
         pi_specs = [s for s in self.scaling_audit if s.get("invariance_pi_constant")]
         if pi_specs and not path_a:
@@ -1395,6 +1440,12 @@ class ResidualEngine:
         def _maybe_log_infer(msg: str) -> None:
             if self.enable_omit_messages:
                 inferred_msgs.append(msg)
+
+        ref_for_audits = state_ref if run_mode == "eval" else None
+        if run_mode == "training" and state_ref is not None:
+            _maybe_log_omit(
+                "state_ref ignored until run_mode='eval' (ref_delta and data/ are eval-only)"
+            )
 
         state_for_groups = dict(state_pred)
         if self.derived_state_chain:
@@ -1483,7 +1534,7 @@ class ResidualEngine:
                 output_key = spec.get("output_key")
                 state_map = spec.get("state_map") or {}
                 has_implied = bool(spec.get("implied_value_key")) or spec.get("implied_fn") is not None
-                if state_ref is None and not has_implied:
+                if ref_for_audits is None and not has_implied:
                     _maybe_log_omit(
                         f"{category}:{name} omitted: no ref_delta or implied_delta applicable"
                     )
@@ -1497,7 +1548,7 @@ class ResidualEngine:
                 base = spec.get("residual_basename") or name
 
                 if (
-                    state_ref is not None
+                    ref_for_audits is not None
                     and output_key is not None
                     and spec.get("include_ref_delta", True)
                 ):
@@ -1507,7 +1558,7 @@ class ResidualEngine:
                         output_key=output_key,
                         state_map=state_map,
                         state_pred=merged,
-                        state_ref=_merge_state_ref(state_ref),
+                        state_ref=_merge_state_ref(ref_for_audits),
                         constants=self.constants,
                         ref_delta_ref_key=spec.get("ref_delta_ref_key"),
                     )
@@ -1549,7 +1600,7 @@ class ResidualEngine:
         pi_constant_scales: Dict[str, float] = {}
         if self.scaling_audit:
             s = _run_specs(self.scaling_audit, registry=GROUP_FNS, category="scaling")
-            if path_a and self.state_builder is not None:
+            if run_mode == "eval" and path_a and self.state_builder is not None:
                 for spec in self.scaling_audit:
                     if not spec.get("invariance_pi_constant"):
                         continue
@@ -1605,8 +1656,8 @@ class ResidualEngine:
             if s:
                 residuals["scaling"] = s
 
-        if state_ref is not None:
-            state_ref_built = self._state_builder(_state_ref_raw_after_derived(state_ref))
+        if ref_for_audits is not None:
+            state_ref_built = self._state_builder(_state_ref_raw_after_derived(ref_for_audits))
             common = set(state_pred_built.keys()) & set(state_ref_built.keys())
             residuals["data"] = {
                 k: jnp.asarray(state_ref_built[k]) - jnp.asarray(state_pred_built[k])
@@ -1616,8 +1667,10 @@ class ResidualEngine:
         flat = _flatten_residual_dict(residuals)
         rms_per_key = _rms_per_key(flat, to_python=log_to_python)
         state_ref_built_for_scale = None
-        if state_ref is not None:
-            state_ref_built_for_scale = self._state_builder(_state_ref_raw_after_derived(state_ref))
+        if ref_for_audits is not None:
+            state_ref_built_for_scale = self._state_builder(
+                _state_ref_raw_after_derived(ref_for_audits)
+            )
         scale_per_key = _state_derived_scale_per_key(
             flat.keys(),
             merged,
@@ -1628,7 +1681,12 @@ class ResidualEngine:
             to_python=log_to_python,
         )
         scale_per_key.update(pi_constant_scales)
-        entry: Dict[str, Any] = {"index": self._index, "rms": rms_per_key, "scale": scale_per_key}
+        entry: Dict[str, Any] = {
+            "index": self._index,
+            "rms": rms_per_key,
+            "scale": scale_per_key,
+            "run_mode": run_mode,
+        }
         if omitted_msgs:
             entry["omitted"] = omitted_msgs
         if inferred_msgs:

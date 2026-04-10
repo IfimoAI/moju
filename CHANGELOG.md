@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking — monitor `run_mode`:** `ResidualEngine.compute_residuals(..., run_mode="training"|"eval")` defaults to **`"training"`**. In training mode, **`state_ref` is ignored** for **`ref_delta`**, **`data/`** pred−ref, and **π-constant** scaling. Use **`run_mode="eval"`** for ground-truth / reference scaling and π-constant (Path A). Log entries record **`run_mode`**; **`audit()`** adds **`monitor_run_mode`** and uses **laws + constitutive only** for overall admissibility when the last step is training; legacy logs without **`run_mode`** keep the previous overall rule (all present categories).
+- **Plotly `visualize`:** **Training** single-figure dashboard uses **two** KPI cards (Governing, Constitutive). **Eval** mode (`mode="eval"`, aligned with `compute_residuals(..., run_mode="eval")`) uses **four** (adds Scaling and Data from the correct category keys). **`mode="test"`** is still accepted and behaves like **`eval`** (no deprecation warning). Default eval/test figure title is **Physics Admissibility Audit (model evaluation)** via **`DEFAULT_VISUALIZE_TITLE_EVAL`**; **`DEFAULT_VISUALIZE_TITLE_TEST`** is an alias for the same string.
+- **PDF `write_audit_pdf`:** Training-style reports (**`monitor_run_mode == "training"`**) omit scaling/data sections and add a short note pointing to eval.
+
+### Added
+
+- **`MonitorConfig`:** optional **`pi_constant_*`** fields for opt-in law→group π-constant defaults; **`build_residual_engine_for_pi_constant_eval`**, **`merge_scaling_audit_with_pi_law_defaults`**, **`resolve_pi_groups_for_laws`**, **`LAW_PRIMARY_PI_GROUPS`** in `moju.monitor.law_group_defaults` (exported from `moju.monitor`).
+- **Docs:** `docs/monitor_training_vs_eval.md`; updates to README, `docs/law_implied_audits.md`.
+
 ## [0.6.1] - 2026-04-04
 
 ### Changed

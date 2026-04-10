@@ -25,7 +25,7 @@ R_NORM_LOG_EPS = 1e-12
 # Fixed height for Moju Studio Dashboard Plotly cards (law/adm bars + spatial heatmaps).
 MOJU_STUDIO_DASHBOARD_CARD_HEIGHT = 400
 
-# Single-figure visualize: training uses a taller canvas (~≥10% vs test) so chart rows gain height;
+# Single-figure visualize: training uses a taller canvas (~≥10% vs eval) so chart rows gain height;
 # ``vertical_spacing`` stays the same fraction of figure height in both modes.
 MONITOR_SINGLE_FIGURE_HEIGHT = 924
 MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING = int(math.ceil(MONITOR_SINGLE_FIGURE_HEIGHT * 1.10))
@@ -821,9 +821,9 @@ def _build_plotly_monitor_figure_single(
     muted = T["muted"]
     warn_color = "#F59E0B"
 
-    is_test = mode_eff == "test"
-    spatial_row = 4 if is_test else 5
-    n_rows = 4 if is_test else 5
+    is_eval = mode_eff == "eval"
+    spatial_row = 4 if is_eval else 5
+    n_rows = 4 if is_eval else 5
 
     _split_xy_row: List[Any] = [
         {"type": "xy", "colspan": 4},
@@ -835,20 +835,31 @@ def _build_plotly_monitor_figure_single(
         None,
         None,
     ]
+    kpi_row_training = [
+        None,
+        None,
+        {"type": "domain", "colspan": 2},
+        None,
+        None,
+        {"type": "domain", "colspan": 2},
+        None,
+        None,
+    ]
+    kpi_row_eval = [
+        {"type": "domain", "colspan": 2},
+        None,
+        {"type": "domain", "colspan": 2},
+        None,
+        {"type": "domain", "colspan": 2},
+        None,
+        {"type": "domain", "colspan": 2},
+        None,
+    ]
     specs: List[List[Any]] = [
         [{"type": "xy", "colspan": 8}, None, None, None, None, None, None, None],
-        [
-            None,
-            {"type": "domain", "colspan": 2},
-            None,
-            {"type": "domain", "colspan": 2},
-            None,
-            {"type": "domain", "colspan": 2},
-            None,
-            None,
-        ],
+        kpi_row_eval if is_eval else kpi_row_training,
     ]
-    if is_test:
+    if is_eval:
         # Row 3: Category Breakdown | combined residual bars; row 4: spatial fields only.
         specs.append(_split_xy_row)
         specs.append(_split_xy_row)
@@ -890,14 +901,20 @@ def _build_plotly_monitor_figure_single(
         row_heights=row_heights,
         # Row gaps (fraction of figure height): test mode uses a larger gap so upper-row x labels
         # clear the subplot titles below (chart row_heights trimmed slightly to compensate).
-        vertical_spacing=0.122 if not is_test else 0.126,
+        vertical_spacing=0.122 if not is_eval else 0.126,
         horizontal_spacing=0.095,
         subplot_titles=subplot_titles,
     )
     _drop_paper_subplot_title_annots_with_text(
         fig,
         frozenset(
-            {"Governing Score", "Constitutive Score", "Scaling Score", "Duality Score"}
+            {
+                "Governing Score",
+                "Constitutive Score",
+                "Scaling Score",
+                "Data Score",
+                "Duality Score",
+            }
         ),
     )
 
@@ -962,19 +979,73 @@ def _build_plotly_monitor_figure_single(
     laws_ref = float(first_cat.get("laws", float("nan"))) if "laws" in first_cat else None
     const_last = float(last_cat.get("constitutive", float("nan")))
     const_ref = float(first_cat.get("constitutive", float("nan"))) if "constitutive" in first_cat else None
-    scaling_last = float(last_cat.get("data", float("nan")))
-    scaling_ref = float(first_cat.get("data", float("nan"))) if "data" in first_cat else None
+    scaling_cat_last = float(last_cat.get("scaling", float("nan")))
+    scaling_cat_ref = (
+        float(first_cat.get("scaling", float("nan"))) if "scaling" in first_cat else None
+    )
+    data_cat_last = float(last_cat.get("data", float("nan")))
+    data_cat_ref = float(first_cat.get("data", float("nan"))) if "data" in first_cat else None
 
-    # Row 2: one empty col each side so three KPIs (cols 2–3, 4–5, 6–7) are centered on the figure.
-    fig.add_trace(_kpi_indicator(laws_last if math.isfinite(laws_last) else 0.0, "Governing Score", laws_ref), row=2, col=2)
-    fig.add_trace(_kpi_indicator(const_last if math.isfinite(const_last) else 0.0, "Constitutive Score", const_ref), row=2, col=4)
-    fig.add_trace(_kpi_indicator(scaling_last if math.isfinite(scaling_last) else 0.0, "Scaling Score", scaling_ref), row=2, col=6)
+    if not is_eval:
+        # Training: Governing + Constitutive only (cols 3–4 and 6–7).
+        fig.add_trace(
+            _kpi_indicator(
+                laws_last if math.isfinite(laws_last) else 0.0, "Governing Score", laws_ref
+            ),
+            row=2,
+            col=3,
+        )
+        fig.add_trace(
+            _kpi_indicator(
+                const_last if math.isfinite(const_last) else 0.0,
+                "Constitutive Score",
+                const_ref,
+            ),
+            row=2,
+            col=6,
+        )
+    else:
+        # Test / eval: up to four category scores (scaling and data use correct keys).
+        fig.add_trace(
+            _kpi_indicator(
+                laws_last if math.isfinite(laws_last) else 0.0, "Governing Score", laws_ref
+            ),
+            row=2,
+            col=1,
+        )
+        fig.add_trace(
+            _kpi_indicator(
+                const_last if math.isfinite(const_last) else 0.0,
+                "Constitutive Score",
+                const_ref,
+            ),
+            row=2,
+            col=3,
+        )
+        fig.add_trace(
+            _kpi_indicator(
+                scaling_cat_last if math.isfinite(scaling_cat_last) else 0.0,
+                "Scaling Score",
+                scaling_cat_ref,
+            ),
+            row=2,
+            col=5,
+        )
+        fig.add_trace(
+            _kpi_indicator(
+                data_cat_last if math.isfinite(data_cat_last) else 0.0,
+                "Data Score",
+                data_cat_ref,
+            ),
+            row=2,
+            col=7,
+        )
 
     trend_y_min: Optional[float] = None
     trend_y_top: Optional[float] = None
 
-    # Training: vs-step Overall Admissibility (test mode uses full-width category row only).
-    if (not is_test) and any(np.isfinite(overall_adm)):
+    # Training: vs-step Overall Admissibility (eval mode uses full-width category row only).
+    if (not is_eval) and any(np.isfinite(overall_adm)):
         adm_hover = [format_admissibility_pct(float(y)) if np.isfinite(y) else "N/A" for y in overall_adm]
         fig.add_trace(
             go.Scatter(
@@ -1044,7 +1115,7 @@ def _build_plotly_monitor_figure_single(
                 y_top = min(1.02, mid + 0.04)
             trend_y_min, trend_y_top = ymin, y_top
 
-    if mode_eff != "test":
+    if mode_eff != "eval":
         fig.update_xaxes(title_text=step_label, row=3, col=1, automargin=True)
         yaxis_kw: Dict[str, Any] = dict(title_text="Admissibility (%)", tickformat=".2f%", row=3, col=1, automargin=True)
         if trend_y_min is not None and trend_y_top is not None:
@@ -1053,7 +1124,7 @@ def _build_plotly_monitor_figure_single(
         fig.update_yaxes(**yaxis_kw)
         _apply_enterprise_axis_style(fig, 3, 1, y_log=False, x_grid=False, y_grid=True)
 
-    cat_col = 1 if is_test else 5
+    cat_col = 1 if is_eval else 5
 
     # Category breakdown (worst -> best)
     order_keys = []
@@ -1135,7 +1206,7 @@ def _build_plotly_monitor_figure_single(
     fig.update_yaxes(side="left", automargin=True, row=3, col=cat_col)
     _apply_enterprise_axis_style(fig, 3, cat_col, y_log=False, x_grid=True, y_grid=False)
 
-    if is_test:
+    if is_eval:
         # Single bar chart: all bar_keys in user order, color per category prefix.
         _tc = 5
         if not bar_keys:
@@ -1199,13 +1270,13 @@ def _build_plotly_monitor_figure_single(
         if use_log_rnorm:
             fig.update_yaxes(zeroline=False, row=3, col=_tc)
 
-    # Residual diagnostics (training only; test uses combined bars on row 3)
+    # Residual diagnostics (training only; eval uses combined bars on row 3)
     def _plot_residual_panel(cat: str, row: int, col: int, title_prefix: str) -> None:
         info = category_training.get(cat, {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))})
         ckeys: List[str] = list(info.get("keys") or [])
         displays: List[str] = list(info.get("displays") or [])
         mat = np.asarray(info.get("r_norm_mat") if info.get("r_norm_mat") is not None else np.zeros((0, n)), dtype=float)
-        if mode_eff != "test" and mat.size and len(ckeys):
+        if mode_eff != "eval" and mat.size and len(ckeys):
             terminal = mat[:, -1]
             worst_i = int(np.nanargmax(terminal)) if np.any(np.isfinite(terminal)) else 0
             unstable = np.nanstd(np.diff(mat, axis=1), axis=1) if mat.shape[1] > 1 else np.zeros(mat.shape[0])
@@ -1282,7 +1353,7 @@ def _build_plotly_monitor_figure_single(
                     col=col,
                 )
         fig.update_xaxes(
-            title_text=("Residual key" if mode_eff == "test" else (step_label if mat.size else "Residual key")),
+            title_text=("Residual key" if mode_eff == "eval" else (step_label if mat.size else "Residual key")),
             row=row,
             col=col,
             automargin=True,
@@ -1295,7 +1366,7 @@ def _build_plotly_monitor_figure_single(
         )
         _apply_enterprise_axis_style(fig, row, col, y_log=use_log_rnorm, x_grid=False, y_grid=True)
 
-    if not is_test:
+    if not is_eval:
         _plot_residual_panel("laws", 4, 1, "Governing")
         _plot_residual_panel("constitutive", 4, 5, "Constitutive")
 
@@ -1366,7 +1437,7 @@ def _build_plotly_monitor_figure_single(
 
     title_text = (figure_title or "").strip()
     fs = T["font_stack"]
-    _main_title_px = 20  # same for training and test default titles
+    _main_title_px = 20  # same for training and eval default titles
     if title_text:
         esc_ft = (
             title_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -1389,7 +1460,7 @@ def _build_plotly_monitor_figure_single(
             pad=dict(t=2, b=0),
             font=dict(size=12, family=fs, color=font_color),
         ),
-        height=(MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING if not is_test else MONITOR_SINGLE_FIGURE_HEIGHT),
+        height=(MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING if not is_eval else MONITOR_SINGLE_FIGURE_HEIGHT),
         showlegend=False,
         # Generous bottom margin so spatial heatmap x labels/titles finish above the centered summary.
         margin=dict(l=90, r=90, t=margin_top, b=205),
@@ -1428,9 +1499,9 @@ def _build_plotly_monitor_figure_single(
         bgcolor=T["summary_bg"],
     )
 
-    # Right half (col 5): Y ticks on the outer edge for constitutive / test residuals only.
+    # Right half (col 5): Y ticks on the outer edge for constitutive / eval residuals only.
     # Category breakdown (training row 3 col 5) stays left with wrapped tick labels.
-    if not is_test:
+    if not is_eval:
         fig.update_yaxes(side="right", automargin=True, row=4, col=5)
     else:
         fig.update_yaxes(side="right", automargin=True, row=3, col=5)
@@ -1610,7 +1681,7 @@ def build_plotly_monitor_dash_payload(
             "convergence": full,
         },
         "filter_contract": {"bar_customdata_field": "category", "threshold": 0.99},
-        "toggles": {"mode": ["training", "test"]},
+        "toggles": {"mode": ["training", "eval"]},
         "export": {"html": True, "pdf": True, "export_buttons": bool(export_buttons)},
     }
 

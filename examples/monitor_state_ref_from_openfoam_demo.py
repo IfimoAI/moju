@@ -26,7 +26,9 @@ def main(case_path: str):
     state_ref = from_openfoam(case_path, var_map={"U": "U", "p": "p"}, strict=False)
 
     state_pred = {"p": jnp.asarray(0.0)}
-    residuals = engine.compute_residuals(state_pred, state_ref=state_ref)
+    residuals = engine.compute_residuals(
+        state_pred, state_ref=state_ref, run_mode="eval"
+    )
     print("Computed keys:", sorted(residuals.keys()))
     if "data" in residuals:
         print("Data residual keys:", sorted(residuals["data"].keys()))

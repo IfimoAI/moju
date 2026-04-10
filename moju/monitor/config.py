@@ -123,6 +123,14 @@ class MonitorConfig:
     # Optional Path A state builder (callable is not JSON-serializable; excluded from to_dict)
     state_builder: Optional[Callable[..., Dict[str, Any]]] = None
 
+    # Opt-in: when building an eval engine via ``build_residual_engine_for_pi_constant_eval``,
+    # append π-constant scaling_audit rows from :mod:`moju.monitor.law_group_defaults`.
+    pi_constant_law_defaults_enabled: bool = False
+    pi_constant_default_c: float = 10.0
+    pi_constant_law_group_overrides: Dict[str, List[str]] = field(default_factory=dict)
+    pi_constant_extra_groups: List[str] = field(default_factory=list)
+    pi_constant_default_compare_keys: List[str] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "constants": dict(self.constants),
@@ -134,6 +142,13 @@ class MonitorConfig:
             "constitutive_custom": list(self.constitutive_custom),
             "derived_state_chain": list(self.derived_state_chain),
             "primary_fields": list(self.primary_fields),
+            "pi_constant_law_defaults_enabled": bool(self.pi_constant_law_defaults_enabled),
+            "pi_constant_default_c": float(self.pi_constant_default_c),
+            "pi_constant_law_group_overrides": {
+                k: list(v) for k, v in self.pi_constant_law_group_overrides.items()
+            },
+            "pi_constant_extra_groups": list(self.pi_constant_extra_groups),
+            "pi_constant_default_compare_keys": list(self.pi_constant_default_compare_keys),
         }
 
     @staticmethod
@@ -144,6 +159,12 @@ class MonitorConfig:
                 "MonitorConfig no longer supports scaling_custom; remove it from JSON "
                 "and use scaling_audit (Groups.*) with ref_delta and optional π-constant only."
             )
+        ov = d.get("pi_constant_law_group_overrides") or {}
+        if not isinstance(ov, dict):
+            raise ValueError("pi_constant_law_group_overrides must be a dict[str, list[str]]")
+        overrides: Dict[str, List[str]] = {
+            str(k): list(v) if isinstance(v, (list, tuple)) else [str(v)] for k, v in ov.items()
+        }
         return MonitorConfig(
             constants=dict(d.get("constants") or {}),
             laws=list(d.get("laws") or []),
@@ -154,5 +175,10 @@ class MonitorConfig:
             constitutive_custom=list(d.get("constitutive_custom") or []),
             derived_state_chain=list(d.get("derived_state_chain") or []),
             primary_fields=list(d.get("primary_fields") or ["T", "u", "v", "w", "p", "rho"]),
+            pi_constant_law_defaults_enabled=bool(d.get("pi_constant_law_defaults_enabled", False)),
+            pi_constant_default_c=float(d.get("pi_constant_default_c", 10.0)),
+            pi_constant_law_group_overrides=overrides,
+            pi_constant_extra_groups=list(d.get("pi_constant_extra_groups") or []),
+            pi_constant_default_compare_keys=list(d.get("pi_constant_default_compare_keys") or []),
         )
 

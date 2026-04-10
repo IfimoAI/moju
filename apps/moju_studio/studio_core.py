@@ -243,8 +243,9 @@ def generate_python_snippet(cfg: MonitorConfig, *, path_b: bool) -> str:
     if path_b:
         lines += [
             "state_pred = { ... }  # your arrays",
-            "state_ref = None  # optional",
-            "residuals = engine.compute_residuals(state_pred, state_ref, auto_path_b_derivatives=False)",
+            "state_ref = None  # optional; use run_mode='eval' when set for ref_delta / data/",
+            "run_mode = 'eval' if state_ref is not None else 'training'",
+            "residuals = engine.compute_residuals(state_pred, state_ref, auto_path_b_derivatives=False, run_mode=run_mode)",
             "report = audit(engine.log)",
         ]
     else:
