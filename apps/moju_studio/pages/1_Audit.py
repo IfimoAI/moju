@@ -1088,10 +1088,16 @@ with tab_dash:
             ov_hdr = float(ov_raw) if ov_raw is not None else float("nan")
         except (TypeError, ValueError):
             ov_hdr = float("nan")
-        pct_hdr = format_admissibility_pct(ov_hdr) if math.isfinite(ov_hdr) else "N/A"
-        st.caption(
-            f"Overall admissibility (final): {pct_hdr} - {format_admissibility_status_label(ov_hdr)}"
-        )
+        _rm_rep = rep.get("monitor_run_mode")
+        if _rm_rep == "eval" or not math.isfinite(ov_hdr):
+            st.caption(
+                "No single overall score in eval mode; see **Admissibility** per-category below."
+            )
+        else:
+            pct_hdr = format_admissibility_pct(ov_hdr) if math.isfinite(ov_hdr) else "N/A"
+            st.caption(
+                f"Overall admissibility (final): {pct_hdr} - {format_admissibility_status_label(ov_hdr)}"
+            )
         _law_panel_main, _rnorm_panel_main, _hm_cs_main = _studio_monitor_spatial_bundle()
         _pref_t_dash = st.session_state.get("studio_fd_time_label", "Steady") != "Steady"
         _sax_dash = str(st.session_state.get("sb_spatial_axis", "x"))
@@ -1224,10 +1230,15 @@ with tab_dash:
             except (TypeError, ValueError):
                 pc_fmt[str(k)] = "N/A"
         try:
-            ov_s = format_admissibility_pct(float(ov)) if ov is not None else "N/A"
+            ov_f = float(ov) if ov is not None else float("nan")
         except (TypeError, ValueError):
-            ov_s = "N/A"
-        st.json({"overall": ov_s, "per_category": pc_fmt})
+            ov_f = float("nan")
+        adm_payload: Dict[str, Any] = {"per_category": pc_fmt}
+        if rep.get("monitor_run_mode") == "eval" or not math.isfinite(ov_f):
+            adm_payload["overall"] = "N/A"
+        else:
+            adm_payload["overall"] = format_admissibility_pct(ov_f)
+        st.json(adm_payload)
 
         st.subheader("RMS (last step)")
         rms = (engine.log[-1].get("rms") if engine else {}) or {}

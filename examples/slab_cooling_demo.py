@@ -31,7 +31,7 @@ import optax
 from moju.piratio import Operators
 from moju.piratio.groups import Groups
 from moju.piratio.laws import Laws
-from moju.monitor import ResidualEngine, build_loss, audit, visualize
+from moju.monitor import ResidualEngine, audit, build_loss, visualize
 
 L = 0.02
 k_solid = 200.0

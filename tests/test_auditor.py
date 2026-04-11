@@ -114,6 +114,45 @@ class TestNanTolerantAuditMetrics:
         expected = math.exp(0.5 * (math.log(cl) + math.log(cc)))
         assert abs(m[0]["overall_admissibility_score"] - expected) < 1e-9
 
+    def test_compute_log_step_metrics_eval_overall_nan(self):
+        import math
+
+        from moju.monitor.auditor import _compute_log_step_metrics
+
+        log_eval = [
+            {
+                "run_mode": "eval",
+                "rms": {
+                    "laws/a": 0.1,
+                    "constitutive/b/implied_delta": 0.1,
+                    "scaling/pe/ref_delta": 5.0,
+                },
+                "scale": {
+                    "laws/a": 1.0,
+                    "constitutive/b/implied_delta": 1.0,
+                    "scaling/pe/ref_delta": 1.0,
+                },
+            }
+        ]
+        m_ev = _compute_log_step_metrics(log_eval)
+        assert not math.isfinite(m_ev[0]["overall_admissibility_score"])
+        log_legacy = [
+            {
+                "rms": {
+                    "laws/a": 0.1,
+                    "constitutive/b/implied_delta": 0.1,
+                    "scaling/pe/ref_delta": 5.0,
+                },
+                "scale": {
+                    "laws/a": 1.0,
+                    "constitutive/b/implied_delta": 1.0,
+                    "scaling/pe/ref_delta": 1.0,
+                },
+            }
+        ]
+        m_leg = _compute_log_step_metrics(log_legacy)
+        assert math.isfinite(m_leg[0]["overall_admissibility_score"])
+
     def test_rms_scalar_uses_nanmean(self):
         import math
 
@@ -286,6 +325,29 @@ class TestBuildLossBatch:
         assert jnp.allclose(loss, 0.0, rtol=rtol, atol=atol)
 
 
+class TestREff:
+    """R_eff = RMS(r)·Q^0.5; Q>1 when |r| is uneven across collocation points."""
+
+    def test_r_eff_matches_rms_when_uniform_or_scalar(self):
+        from moju.monitor.auditor import _rms_scalar, _r_eff_scalar
+
+        u = jnp.ones((4,))
+        assert jnp.allclose(_r_eff_scalar(u), _rms_scalar(u))
+        assert jnp.allclose(_r_eff_scalar(jnp.array(2.0)), _rms_scalar(jnp.array(2.0)))
+
+    def test_r_eff_exceeds_rms_and_lowers_admissibility_when_uneven(self):
+        from moju.monitor.auditor import _rms_scalar, _r_eff_scalar
+
+        spike = jnp.array([0.0, 0.0, 0.0, 10.0])
+        r_eff = float(_r_eff_scalar(spike))
+        r_rms = float(_rms_scalar(spike))
+        assert r_eff > r_rms
+        uniform = jnp.ones((4,))
+        adm_u = 1.0 / (1.0 + float(_r_eff_scalar(uniform)))
+        adm_spike = 1.0 / (1.0 + r_eff)
+        assert adm_spike < adm_u
+
+
 class TestAudit:
     def test_audit_writes_back_to_log(self):
         log = [
@@ -331,7 +393,9 @@ class TestAudit:
         assert abs(r_norm - rms / scale_k) < 1e-6
 
     def test_default_scale_is_unit_for_laws_and_implied_delta(self, rtol, atol):
-        """ND law and implied_delta keys use scale_k ≈ 1, not RMS(state primitives)."""
+        """ND law and implied_delta keys use scale_k ≈ DEFAULT_NONDIM_R_NORM_SCALE_K."""
+        from moju.monitor.auditor import DEFAULT_NONDIM_R_NORM_SCALE_K
+
         P, R, T = jnp.array(1e6), jnp.array(287.0), jnp.array(300.0)
         rho = Models.ideal_gas_rho(P, R, T)
         core = ResidualEngine(
@@ -355,10 +419,12 @@ class TestAudit:
         }
         core.compute_residuals(state_pred)
         sc = core.log[-1]["scale"]
-        assert abs(sc["laws/laplace_equation"] - 1.0) < 1e-9
-        assert abs(sc["constitutive/ideal_gas_rho/implied_delta"] - 1.0) < 1e-9
+        assert abs(sc["laws/laplace_equation"] - DEFAULT_NONDIM_R_NORM_SCALE_K) < 1e-9
+        assert abs(sc["constitutive/ideal_gas_rho/implied_delta"] - DEFAULT_NONDIM_R_NORM_SCALE_K) < 1e-9
 
-    def test_constitutive_implied_scale_is_unity(self, rtol, atol):
+    def test_constitutive_implied_scale_is_default_nondim(self, rtol, atol):
+        from moju.monitor.auditor import DEFAULT_NONDIM_R_NORM_SCALE_K
+
         P, R = jnp.array(101325.0), jnp.array(287.0)
         T = jnp.array(290.0)
         rho = Models.ideal_gas_rho(P, R, T)
@@ -376,7 +442,7 @@ class TestAudit:
         state_pred = {"P": P, "R": R, "T": T, "rho": rho, "rho_implied": rho}
         core.compute_residuals(state_pred)
         sk = core.log[-1]["scale"]["constitutive/ideal_gas_rho/implied_delta"]
-        assert abs(sk - 1.0) < 1e-6
+        assert abs(sk - DEFAULT_NONDIM_R_NORM_SCALE_K) < 1e-9
 
     def test_audit_export_dir_pdf_with_new_categories(self, tmp_path):
         pytest.importorskip("reportlab")
@@ -1040,6 +1106,16 @@ class TestVisualize:
         kpi_fig = tabs["kpi"]
         assert any(getattr(tr, "type", None) == "indicator" for tr in getattr(kpi_fig, "data", []))
 
+        log_ev = [
+            {"index": 0, "run_mode": "eval", "rms": {"laws/a": 1.0, "constitutive/b/implied_delta": 0.5}, "scale": {}},
+        ]
+        out_ev = visualize(log_ev, backend="plotly", mode="eval", dashboard_mode="dash-tabs")
+        kpi_ev = (out_ev.get("tabs") or {}).get("kpi")
+        assert kpi_ev is not None
+        assert not any(getattr(tr, "type", None) == "indicator" for tr in getattr(kpi_ev, "data", []))
+        anns_ev = list(getattr(kpi_ev.layout, "annotations", []) or [])
+        assert any("eval mode" in str(getattr(a, "text", "")).lower() for a in anns_ev)
+
     def test_visualize_enterprise_threshold_line_and_scale_hover(self):
         pytest.importorskip("plotly")
         log = [
@@ -1100,7 +1176,66 @@ class TestVisualize:
         assert len(hms) == 2
         assert all(int(t.meta.get("subplot_row", 0)) == 4 for t in hms)
 
-    def test_visualize_single_figure_spatial_heatmaps_share_colorbar_range(self):
+    def test_visualize_single_figure_subplot_title_annotations_match_panels(self):
+        """Explicit panel titles (merged grid + domain cells) plus spatial colorbar/hover wording."""
+        pytest.importorskip("plotly")
+        import numpy as np
+
+        from moju.monitor.visualize_plotly import SPATIAL_HEATMAP_COLORBAR_TITLE_LOG, _monitor_flat_subplot_titles
+
+        expect_tr = {
+            "Overall Admissibility",
+            "Category Breakdown",
+            "Governing Residuals",
+            "Constitutive Residuals",
+            "Governing Residual",
+            "Constitutive Residual",
+        }
+        assert {t for t in _monitor_flat_subplot_titles(n_rows=5, is_eval=False, nr_panel_title="NR") if t} == expect_tr
+        expect_ev = {
+            "Category Breakdown",
+            "Normalized Residuals",
+            "Governing Residual",
+            "Constitutive Residual",
+        }
+        assert {t for t in _monitor_flat_subplot_titles(n_rows=4, is_eval=True, nr_panel_title="Normalized Residuals") if t} == expect_ev
+
+        log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}}]
+        x = np.linspace(0, 1, 8)
+        spatial_law = {"x": x, "values": {"laws/a": np.ones(8) * 0.01}}
+        spatial_c = {"x": x, "values": {"constitutive/m/c": np.ones(8) * 0.5}}
+        fig_tr = visualize(
+            log,
+            backend="plotly",
+            mode="training",
+            dashboard_mode="single-figure",
+            spatial_law_panel=spatial_law,
+            spatial_rnorm_panel=spatial_c,
+        )
+        ann_tr = {str(getattr(a, "text", "") or "") for a in (fig_tr.layout.annotations or [])}
+        assert expect_tr <= ann_tr
+        fig_ev = visualize(
+            log,
+            backend="plotly",
+            mode="eval",
+            dashboard_mode="single-figure",
+            spatial_law_panel=spatial_law,
+            spatial_rnorm_panel=spatial_c,
+        )
+        ann_ev = {str(getattr(a, "text", "") or "") for a in (fig_ev.layout.annotations or [])}
+        assert expect_ev <= ann_ev
+        hms = [t for t in fig_tr.data if getattr(t, "type", None) == "heatmap" and getattr(t, "colorbar", None)]
+        assert hms
+        cb = hms[0].to_plotly_json().get("colorbar") or {}
+        cb_title = cb.get("title")
+        if isinstance(cb_title, dict):
+            cb_title = cb_title.get("text") or ""
+        cb_title = str(cb_title or "")
+        assert SPATIAL_HEATMAP_COLORBAR_TITLE_LOG.lower() in cb_title.lower()
+        ht = str(getattr(hms[0], "hovertemplate", "") or "")
+        assert SPATIAL_HEATMAP_COLORBAR_TITLE_LOG.lower() in ht.lower() and "%{z" in ht
+
+    def test_visualize_single_figure_spatial_heatmaps_have_independent_colorbar_ranges(self):
         pytest.importorskip("plotly")
         import numpy as np
 
@@ -1126,8 +1261,9 @@ class TestVisualize:
         assert len(hms) == 2
         z0 = (getattr(hms[0], "zmin", None), getattr(hms[0], "zmax", None))
         z1 = (getattr(hms[1], "zmin", None), getattr(hms[1], "zmax", None))
-        assert z0 == z1
         assert z0[0] is not None and z0[1] is not None
+        assert z1[0] is not None and z1[1] is not None
+        assert z0 != z1
 
     def test_visualize_forensic_tab_heatmap_has_data_driven_zlim(self):
         pytest.importorskip("plotly")

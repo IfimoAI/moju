@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from moju.monitor.visualize_labels import format_admissibility_pct, pretty_residual_key
@@ -186,11 +187,24 @@ def write_audit_pdf(
         )
         story.append(Spacer(1, 8))
 
-    # Overall score and level
-    story.append(Paragraph("Overall", heading_style))
-    score_text = f"Admissibility score: {format_admissibility_pct(float(overall_score))} &nbsp; — &nbsp; {overall_level}"
-    story.append(Paragraph(score_text, body_style))
-    story.append(Spacer(1, 16))
+    # Overall score and level (omitted when non-finite, e.g. eval mode)
+    try:
+        _ov = float(overall_score)
+    except (TypeError, ValueError):
+        _ov = float("nan")
+    if math.isfinite(_ov):
+        story.append(Paragraph("Overall", heading_style))
+        score_text = f"Admissibility score: {format_admissibility_pct(_ov)} &nbsp; — &nbsp; {overall_level}"
+        story.append(Paragraph(score_text, body_style))
+        story.append(Spacer(1, 16))
+    else:
+        story.append(
+            Paragraph(
+                "<i>No single overall admissibility score (eval-style log). See category summary below.</i>",
+                body_style,
+            )
+        )
+        story.append(Spacer(1, 16))
 
     if per_category:
         story.append(Paragraph("Category summary", heading_style))

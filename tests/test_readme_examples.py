@@ -1,5 +1,7 @@
 """Smoke test: README Quick Start snippet runs and produces expected outputs."""
 
+import math
+
 import pytest
 import jax.numpy as jnp
 
@@ -77,6 +79,8 @@ def test_readme_five_minute_example_runs():
     assert jnp.ndim(loss) == 0
     assert "overall_admissibility_score" in report
     assert "overall_admissibility_level" in report
+    assert not math.isfinite(float(report["overall_admissibility_score"]))
+    assert report["overall_admissibility_level"] == "Unknown"
     assert "per_category" in report
     assert "per_key" in report
     assert "laws" in report["per_category"]

@@ -2,6 +2,8 @@
 
 `ResidualEngine.compute_residuals` supports **`run_mode="training"`** (default) and **`run_mode="eval"`**.
 
+Per flat residual key, the log’s **`rms`** field is **R_eff** = RMS(r)·**Q^0.5** with **Q** = RMS(m)/mean(m), **m_i** = √(r_i²+ε²) over collocation values (**Q = 1** when |r| is uniform, or for a single point). **R_norm** = **R_eff**/scale_k as elsewhere in the monitor. Default **`scale_k`** for **laws/** and nondimensional **implied_delta** / **ref_delta** is **2×10⁻³** (`DEFAULT_NONDIM_R_NORM_SCALE_K` in `moju.monitor.auditor`). Optional **`audit` / `visualize`** argument **`r_ref`** overrides **`scale_k`** per key.
+
 ## Training (`run_mode="training"`)
 
 Use inside optimization loops.
@@ -12,7 +14,7 @@ Use inside optimization loops.
   - the **`data/`** block (per-key prediction − reference on overlapping keys)
 - **π-constant** scaling (`invariance_pi_constant`) is **skipped** (Path A only when enabled in eval).
 
-Each log entry stores **`run_mode`**. **`audit()`** / **`_compute_log_step_metrics`** compute **overall admissibility** as the geometric mean of **laws** and **constitutive** only for those entries.
+Each log entry stores **`run_mode`**. **`audit()`** / **`_compute_log_step_metrics`** compute **overall admissibility** as the geometric mean of **laws** and **constitutive** only for **training** entries; for **eval** entries the overall is **not defined** (**`nan`**). Legacy entries **without** **`run_mode`** keep a single overall as the geometric mean of all present categories.
 
 **Plotly `visualize(..., mode="training")`** shows **two** KPI cards: Governing and Constitutive.
 
@@ -22,9 +24,9 @@ Use after training (or any time you have a reference or want π-constant checks)
 
 - Pass **`state_ref`** to enable **`ref_delta`** and **`data/`** residuals.
 - **π-constant** runs only for **Path A** (`state_builder` + `model`, `params`, `collocation`; no `state_pred` argument).
-- Overall admissibility uses **all** categories present in the RMS keys (`laws`, `constitutive`, `scaling`, `data`).
+- **`audit()`** does **not** define a single **overall** admissibility for eval logs (**`nan`** / **Unknown**); **`per_category`** and **`per_key`** still include **`data/`** when present.
 
-**`visualize(..., mode="eval")`** can show **four** KPI cards (Governing, Constitutive, Scaling, Data) when those category scores exist. **`mode="test"`** is still accepted and behaves the same (no deprecation warning).
+**`visualize(..., mode="eval")`** shows **three** KPI cards (Governing, Constitutive, Scaling) when those category scores exist—**no** Data KPI (data category remains in the breakdown / per-key). The figure title still includes the **overall admissibility (final)** line (e.g. **N/A** when the log’s rolled-up overall is undefined for eval). **`dashboard_mode="dash-tabs"`** uses a text placeholder on the KPI tab instead of an overall gauge. **`mode="test"`** is still accepted and behaves the same (no deprecation warning).
 
 ## Law → π-constant defaults (opt-in)
 

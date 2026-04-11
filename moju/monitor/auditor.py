@@ -2,15 +2,17 @@
 ResidualEngine: residuals for governing laws, constitutive, and scaling/similarity audits.
 
 - compute_residuals(..., state_ref=None, run_mode=\"training\"|\"eval\", ...)
-- build_loss: cascaded RMS over laws only (training).
-- audit / visualize: same metrics (RMS, R_norm, admissibility) for all residual keys;
+- build_loss: cascaded **R_eff** over laws only (training); **R_eff** matches logged ``rms`` (see below).
+- audit / visualize: same metrics (**R_eff**, R_norm, admissibility) for all residual keys;
   visualize builds Plotly training/eval dashboards (optional spatial law panel for x slices).
 
 Constitutive and scaling/similarity audits are tied to Models.* and Groups.* functions via
 **ref_delta**, **implied_delta** (constitutive only), and **π-constant** checks (scaling, Path A).
 **implied_delta** and **ref_delta** are always **nondimensional** (see
-``moju.monitor.closure_registry.apply_closure_discrepancy_normalize``). For **R_norm**, default
-**scale_k** is **≈ 1** (plus ``_SCALE_EPS``) for **laws/** and for nondimensional closure keys;
+``moju.monitor.closure_registry.apply_closure_discrepancy_normalize``). Logged ``rms`` per key is
+**R_eff** = RMS(r)·Q^0.5 with **Q** = RMS(m)/mean(m), **m_i** = sqrt(r_i²+ε²); **Q=1** when magnitudes are
+uniform across collocation points (single-point tensors use **Q=1**). **R_norm** = **R_eff**/scale_k.
+For **R_norm**, default **scale_k** is **2×10⁻³** (plus ``_SCALE_EPS``) for **laws/** and for nondimensional closure keys;
 other **constitutive/** / **scaling/** residuals and **data/** use state- or reference-derived scales. Optional ``audit(..., r_ref=...)`` overrides
 **scale_k** per key. Per-key **admissibility_score** is ``1 / (1 + R_norm)`` when finite.
 :func:`admissibility_level` maps scores in ``[0, 1]`` to four bands (see its docstring). Metrics are
@@ -52,6 +54,10 @@ DEFAULT_VISUALIZE_TITLE_TEST = DEFAULT_VISUALIZE_TITLE_EVAL
 
 # Admissibility score in [0, 1]; "High" is strictly above this threshold.
 ADM_HIGH_THRESHOLD = 0.95
+# Imbalance factor in **R_eff** = RMS(r)·Q**p** (see :func:`_r_eff_scalar`).
+R_EFF_Q_POWER = 0.5
+# Logged ``scale_k`` for **laws/** and nondimensional **implied_delta** / **ref_delta** (R_norm denominator).
+DEFAULT_NONDIM_R_NORM_SCALE_K = 2e-3
 
 
 def _normalize_visualize_mode(mode: str) -> str:
@@ -178,6 +184,29 @@ def _rms_scalar(x: jnp.ndarray) -> jnp.ndarray:
     return jnp.sqrt(jnp.nanmean(jnp.square(a)))
 
 
+def _r_eff_scalar(x: jnp.ndarray) -> jnp.ndarray:
+    """
+    Effective residual scalar **R_eff** = RMS(r)·Q^p for collocation-point residuals, ``p`` = :data:`R_EFF_Q_POWER` (default **0.5**).
+
+    Let ``m_i = sqrt(r_i^2 + ε^2)`` with ε = :data:`_SCALE_EPS`. Define
+    ``Q = RMS(m) / mean(m)`` (NaN-mean reductions). Then ``R_eff = RMS(r) * (Q ** p)`` with ``p`` a positive float.
+    For nonnegative ``m``, ``Q >= 1`` with equality iff all ``m_i`` are equal (uniform magnitude).
+    For a single value (0-d or length-1), ``Q = 1`` so ``R_eff`` matches ``RMS(r)``.
+    """
+    a = jnp.asarray(x).ravel()
+    if a.size == 0:
+        return jnp.asarray(float("nan"))
+    rms_r = jnp.sqrt(jnp.nanmean(jnp.square(a)))
+    if a.size == 1:
+        return rms_r
+    eps = jnp.asarray(_SCALE_EPS, dtype=a.dtype)
+    m = jnp.sqrt(jnp.square(a) + eps * eps)
+    rms_m = jnp.sqrt(jnp.nanmean(jnp.square(m)))
+    mean_m = jnp.nanmean(m)
+    q = rms_m / mean_m
+    return rms_r * jnp.power(q, float(R_EFF_Q_POWER))
+
+
 def admissibility_level(score: float) -> str:
     """
     Map admissibility score in ``[0, 1]`` to a qualitative label (``Unknown`` if non-finite).
@@ -227,9 +256,10 @@ def _rms_per_key(
     *,
     to_python: bool = True,
 ) -> Dict[str, Any]:
+    """Per-key **R_eff** (``rms`` in the log) via :func:`_r_eff_scalar`."""
     out: Dict[str, Any] = {}
     for key, arr in residuals_flat.items():
-        r = _rms_scalar(arr)
+        r = _r_eff_scalar(arr)
         if to_python:
             out[key] = float(jax.device_get(r))
         else:
@@ -255,8 +285,8 @@ _SCALE_EPS = 1e-12
 
 
 def _default_unit_scale_k(*, to_python: bool) -> float:
-    """scale_k = 1 + eps for nondimensional law / implied / ref residuals."""
-    s = _SCALE_EPS + 1.0
+    """scale_k = :data:`DEFAULT_NONDIM_R_NORM_SCALE_K` + eps for nondimensional law / implied / ref residuals."""
+    s = _SCALE_EPS + DEFAULT_NONDIM_R_NORM_SCALE_K
     return float(jax.device_get(jnp.asarray(s))) if to_python else float(s)
 
 
@@ -277,9 +307,9 @@ def _state_derived_scale_per_key(
     to_python: bool = True,
 ) -> Dict[str, float]:
     """
-    Per-key scale for ``R_norm = RMS(r_k) / scale_k`` stored on each log entry (``entry["scale"]``).
+    Per-key scale for ``R_norm = R_eff / scale_k`` (``R_eff`` in ``entry["rms"]``) stored on each log entry (``entry["scale"]``).
 
-    Default **scale_k** is **≈ 1** for governing **laws/** and for nondimensional
+    Default **scale_k** is **≈ 2×10⁻³** (plus ε) for governing **laws/** and for nondimensional
     **implied_delta** / **ref_delta** under **constitutive/** and **scaling/**. Other audit keys and
     **data/** use RMS of relevant state (or reference) fields. Optional ``r_ref`` in
     :func:`audit` overrides per key after logging.
@@ -383,6 +413,9 @@ def build_loss(
     option: str = "cascaded",
     law_weights: Optional[Dict[str, float]] = None,
 ) -> jnp.ndarray:
+    """
+    Weighted sum of per-law **R_eff** scalars (same reduction as ``compute_residuals`` logs under ``rms``).
+    """
     if option != "cascaded":
         raise ValueError(f"Only option='cascaded' is implemented, got {option!r}")
     laws = residual_dict.get("laws", {})
@@ -392,7 +425,7 @@ def build_loss(
     n = len(names)
     weights = law_weights or {}
     w = jnp.array([weights.get(name, 1.0 / n) for name in names])
-    rms_vals = jnp.array([_rms_scalar(jnp.asarray(laws[name])) for name in names])
+    rms_vals = jnp.array([_r_eff_scalar(jnp.asarray(laws[name])) for name in names])
     return jnp.sum(w * rms_vals)
 
 
@@ -406,8 +439,13 @@ def _compute_log_step_metrics(
     Returns one dict per entry with keys: ``r_norm``, ``admissibility_score``,
     ``category_admissibility_score``, ``overall_admissibility_score``, and
     ``per_key_report`` (flat key -> {rms, r_norm, admissibility_score, admissibility_level}).
+    Field ``rms`` is **R_eff** from :func:`compute_residuals` (see :func:`_r_eff_scalar`).
     Scale precedence per key: **r_ref** (if given) > entry ``scale`` > first-step RMS > 1.
     Category scores are **0** if any per-key admissibility in that category is non-finite.
+
+    **Overall admissibility:** for ``run_mode == \"training\"``, geometric mean of **laws** and
+    **constitutive** only. For ``run_mode == \"eval\"``, **not defined** (``nan``). For legacy entries
+    without ``run_mode``, geometric mean of **all** present categories.
     """
     if not log:
         return []
@@ -486,8 +524,10 @@ def _compute_log_step_metrics(
                 overall = _geom_mean_admissibility(
                     [float(category_scores[c]) for c in train_cats]
                 )
+        elif rm == "eval":
+            overall = float("nan")
         else:
-            # ``eval`` or legacy logs without ``run_mode``: all present categories.
+            # Legacy logs without ``run_mode``: all present categories.
             if not cats_present:
                 overall = float("nan")
             else:
@@ -518,11 +558,12 @@ def audit(
     model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Physics admissibility from logged RMS and scales.
+    Physics admissibility from logged **R_eff** (field ``rms``) and scales.
 
-    **R_norm** uses ``RMS(r_k) / scale_k`` with ``scale_k`` from each entry's ``scale`` when
+    **R_norm** uses ``R_eff / scale_k`` where each entry's ``rms`` is **R_eff** = RMS(r)·Q^0.5 from
+    :func:`compute_residuals` (see :func:`_r_eff_scalar`). ``scale_k`` comes from each entry's ``scale`` when
     positive, else the first step's RMS fallback, else 1. **ResidualEngine** logs default
-    ``scale_k ≈ 1`` for **laws/** and nondimensional **implied_delta** / **ref_delta** keys;
+    ``scale_k ≈ 2×10⁻³`` for **laws/** and nondimensional **implied_delta** / **ref_delta** keys;
     other residuals and **data/** use state-derived scales. Optional **r_ref** (flat key → positive
     float) overrides ``scale_k`` for those keys. Per-key **admissibility_score** is
     ``1 / (1 + R_norm)`` when finite.
@@ -532,10 +573,10 @@ def audit(
     ``laws``, ``constitutive``, ``scaling``, ``data`` — only when **every** per-key
     admissibility in that category is finite; if any key is non-finite (NaN/Inf) or
     non-numeric, the category score is **0** (inadmissible for that bucket); empty
-    categories omitted;     (3) overall score — geometric mean of category scores. For log entries with
-    ``run_mode == \"training\"``, only **laws** and **constitutive** enter the overall;
-    for ``run_mode == \"eval\"`` or legacy entries (no ``run_mode``), all present categories
-    are included.
+    categories omitted; (3) **overall** score — for ``run_mode == \"training\"``, geometric mean of
+    **laws** and **constitutive** only; for ``run_mode == \"eval\"``, **not defined**
+    (``overall_admissibility_score`` is ``nan``, ``overall_admissibility_level`` is **Unknown**);
+    for legacy entries without ``run_mode``, geometric mean of all present categories.
 
     The returned dict includes ``monitor_run_mode`` from the last log entry when present.
     """

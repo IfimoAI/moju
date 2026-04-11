@@ -21,14 +21,25 @@ from moju.monitor.visualize_labels import (
 )
 
 R_NORM_LOG_EPS = 1e-12
+# Spatial heatmap colorbar: matches plotted z (log10(|residual| + ε)) and hover `z` in display space.
+SPATIAL_HEATMAP_COLORBAR_TITLE_LOG = "log10(|residual| + ε)"
 
 # Fixed height for Moju Studio Dashboard Plotly cards (law/adm bars + spatial heatmaps).
 MOJU_STUDIO_DASHBOARD_CARD_HEIGHT = 400
 
-# Single-figure visualize: training uses a taller canvas (~≥10% vs eval) so chart rows gain height;
-# ``vertical_spacing`` stays the same fraction of figure height in both modes.
+# Single-figure visualize: eval canvas height; training scales up so each chart row matches eval's
+# pixel height (training has one extra chart row with the same relative weight as eval's lower chart row).
 MONITOR_SINGLE_FIGURE_HEIGHT = 924
-MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING = int(math.ceil(MONITOR_SINGLE_FIGURE_HEIGHT * 1.10))
+_MONITOR_ROW_HEIGHT_SUM_EVAL = 0.002 + 0.074 + 0.262 + 0.222
+_MONITOR_ROW_HEIGHT_SUM_TRAINING = 0.002 + 0.074 + 0.262 + 0.222 + 0.222
+MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING = int(
+    math.ceil(
+        MONITOR_SINGLE_FIGURE_HEIGHT * _MONITOR_ROW_HEIGHT_SUM_TRAINING / _MONITOR_ROW_HEIGHT_SUM_EVAL
+    )
+)
+# Summary box below subplots (``yref="paper"``, ``yanchor="top"``): higher y = closer to charts; margin_b reserves pixels so the border is not clipped (training + eval).
+MONITOR_SINGLE_FIGURE_MARGIN_BOTTOM = 268
+MONITOR_SUMMARY_ANNOTATION_Y_PAPER = -0.098
 
 # Heatmap colorbars: paper coordinates; positioned via align_heatmap_colorbars_to_subplot_domains.
 HEATMAP_COLORBAR_X_GAP_PAPER = 0.012
@@ -52,6 +63,12 @@ DISSONANCE_COLOR = "#EF4444"
 # Training Overall Admissibility vs-step line (single-figure): black on white plotly_white panel.
 OVERALL_ADMISSIBILITY_TREND_LINE_COLOR = "#000000"
 LOW_ADM_COLOR = "#e67e22"  # between moderate (amber) and non-admissible (red)
+# Horizontal category-breakdown bars: fraction of category spacing (Plotly default ~0.8); higher = thicker bars, tighter vertical gaps.
+CATEGORY_BREAKDOWN_BAR_WIDTH = 0.46
+# Y (axis domain, 0=bottom 1=top): Primary Issue label inside the plot, top-anchored with a small inset from y=1.
+PRIMARY_ISSUE_ANNOTATION_Y_DOMAIN = 0.98
+# KPI ``go.Indicator`` domain x-span inside each subplot cell (symmetric → centered score stack).
+KPI_INDICATOR_DOMAIN_X = (0.10, 0.90)
 
 
 def _wrap_category_tick_label_html(label: str, *, max_line_chars: int = 14, max_lines: int = 4) -> str:
@@ -588,26 +605,6 @@ def _spatial_panel_plotted_display_z_flat(spatial: Dict[str, Any], *, use_log_rn
     return np.array([], dtype=float)
 
 
-def _combined_spatial_heatmap_z_range(
-    spatial: Optional[Dict[str, Any]],
-    spatial_rnorm: Optional[Dict[str, Any]],
-    *,
-    use_log_rnorm: bool,
-) -> Optional[Tuple[float, float]]:
-    """Shared colorbar limits for governing + constitutive spatial heatmaps (display space)."""
-    import numpy as np
-
-    parts: List[Any] = []
-    if spatial is not None:
-        parts.append(_spatial_panel_plotted_display_z_flat(spatial, use_log_rnorm=use_log_rnorm))
-    if spatial_rnorm is not None:
-        parts.append(_spatial_panel_plotted_display_z_flat(spatial_rnorm, use_log_rnorm=use_log_rnorm))
-    if not parts:
-        return None
-    allv = np.concatenate([p for p in parts if p.size])
-    return _finite_z_range_from_array(allv)
-
-
 def _heatmap_zlim_kwargs(z_range: Optional[Tuple[float, float]]) -> Dict[str, Any]:
     if z_range is None:
         return {}
@@ -625,7 +622,7 @@ def _plotly_add_spatial_panel_to_subplot(
     mid: float,
     colorbar_compact: bool,
     use_log_rnorm: bool = True,
-    colorbar_scale_title: str = "log10(|residual| + ε)",
+    colorbar_scale_title: str = SPATIAL_HEATMAP_COLORBAR_TITLE_LOG,
     z_range: Optional[Tuple[float, float]] = None,
 ) -> None:
     """Add law or constitutive spatial trace (1D keys×x, 2D x×y, or 3D z-slice) to a subplot cell."""
@@ -653,13 +650,14 @@ def _plotly_add_spatial_panel_to_subplot(
         x_sp = spatial["x"]
         pos_ax = spatial.get("position_axis") or "x"
         li = spatial.get("log_step_index")
-        # Residual key is customdata; label z with key (no duplicate key line).
+        _z1 = colorbar_scale_title
+        # customdata = residual key name; z is in display space (log or linear).
         ht_1d = (
-            "x=%{x:.4g}<br>%{customdata}=%{z:.4g}<br>log step "
+            f"x=%{{x:.4g}}<br>%{{customdata}} ({_z1})=%{{z:.4g}}<br>log step "
             + str(int(li))
             + "<extra></extra>"
             if li is not None
-            else "x=%{x:.4g}<br>%{customdata}=%{z:.4g}<extra></extra>"
+            else f"x=%{{x:.4g}}<br>%{{customdata}} ({_z1})=%{{z:.4g}}<extra></extra>"
         )
         fig.add_trace(
             go.Heatmap(
@@ -691,6 +689,7 @@ def _plotly_add_spatial_panel_to_subplot(
         nk = int(Zs.shape[0])
         hl = row_labels[0] if row_labels else ""
         _hk = truncate_display_label(str(hl), 48) if hl else "residual"
+        _z2 = colorbar_scale_title
         fig.add_trace(
             go.Heatmap(
                 x=x_sp,
@@ -698,7 +697,7 @@ def _plotly_add_spatial_panel_to_subplot(
                 z=z0,
                 colorscale=hm_cs,
                 colorbar=cb_kw,
-                hovertemplate=f"x=%{{x:.4g}}<br>y=%{{y:.4g}}<br>{_hk}=%{{z:.4g}}<extra></extra>",
+                hovertemplate=f"x=%{{x:.4g}}<br>y=%{{y:.4g}}<br>{_hk} ({_z2})=%{{z:.4g}}<extra></extra>",
                 name=truncate_display_label(hl, 40) + (f" (+{nk - 1} more)" if nk > 1 else ""),
                 meta=dict(subplot_row=row, subplot_col=col),
                 **zlim,
@@ -724,6 +723,7 @@ def _plotly_add_spatial_panel_to_subplot(
         zk = float(z_sp[kz])
         hl3 = row_labels[0] if row_labels else ""
         _hk3 = truncate_display_label(str(hl3), 48) if hl3 else "residual"
+        _z3 = colorbar_scale_title
         fig.add_trace(
             go.Heatmap(
                 x=x_sp,
@@ -731,7 +731,7 @@ def _plotly_add_spatial_panel_to_subplot(
                 z=sl,
                 colorscale=hm_cs,
                 colorbar=cb_kw,
-                hovertemplate=f"x=%{{x:.4g}}<br>y=%{{y:.4g}}<br>{_hk3}=%{{z:.4g}}<extra></extra>",
+                hovertemplate=f"x=%{{x:.4g}}<br>y=%{{y:.4g}}<br>{_hk3} ({_z3})=%{{z:.4g}}<extra></extra>",
                 name=f"z-slice z={zk:.4g}" + (f" (+{nk - 1} keys)" if nk > 1 else ""),
                 meta=dict(subplot_row=row, subplot_col=col),
                 **zlim,
@@ -759,6 +759,83 @@ def _plotly_add_spatial_panel_to_subplot(
     )
     fig.update_xaxes(visible=False, row=row, col=col)
     fig.update_yaxes(visible=False, row=row, col=col)
+
+
+def _monitor_flat_subplot_titles(*, n_rows: int, is_eval: bool, nr_panel_title: str) -> Tuple[str, ...]:
+    """
+    Row-major titles for ``make_subplots(rows=n_rows, cols=8)`` so paper titles align with merged panels.
+
+    Anchor columns follow ``specs``: combined bars / trend panels start at col 1 or 5 (0-based col index 0 or 4).
+    """
+    n = n_rows * 8
+    st = [""] * n
+    if is_eval:
+        st[16] = "Category Breakdown"
+        st[20] = nr_panel_title
+        st[24] = "Governing Residual"
+        st[28] = "Constitutive Residual"
+    else:
+        st[16] = "Overall Admissibility"
+        st[20] = "Category Breakdown"
+        st[24] = "Governing Residuals"
+        st[28] = "Constitutive Residuals"
+        st[32] = "Governing Residual"
+        st[36] = "Constitutive Residual"
+    return tuple(st)
+
+
+def _plotly_xy_axis_ref_strings_for_subplot(fig: Any, row: int, col: int) -> Tuple[str, str]:
+    """Return ``(xref, yref)`` axis names (e.g. ``('x2','y2')``) for a ``Figure.get_subplot`` cell."""
+    sp = fig.get_subplot(row, col)
+
+    def _ref(axis_obj: Any, kind: str) -> str:
+        root = getattr(fig.layout, f"{kind}axis", None)
+        if axis_obj is root:
+            return kind
+        for i in range(2, 64):
+            ax = getattr(fig.layout, f"{kind}axis{i}", None)
+            if ax is axis_obj:
+                return f"{kind}{i}"
+        raise ValueError(f"Could not resolve {kind} axis ref for subplot ({row}, {col})")
+
+    return _ref(sp.xaxis, "x"), _ref(sp.yaxis, "y")
+
+
+def _add_monitor_panel_title_annotations(
+    fig: Any,
+    flat_titles: Tuple[str, ...],
+    *,
+    font_color: str,
+) -> None:
+    """Attach one title annotation per non-empty anchor cell.
+
+    Plotly may omit ``subplot_titles`` for grids that mix ``colspan`` and ``domain`` cells; we still pass
+    ``subplot_titles`` for API consistency, then place matching labels with axis **domain** coordinates
+    (``xref``/``yref`` ending in `` domain``) so ``x=0.5``, ``y>1`` sit **above** the plot, not in data space.
+    """
+    T = _ENTERPRISE_THEME
+    fs = T["font_stack"]
+    for i, text in enumerate(flat_titles):
+        t = str(text or "").strip()
+        if not t:
+            continue
+        row = i // 8 + 1
+        col = i % 8 + 1
+        try:
+            xa, ya = _plotly_xy_axis_ref_strings_for_subplot(fig, row, col)
+        except Exception:
+            continue
+        fig.add_annotation(
+            text=t,
+            xref=f"{xa} domain",
+            yref=f"{ya} domain",
+            x=0.5,
+            y=1.02,
+            showarrow=False,
+            xanchor="center",
+            yanchor="bottom",
+            font=dict(size=13, color=font_color, family=fs),
+        )
 
 
 def _build_plotly_monitor_figure_single(
@@ -845,8 +922,9 @@ def _build_plotly_monitor_figure_single(
         None,
         None,
     ]
+    # Eval: three KPIs (Governing, Constitutive, Scaling); same 8-slot colspan pattern as training row.
     kpi_row_eval = [
-        {"type": "domain", "colspan": 2},
+        None,
         None,
         {"type": "domain", "colspan": 2},
         None,
@@ -866,34 +944,17 @@ def _build_plotly_monitor_figure_single(
         # Slightly shorter chart rows fund larger vertical_spacing vs training—more gap from x labels
         # / x-axis titles to the subplot title row below (same figure height).
         row_heights = [0.002, 0.074, 0.262, 0.222]
-        subplot_titles = (
-            "",
-            "",
-            "",
-            "",
-            "Category Breakdown",
-            "Normalized Residuals",
-            "Governing Residual",
-            "Constitutive Residual",
-        )
     else:
         specs.append(_split_xy_row)
         specs.append(_split_xy_row)
         specs.append(_split_xy_row)
-        # Taller chart rows (3–5) vs a slimmer KPI band; vertical_spacing unchanged.
-        row_heights = [0.002, 0.042, 0.220, 0.210, 0.228]
-        subplot_titles = (
-            "",
-            "",
-            "",
-            "",
-            "Overall Admissibility",
-            "Category Breakdown",
-            "Governing Residuals",
-            "Constitutive Residuals",
-            "Governing Residual",
-            "Constitutive Residual",
-        )
+        # KPI + chart row weights align with eval; extra chart row uses same weight as eval's lower row
+        # so pixel heights match ``MONITOR_SINGLE_FIGURE_HEIGHT`` eval layout when figure height scales.
+        row_heights = [0.002, 0.074, 0.262, 0.222, 0.222]
+    nr_panel_title = truncate_display_label(str(bundle.get("nr_title") or "Normalized Residuals"), 56)
+    subplot_titles = _monitor_flat_subplot_titles(
+        n_rows=n_rows, is_eval=is_eval, nr_panel_title=nr_panel_title
+    )
     fig = make_subplots(
         rows=n_rows,
         cols=8,
@@ -948,6 +1009,7 @@ def _build_plotly_monitor_figure_single(
         num_size = 20 if has_delta else 22
         # Vertical centering in cell; compact stack with clear title / value / delta bands.
         domain_y = [0.07, 0.93] if has_delta else [0.10, 0.90]
+        _x0, _x1 = KPI_INDICATOR_DOMAIN_X
         ind_kwargs: Dict[str, Any] = dict(
             align="center",
             mode=("number+delta" if has_delta else "number"),
@@ -961,7 +1023,7 @@ def _build_plotly_monitor_figure_single(
                 "align": "center",
                 "font": {"family": T["font_stack"], "size": 13, "color": font_color},
             },
-            domain=dict(x=[0.02, 0.98], y=domain_y),
+            domain=dict(x=[_x0, _x1], y=domain_y),
         )
         ind = go.Indicator(**ind_kwargs)
         if has_delta:
@@ -983,9 +1045,6 @@ def _build_plotly_monitor_figure_single(
     scaling_cat_ref = (
         float(first_cat.get("scaling", float("nan"))) if "scaling" in first_cat else None
     )
-    data_cat_last = float(last_cat.get("data", float("nan")))
-    data_cat_ref = float(first_cat.get("data", float("nan"))) if "data" in first_cat else None
-
     if not is_eval:
         # Training: Governing + Constitutive only (cols 3–4 and 6–7).
         fig.add_trace(
@@ -1005,13 +1064,13 @@ def _build_plotly_monitor_figure_single(
             col=6,
         )
     else:
-        # Test / eval: up to four category scores (scaling and data use correct keys).
+        # Eval: Governing, Constitutive, Scaling (no Data KPI; data/ still in category bars / per_key).
         fig.add_trace(
             _kpi_indicator(
                 laws_last if math.isfinite(laws_last) else 0.0, "Governing Score", laws_ref
             ),
             row=2,
-            col=1,
+            col=3,
         )
         fig.add_trace(
             _kpi_indicator(
@@ -1020,22 +1079,13 @@ def _build_plotly_monitor_figure_single(
                 const_ref,
             ),
             row=2,
-            col=3,
+            col=5,
         )
         fig.add_trace(
             _kpi_indicator(
                 scaling_cat_last if math.isfinite(scaling_cat_last) else 0.0,
                 "Scaling Score",
                 scaling_cat_ref,
-            ),
-            row=2,
-            col=5,
-        )
-        fig.add_trace(
-            _kpi_indicator(
-                data_cat_last if math.isfinite(data_cat_last) else 0.0,
-                "Data Score",
-                data_cat_ref,
             ),
             row=2,
             col=7,
@@ -1155,6 +1205,7 @@ def _build_plotly_monitor_figure_single(
             x=cat_vals,
             y=cat_labels,
             orientation="h",
+            width=CATEGORY_BREAKDOWN_BAR_WIDTH,
             marker=dict(color=cat_colors, line=dict(color=T["bar_line"], width=0.5)),
             text=cat_text,
             textposition="outside",
@@ -1187,11 +1238,12 @@ def _build_plotly_monitor_figure_single(
     if show_primary_issue:
         fig.add_annotation(
             x=0.02,
-            y=1.04,
+            y=PRIMARY_ISSUE_ANNOTATION_Y_DOMAIN,
             xref=f"{cat_axis} domain",
             yref=f"{cat_yaxis} domain",
             text=f"Primary Issue: {worst_label}",
             showarrow=False,
+            yanchor="top",
             align="left",
             font=dict(size=11, color=DISSONANCE_COLOR, family=T["font_stack"]),
         )
@@ -1370,10 +1422,13 @@ def _build_plotly_monitor_figure_single(
         _plot_residual_panel("laws", 4, 1, "Governing")
         _plot_residual_panel("constitutive", 4, 5, "Constitutive")
 
-    # Spatial maps (shared zlim across governing + constitutive heatmaps when both use display transform)
+    # Spatial maps: each heatmap colorbar uses display-space zmin/zmax from that panel only (log or linear).
     mid = indices[len(indices) // 2] if indices else 0
-    spatial_z_range = _combined_spatial_heatmap_z_range(spatial, spatial_rnorm, use_log_rnorm=use_log_rnorm)
+    _spatial_cb_title = SPATIAL_HEATMAP_COLORBAR_TITLE_LOG if use_log_rnorm else "|residual|"
     if spatial is not None:
+        _z_range_law = _finite_z_range_from_array(
+            _spatial_panel_plotted_display_z_flat(spatial, use_log_rnorm=use_log_rnorm)
+        )
         _plotly_add_spatial_panel_to_subplot(
             fig,
             row=spatial_row,
@@ -1383,8 +1438,8 @@ def _build_plotly_monitor_figure_single(
             mid=mid,
             colorbar_compact=False,
             use_log_rnorm=use_log_rnorm,
-            colorbar_scale_title="log10 residual",
-            z_range=spatial_z_range,
+            colorbar_scale_title=_spatial_cb_title,
+            z_range=_z_range_law,
         )
     else:
         fig.add_trace(
@@ -1396,6 +1451,9 @@ def _build_plotly_monitor_figure_single(
         fig.update_yaxes(visible=False, row=spatial_row, col=1)
 
     if spatial_rnorm is not None:
+        _z_range_const = _finite_z_range_from_array(
+            _spatial_panel_plotted_display_z_flat(spatial_rnorm, use_log_rnorm=use_log_rnorm)
+        )
         _plotly_add_spatial_panel_to_subplot(
             fig,
             row=spatial_row,
@@ -1405,8 +1463,8 @@ def _build_plotly_monitor_figure_single(
             mid=mid,
             colorbar_compact=False,
             use_log_rnorm=use_log_rnorm,
-            colorbar_scale_title="log10 residual",
-            z_range=spatial_z_range,
+            colorbar_scale_title=_spatial_cb_title,
+            z_range=_z_range_const,
         )
     else:
         fig.add_trace(
@@ -1442,15 +1500,21 @@ def _build_plotly_monitor_figure_single(
         esc_ft = (
             title_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         )
-        # Line break plus top margin so the subtitle sits clearly below the main title (~2× prior gap).
-        layout_title_html = (
-            f"<span style=\"font-size:{_main_title_px}px;font-weight:600;color:{font_color};font-family:{fs}\">{esc_ft}</span>"
-            f"<br><span style=\"display:block;margin:88px 0 0 0;line-height:1.3\">{overall_subtitle_html}</span>"
-        )
-        margin_top = 152
+        if not overall_subtitle_html.strip():
+            layout_title_html = (
+                f"<span style=\"font-size:{_main_title_px}px;font-weight:600;color:{font_color};font-family:{fs}\">{esc_ft}</span>"
+            )
+            margin_top = 72
+        else:
+            # Line break plus top margin so the subtitle sits clearly below the main title (~2× prior gap).
+            layout_title_html = (
+                f"<span style=\"font-size:{_main_title_px}px;font-weight:600;color:{font_color};font-family:{fs}\">{esc_ft}</span>"
+                f"<br><span style=\"display:block;margin:88px 0 0 0;line-height:1.3\">{overall_subtitle_html}</span>"
+            )
+            margin_top = 152
     else:
         layout_title_html = overall_subtitle_html
-        margin_top = 54
+        margin_top = 54 if overall_subtitle_html.strip() else 72
     fig.update_layout(
         title=dict(
             text=layout_title_html,
@@ -1462,8 +1526,8 @@ def _build_plotly_monitor_figure_single(
         ),
         height=(MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING if not is_eval else MONITOR_SINGLE_FIGURE_HEIGHT),
         showlegend=False,
-        # Generous bottom margin so spatial heatmap x labels/titles finish above the centered summary.
-        margin=dict(l=90, r=90, t=margin_top, b=205),
+        # Bottom margin: spatial x labels + full summary box (border) without clipping.
+        margin=dict(l=90, r=90, t=margin_top, b=MONITOR_SINGLE_FIGURE_MARGIN_BOTTOM),
         hovermode="closest",
         template="plotly_white",
         plot_bgcolor=plot_bg,
@@ -1485,7 +1549,7 @@ def _build_plotly_monitor_figure_single(
     fig.add_annotation(
         text=summary_text,
         x=0.5,
-        y=-0.158,
+        y=MONITOR_SUMMARY_ANNOTATION_Y_PAPER,
         xref="paper",
         yref="paper",
         xanchor="center",
@@ -1512,6 +1576,7 @@ def _build_plotly_monitor_figure_single(
     fig.update_xaxes(automargin=True, title=dict(standoff=10))
 
     align_heatmap_colorbars_to_subplot_domains(fig)
+    _add_monitor_panel_title_annotations(fig, subplot_titles, font_color=font_color)
     return fig
 
 
@@ -1549,7 +1614,13 @@ def _build_kpi_figure(
             {"range": [ADM_HIGH_THRESHOLD, 1.0], "color": "#d1fae5"},
         ],
     }
-    fig.add_trace(go.Indicator(**ind_kwargs, title={"text": "Overall Admissibility A"}))
+    fig.add_trace(
+        go.Indicator(
+            **ind_kwargs,
+            title={"text": "Overall Admissibility A", "align": "center"},
+            domain=dict(x=[0.14, 0.86], y=[0.22, 0.88]),
+        )
+    )
     fig.add_annotation(
         text="A = 1 / (1 + R_norm)",
         x=0.5,
@@ -1566,6 +1637,35 @@ def _build_kpi_figure(
         font=dict(family=T["font_stack"], color=fontc),
         margin=dict(l=40, r=40, t=80, b=50),
         height=360,
+    )
+    return fig
+
+
+def _build_eval_kpi_tab_placeholder() -> Any:
+    """Dash KPI tab for eval: no single overall score (avoid a misleading zero gauge)."""
+    import plotly.graph_objects as go
+
+    T = _ENTERPRISE_THEME
+    fig = go.Figure()
+    fig.update_layout(
+        template="plotly_white",
+        paper_bgcolor=T["paper_bg"],
+        plot_bgcolor=T["paper_bg"],
+        font=dict(family=T["font_stack"], color=T["font_color"]),
+        margin=dict(l=40, r=40, t=60, b=40),
+        height=360,
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+    )
+    fig.add_annotation(
+        text="Eval mode does not define a single overall score. Use the Admissibility tab for category KPIs and breakdown.",
+        x=0.5,
+        y=0.5,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font=dict(size=13, family=T["font_stack"], color=T["font_color"]),
+        align="center",
     )
     return fig
 
@@ -1670,7 +1770,10 @@ def build_plotly_monitor_dash_payload(
         baseline_score=baseline_score,
         export_buttons=export_buttons,
     )
-    kpi = _build_kpi_figure(bundle.get("overall_adm") or [], baseline_score=baseline_score)
+    if (bundle.get("mode") or "") == "eval":
+        kpi = _build_eval_kpi_tab_placeholder()
+    else:
+        kpi = _build_kpi_figure(bundle.get("overall_adm") or [], baseline_score=baseline_score)
     forensic = _build_forensic_heatmap_figure(bundle, spatial_heatmap_colorscale=spatial_heatmap_colorscale)
     return {
         "mode": "dash-tabs",

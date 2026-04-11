@@ -32,8 +32,8 @@ def test_import_monitor_all():
     from moju.monitor import (
         ResidualEngine,
         admissibility_level,
-        build_loss,
         audit,
+        build_loss,
         build_monitor_visualize_bundle,
         build_spatial_rnorm_panels_from_residuals,
         visualize,
