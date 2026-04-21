@@ -326,7 +326,7 @@ class TestBuildLossBatch:
 
 
 class TestREff:
-    """R_eff = RMS(r)·Q^0.5; Q>1 when |r| is uneven across collocation points."""
+    """R_eff = RMS_δ(r)·Q^0.5 with jittered RMS (see R_EFF_RMS_JITTER_SQ); Q>1 when |r| is uneven."""
 
     def test_r_eff_matches_rms_when_uniform_or_scalar(self):
         from moju.monitor.auditor import _rms_scalar, _r_eff_scalar

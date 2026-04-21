@@ -20,21 +20,21 @@ def _load_example_module(filename: str):
 def test_cookbook_turbulence_law_of_wall_main():
     mod = _load_example_module("cookbook_turbulence_law_of_wall.py")
     out = mod.main()
-    assert out["ref_rms"] == 0.0
+    assert jnp.allclose(out["ref_rms"], 0.0, atol=1e-9)
     assert out["flat_key"] in out["report"]["per_key"]
 
 
 def test_cookbook_turbulence_colebrook_main():
     mod = _load_example_module("cookbook_turbulence_colebrook.py")
     out = mod.main()
-    assert out["ref_rms"] == 0.0
+    assert jnp.allclose(out["ref_rms"], 0.0, atol=1e-9)
     assert out["flat_key"] in out["report"]["per_key"]
 
 
 def test_cookbook_constitutive_smagorinsky_main():
     mod = _load_example_module("cookbook_constitutive_smagorinsky.py")
     out = mod.main()
-    assert out["ref_rms"] == 0.0
+    assert jnp.allclose(out["ref_rms"], 0.0, atol=1e-9)
     assert out["flat_key"] in out["report"]["per_key"]
 
 
