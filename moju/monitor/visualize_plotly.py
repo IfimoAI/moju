@@ -1655,8 +1655,8 @@ def _build_plotly_monitor_figure_single(
         summary_lines.append("Training trend improving" if last_ov >= first_ov else "Training trend degrading")
     if show_primary_issue:
         summary_lines.append(
-            "Recommend (NN-based models): if any category is below high admissibility, "
-            "tune the optimizer and schedule, rebalance residual weights, and adjust width and depth."
+            "Recommend (NN-based models): Tune the optimizer and schedule, rebalance residual weights, "
+            "and adjust width and depth."
         )
     summary_text = "Summary:<br>- " + "<br>- ".join(summary_lines[:5]) if summary_lines else "Summary: insufficient diagnostics"
 
