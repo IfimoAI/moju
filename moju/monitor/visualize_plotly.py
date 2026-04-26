@@ -26,13 +26,6 @@ SPATIAL_HEATMAP_COLORBAR_TITLE_LOG = "log10(|residual| + ε)"
 # Perceptually uniform default (avoid Jet for scientific heatmaps).
 DEFAULT_SPATIAL_HEATMAP_COLORSCALE = "Viridis"
 
-TROUBLESHOOT_HINT_GOVERNING = (
-    "Hint: tighten governing-law loss weighting, verify SI-consistent derivatives, and add collocation near stiff regions."
-)
-TROUBLESHOOT_HINT_CONSTITUTIVE = (
-    "Hint: check constitutive implied vs model closure, law-linked audits, and reference scales (r_ref)."
-)
-
 # Fixed height for Moju Studio Dashboard Plotly cards (law/adm bars + spatial heatmaps).
 MOJU_STUDIO_DASHBOARD_CARD_HEIGHT = 400
 
@@ -1660,14 +1653,11 @@ def _build_plotly_monitor_figure_single(
         )
     if math.isfinite(last_ov) and math.isfinite(first_ov):
         summary_lines.append("Training trend improving" if last_ov >= first_ov else "Training trend degrading")
-    if math.isfinite(last_ov) and not is_high_admissibility(last_ov):
-        summary_lines.append("Recommend: adjust optimizer, residual weighting, or data scaling")
-    if show_primary_issue and cat_labels_raw:
-        wl = cat_labels_raw[0].lower()
-        if ("governing" in wl or "law" in wl) and TROUBLESHOOT_HINT_GOVERNING not in summary_lines:
-            summary_lines.append(TROUBLESHOOT_HINT_GOVERNING)
-        elif "constitutive" in wl and TROUBLESHOOT_HINT_CONSTITUTIVE not in summary_lines:
-            summary_lines.append(TROUBLESHOOT_HINT_CONSTITUTIVE)
+    if show_primary_issue:
+        summary_lines.append(
+            "Recommend (NN-based models): if any category is below high admissibility, "
+            "tune the optimizer and schedule, rebalance residual weights, and adjust width and depth."
+        )
     summary_text = "Summary:<br>- " + "<br>- ".join(summary_lines[:5]) if summary_lines else "Summary: insufficient diagnostics"
 
     title_text = (figure_title or "").strip()
