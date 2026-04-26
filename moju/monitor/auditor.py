@@ -450,8 +450,9 @@ def _compute_log_step_metrics(
     Category scores are **0** if any per-key admissibility in that category is non-finite.
 
     **Overall admissibility:** for ``run_mode == \"training\"``, geometric mean of **laws** and
-    **constitutive** only. For ``run_mode == \"eval\"``, **not defined** (``nan``). For legacy entries
-    without ``run_mode``, geometric mean of **all** present categories.
+    **constitutive** only. For ``run_mode == \"eval\"``, geometric mean of finite, present
+    category scores (missing categories are excluded). For legacy entries without ``run_mode``,
+    geometric mean of **all** present categories.
     """
     if not log:
         return []
@@ -531,7 +532,12 @@ def _compute_log_step_metrics(
                     [float(category_scores[c]) for c in train_cats]
                 )
         elif rm == "eval":
-            overall = float("nan")
+            eval_vals = [
+                float(vv)
+                for vv in category_scores.values()
+                if math.isfinite(float(vv))
+            ]
+            overall = _geom_mean_admissibility(eval_vals) if eval_vals else float("nan")
         else:
             # Legacy logs without ``run_mode``: all present categories.
             if not cats_present:
@@ -580,9 +586,9 @@ def audit(
     admissibility in that category is finite; if any key is non-finite (NaN/Inf) or
     non-numeric, the category score is **0** (inadmissible for that bucket); empty
     categories omitted; (3) **overall** score — for ``run_mode == \"training\"``, geometric mean of
-    **laws** and **constitutive** only; for ``run_mode == \"eval\"``, **not defined**
-    (``overall_admissibility_score`` is ``nan``, ``overall_admissibility_level`` is **Unknown**);
-    for legacy entries without ``run_mode``, geometric mean of all present categories.
+    **laws** and **constitutive** only; for ``run_mode == \"eval\"``, geometric mean of finite,
+    present category scores (missing categories excluded); for legacy entries without ``run_mode``,
+    geometric mean of all present categories.
 
     The returned dict includes ``monitor_run_mode`` from the last log entry when present.
     """

@@ -961,7 +961,7 @@ def build_worst_keys_table_figure(bundle: Dict[str, Any]) -> Any:
 
 
 def _build_eval_kpi_figure(bundle: Dict[str, Any]) -> Any:
-    """Dash KPI tab for eval: category indicators plus run_mode explanation (no fake overall gauge)."""
+    """Dash KPI tab for eval: category indicators plus overall rollup summary."""
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
@@ -1039,11 +1039,12 @@ def _build_eval_kpi_figure(bundle: Dict[str, Any]) -> Any:
         row=1,
         col=3,
     )
-    rm = bundle.get("monitor_run_mode") or "eval"
+    overall = float(metrics[-1].get("overall_admissibility_score", float("nan")))
+    overall_pct = format_admissibility_pct(overall) if math.isfinite(overall) else "N/A"
+    status = format_admissibility_status_label(overall)
     explain = (
-        f"<b>run_mode=\"{rm}\"</b> — rolled-up overall admissibility is not defined for eval logs "
-        "(training uses the geometric mean of governing + constitutive). "
-        "Use the scores above and the Admissibility tab for per-key detail."
+        f"<b>Overall admissibility (rollup): {overall_pct}</b> [{status}] — "
+        "computed from available category scores. Use the Admissibility tab for per-key detail."
     )
     fig.add_annotation(
         text=explain,
@@ -1229,18 +1230,11 @@ def _build_plotly_monitor_figure_single(
         format_admissibility_pct(last_ov) if math.isfinite(last_ov) else "N/A"
     )
     # Merged into layout title at update_layout (one step smaller than main title for hierarchy).
-    if is_eval and not math.isfinite(last_ov):
-        overall_subtitle_html = (
-            f"<span style='font-size:{_sub_px}px;font-weight:500;color:{muted}'>"
-            "Roll-up overall score is not defined for <b>eval</b> logs — use category scores "
-            "and per-key breakdown below.</span>"
-        )
-    else:
-        overall_subtitle_html = (
-            f"<span style='font-size:{_sub_px}px;font-weight:600;color:{font_color}'>Overall admissibility (final): </span>"
-            f"<span style='font-size:{_sub_px}px;font-weight:700'>{pct_html}</span>"
-            f" <span style='font-size:{_sub_px}px;color:{status_color};font-weight:700'>– [{status}]</span>"
-        )
+    overall_subtitle_html = (
+        f"<span style='font-size:{_sub_px}px;font-weight:600;color:{font_color}'>Overall admissibility (final): </span>"
+        f"<span style='font-size:{_sub_px}px;font-weight:700'>{pct_html}</span>"
+        f" <span style='font-size:{_sub_px}px;color:{status_color};font-weight:700'>– [{status}]</span>"
+    )
 
     # KPI cards as indicators
     last_cat = (metrics[-1].get("category_admissibility_score") if metrics else {}) or {}

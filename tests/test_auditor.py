@@ -114,7 +114,7 @@ class TestNanTolerantAuditMetrics:
         expected = math.exp(0.5 * (math.log(cl) + math.log(cc)))
         assert abs(m[0]["overall_admissibility_score"] - expected) < 1e-9
 
-    def test_compute_log_step_metrics_eval_overall_nan(self):
+    def test_compute_log_step_metrics_eval_rolls_up_available_categories(self):
         import math
 
         from moju.monitor.auditor import _compute_log_step_metrics
@@ -135,7 +135,41 @@ class TestNanTolerantAuditMetrics:
             }
         ]
         m_ev = _compute_log_step_metrics(log_eval)
-        assert not math.isfinite(m_ev[0]["overall_admissibility_score"])
+        ce = m_ev[0]["category_admissibility_score"]
+        expected_eval = math.exp(
+            (
+                math.log(float(ce["laws"]))
+                + math.log(float(ce["constitutive"]))
+                + math.log(float(ce["scaling"]))
+            )
+            / 3.0
+        )
+        assert abs(m_ev[0]["overall_admissibility_score"] - expected_eval) < 1e-9
+
+        log_eval_no_scaling = [
+            {
+                "run_mode": "eval",
+                "rms": {
+                    "laws/a": 0.1,
+                    "constitutive/b/implied_delta": 0.1,
+                },
+                "scale": {
+                    "laws/a": 1.0,
+                    "constitutive/b/implied_delta": 1.0,
+                },
+            }
+        ]
+        m_ev2 = _compute_log_step_metrics(log_eval_no_scaling)
+        ce2 = m_ev2[0]["category_admissibility_score"]
+        expected_eval2 = math.exp(
+            (
+                math.log(float(ce2["laws"]))
+                + math.log(float(ce2["constitutive"]))
+            )
+            / 2.0
+        )
+        assert abs(m_ev2[0]["overall_admissibility_score"] - expected_eval2) < 1e-9
+
         log_legacy = [
             {
                 "rms": {
@@ -709,7 +743,7 @@ class TestVisualize:
         assert len(wk) >= 1
         assert wk[0]["key"] in ("laws/x", "constitutive/a/b", "scaling/y/z")
 
-    def test_visualize_eval_title_when_overall_undefined(self):
+    def test_visualize_eval_title_shows_overall_rollup(self):
         pytest.importorskip("plotly")
         log = [
             {
@@ -721,8 +755,8 @@ class TestVisualize:
         ]
         fig = visualize(log, backend="plotly", mode="eval")
         lt = str(fig.layout.title.text or "")
-        assert "Overall admissibility (final)" not in lt
-        assert "not defined" in lt.lower() or "eval" in lt.lower()
+        assert "Overall admissibility (final)" in lt
+        assert "not defined" not in lt.lower()
 
     def test_visualize_split_layout_returns_monitor_and_worst_keys(self):
         pytest.importorskip("plotly")
