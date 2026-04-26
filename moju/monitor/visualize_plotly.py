@@ -23,6 +23,15 @@ from moju.monitor.visualize_labels import (
 R_NORM_LOG_EPS = 1e-12
 # Spatial heatmap colorbar: matches plotted z (log10(|residual| + ε)) and hover `z` in display space.
 SPATIAL_HEATMAP_COLORBAR_TITLE_LOG = "log10(|residual| + ε)"
+# Perceptually uniform default (avoid Jet for scientific heatmaps).
+DEFAULT_SPATIAL_HEATMAP_COLORSCALE = "Viridis"
+
+TROUBLESHOOT_HINT_GOVERNING = (
+    "Hint: tighten governing-law loss weighting, verify SI-consistent derivatives, and add collocation near stiff regions."
+)
+TROUBLESHOOT_HINT_CONSTITUTIVE = (
+    "Hint: check constitutive implied vs model closure, law-linked audits, and reference scales (r_ref)."
+)
 
 # Fixed height for Moju Studio Dashboard Plotly cards (law/adm bars + spatial heatmaps).
 MOJU_STUDIO_DASHBOARD_CARD_HEIGHT = 400
@@ -371,6 +380,55 @@ def _status_bracket_color(tag: str, *, warn_color: str) -> str:
     if tag == "LOW":
         return LOW_ADM_COLOR
     return DISSONANCE_COLOR
+
+
+def _go_category_kpi_indicator(
+    value: float,
+    title: str,
+    ref: Optional[float],
+    *,
+    font_color: str,
+    warn_color: str,
+    title_px: int = 13,
+    num_px: int = 22,
+    delta_px: int = 9,
+) -> Any:
+    """Single ``go.Indicator`` for Governing / Constitutive / Scaling scorecards."""
+    import plotly.graph_objects as go
+
+    T = _ENTERPRISE_THEME
+    v = float(value) if math.isfinite(float(value)) else 0.0
+    card_color = _kpi_indicator_value_color(v, warn_color=warn_color)
+    has_delta = ref is not None and math.isfinite(float(ref))
+    num_size = num_px - 2 if has_delta else num_px
+    domain_y = [0.07, 0.93] if has_delta else [0.10, 0.90]
+    _x0, _x1 = KPI_INDICATOR_DOMAIN_X
+    ind_kwargs: Dict[str, Any] = dict(
+        align="center",
+        mode=("number+delta" if has_delta else "number"),
+        value=v,
+        number={
+            "valueformat": ".1%",
+            "font": {"size": num_size, "color": card_color},
+        },
+        title={
+            "text": title,
+            "align": "center",
+            "font": {"family": T["font_stack"], "size": title_px, "color": font_color},
+        },
+        domain=dict(x=[_x0, _x1], y=domain_y),
+    )
+    ind = go.Indicator(**ind_kwargs)
+    if has_delta:
+        ind.delta = {
+            "reference": float(ref),
+            "increasing": {"color": ADMISSIBLE_COLOR},
+            "decreasing": {"color": DISSONANCE_COLOR},
+            "valueformat": ".1%",
+            "position": "bottom",
+            "font": {"size": delta_px, "family": T["font_stack"]},
+        }
+    return ind
 
 
 def _kpi_indicator_value_color(score: float, *, warn_color: str) -> str:
@@ -838,6 +896,177 @@ def _add_monitor_panel_title_annotations(
         )
 
 
+def build_worst_keys_table_figure(bundle: Dict[str, Any]) -> Any:
+    """Standalone table: highest ``R_norm`` keys at the final log step (troubleshooting)."""
+    import plotly.graph_objects as go
+
+    T = _ENTERPRISE_THEME
+    rows = list(bundle.get("worst_keys_rows") or [])
+    if not rows:
+        fig = go.Figure(
+            data=[
+                go.Table(
+                    header=dict(values=["Top residual keys (final step)"]),
+                    cells=dict(values=[["No finite R_norm rows for selected keys."]]),
+                )
+            ]
+        )
+        fig.update_layout(
+            template="plotly_white",
+            paper_bgcolor=T["paper_bg"],
+            margin=dict(l=24, r=24, t=40, b=24),
+            height=160,
+        )
+        return fig
+
+    def fmt(x: Any) -> str:
+        try:
+            xf = float(x)
+        except (TypeError, ValueError):
+            return "—"
+        return f"{xf:.4g}" if math.isfinite(xf) else "—"
+
+    displays = [str(r.get("display") or "") for r in rows]
+    r_effs = [fmt(r.get("r_eff")) for r in rows]
+    sks = [fmt(r.get("scale_k")) for r in rows]
+    rns = [fmt(r.get("r_norm")) for r in rows]
+    adms = [fmt(r.get("admissibility")) for r in rows]
+    cats = [str(r.get("category") or "") for r in rows]
+    fig = go.Figure(
+        data=[
+            go.Table(
+                columnwidth=[220, 72, 72, 72, 88, 80],
+                header=dict(
+                    values=["Residual key", "R_eff", "scale_k", "R_norm", "Admissibility", "Category"],
+                    fill_color="#e2e8f0",
+                    align="left",
+                    font=dict(family=T["font_stack"], size=12, color=T["font_color"]),
+                ),
+                cells=dict(
+                    values=[displays, r_effs, sks, rns, adms, cats],
+                    align="left",
+                    font=dict(family=T["font_stack"], size=11, color=T["font_color"]),
+                ),
+            )
+        ]
+    )
+    fig.update_layout(
+        title=dict(text="Worst residual keys (by R_norm, final log step)", x=0.02, xanchor="left"),
+        template="plotly_white",
+        paper_bgcolor=T["paper_bg"],
+        margin=dict(l=24, r=24, t=56, b=24),
+        height=min(120 + 28 * len(rows), 720),
+    )
+    return fig
+
+
+def _build_eval_kpi_figure(bundle: Dict[str, Any]) -> Any:
+    """Dash KPI tab for eval: category indicators plus run_mode explanation (no fake overall gauge)."""
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    T = _ENTERPRISE_THEME
+    metrics = list(bundle.get("metrics") or [])
+    n = int(bundle.get("n") or 0)
+    if not metrics:
+        fig = go.Figure()
+        fig.update_layout(template="plotly_white", paper_bgcolor=T["paper_bg"], height=320)
+        fig.add_annotation(
+            text="No log metrics",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(family=T["font_stack"], color=T["font_color"]),
+        )
+        return fig
+    last_cat = metrics[-1].get("category_admissibility_score") or {}
+    first_cat = metrics[0].get("category_admissibility_score") or {} if n > 1 else {}
+    use_ref = n > 1
+    font_color = T["font_color"]
+    warn_color = "#F59E0B"
+
+    def ref_for(key: str) -> Optional[float]:
+        if not use_ref or key not in first_cat:
+            return None
+        try:
+            v = float(first_cat[key])
+        except (TypeError, ValueError):
+            return None
+        return v if math.isfinite(v) else None
+
+    laws_last = float(last_cat.get("laws", float("nan")))
+    const_last = float(last_cat.get("constitutive", float("nan")))
+    sc_last = float(last_cat.get("scaling", float("nan")))
+
+    fig = make_subplots(
+        rows=1,
+        cols=3,
+        specs=[[{"type": "domain"}, {"type": "domain"}, {"type": "domain"}]],
+        horizontal_spacing=0.04,
+    )
+    fig.add_trace(
+        _go_category_kpi_indicator(
+            laws_last if math.isfinite(laws_last) else 0.0,
+            "Governing Score",
+            ref_for("laws"),
+            font_color=font_color,
+            warn_color=warn_color,
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        _go_category_kpi_indicator(
+            const_last if math.isfinite(const_last) else 0.0,
+            "Constitutive Score",
+            ref_for("constitutive"),
+            font_color=font_color,
+            warn_color=warn_color,
+        ),
+        row=1,
+        col=2,
+    )
+    fig.add_trace(
+        _go_category_kpi_indicator(
+            sc_last if math.isfinite(sc_last) else 0.0,
+            "Scaling Score",
+            ref_for("scaling"),
+            font_color=font_color,
+            warn_color=warn_color,
+        ),
+        row=1,
+        col=3,
+    )
+    rm = bundle.get("monitor_run_mode") or "eval"
+    explain = (
+        f"<b>run_mode=\"{rm}\"</b> — rolled-up overall admissibility is not defined for eval logs "
+        "(training uses the geometric mean of governing + constitutive). "
+        "Use the scores above and the Admissibility tab for per-key detail."
+    )
+    fig.add_annotation(
+        text=explain,
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=-0.06,
+        showarrow=False,
+        font=dict(size=11, family=T["font_stack"], color=T["muted"]),
+        align="center",
+    )
+    fig.update_layout(
+        title=dict(text="Eval — category admissibility", x=0.5, xanchor="center"),
+        template="plotly_white",
+        paper_bgcolor=T["paper_bg"],
+        plot_bgcolor=T["paper_bg"],
+        font=dict(family=T["font_stack"], color=font_color),
+        margin=dict(l=32, r=32, t=56, b=120),
+        height=380,
+    )
+    return fig
+
+
 def _build_plotly_monitor_figure_single(
     bundle: Dict[str, Any],
     *,
@@ -848,6 +1077,8 @@ def _build_plotly_monitor_figure_single(
     theme: str = "light",
     baseline_score: Optional[float] = None,  # API parity with visualize(); unused here (KPI tab uses _build_kpi_figure).
     export_buttons: bool = True,
+    show_branding: bool = False,
+    density: str = "comfortable",
 ) -> Any:
     """Build a decision-oriented Plotly physics admissibility report."""
     import numpy as np
@@ -856,11 +1087,18 @@ def _build_plotly_monitor_figure_single(
 
     if r_norm_scale not in ("log", "linear"):
         raise ValueError("r_norm_scale must be 'log' or 'linear'")
+    if density not in ("comfortable", "compact"):
+        raise ValueError("density must be 'comfortable' or 'compact'")
     _require_light_theme(theme)
 
     use_log_rnorm = r_norm_scale == "log"
     rnorm_y_title = "log10(R_norm + ε)" if use_log_rnorm else "Normalized residual (R norm)"
-    hm_cs = spatial_heatmap_colorscale or "Jet"
+    hm_cs = spatial_heatmap_colorscale or DEFAULT_SPATIAL_HEATMAP_COLORSCALE
+    compact = density == "compact"
+    _sub_px = 14 if compact else 15
+    _main_title_px = 18 if compact else 20
+    kpi_title_px = 12 if compact else 13
+    kpi_num_px = 20 if compact else 22
 
     n = int(bundle["n"])
     indices = list(range(n))
@@ -991,51 +1229,34 @@ def _build_plotly_monitor_figure_single(
         format_admissibility_pct(last_ov) if math.isfinite(last_ov) else "N/A"
     )
     # Merged into layout title at update_layout (one step smaller than main title for hierarchy).
-    _sub_px = 15
-    overall_subtitle_html = (
-        f"<span style='font-size:{_sub_px}px;font-weight:600;color:{font_color}'>Overall admissibility (final): </span>"
-        f"<span style='font-size:{_sub_px}px;font-weight:700'>{pct_html}</span>"
-        f" <span style='font-size:{_sub_px}px;color:{status_color};font-weight:700'>– [{status}]</span>"
-    )
+    if is_eval and not math.isfinite(last_ov):
+        overall_subtitle_html = (
+            f"<span style='font-size:{_sub_px}px;font-weight:500;color:{muted}'>"
+            "Roll-up overall score is not defined for <b>eval</b> logs — use category scores "
+            "and per-key breakdown below.</span>"
+        )
+    else:
+        overall_subtitle_html = (
+            f"<span style='font-size:{_sub_px}px;font-weight:600;color:{font_color}'>Overall admissibility (final): </span>"
+            f"<span style='font-size:{_sub_px}px;font-weight:700'>{pct_html}</span>"
+            f" <span style='font-size:{_sub_px}px;color:{status_color};font-weight:700'>– [{status}]</span>"
+        )
 
     # KPI cards as indicators
     last_cat = (metrics[-1].get("category_admissibility_score") if metrics else {}) or {}
     first_cat = (metrics[0].get("category_admissibility_score") if metrics else {}) or {}
 
     def _kpi_indicator(value: float, title: str, ref: Optional[float]) -> Any:
-        v = float(value) if math.isfinite(float(value)) else 0.0
-        card_color = _kpi_indicator_value_color(v, warn_color=warn_color)
-        has_delta = ref is not None and math.isfinite(float(ref))
-        num_size = 20 if has_delta else 22
-        # Vertical centering in cell; compact stack with clear title / value / delta bands.
-        domain_y = [0.07, 0.93] if has_delta else [0.10, 0.90]
-        _x0, _x1 = KPI_INDICATOR_DOMAIN_X
-        ind_kwargs: Dict[str, Any] = dict(
-            align="center",
-            mode=("number+delta" if has_delta else "number"),
-            value=v,
-            number={
-                "valueformat": ".1%",
-                "font": {"size": num_size, "color": card_color},
-            },
-            title={
-                "text": title,
-                "align": "center",
-                "font": {"family": T["font_stack"], "size": 13, "color": font_color},
-            },
-            domain=dict(x=[_x0, _x1], y=domain_y),
+        return _go_category_kpi_indicator(
+            value,
+            title,
+            ref,
+            font_color=font_color,
+            warn_color=warn_color,
+            title_px=kpi_title_px,
+            num_px=kpi_num_px,
+            delta_px=8 if compact else 9,
         )
-        ind = go.Indicator(**ind_kwargs)
-        if has_delta:
-            ind.delta = {
-                "reference": float(ref),
-                "increasing": {"color": ADMISSIBLE_COLOR},
-                "decreasing": {"color": DISSONANCE_COLOR},
-                "valueformat": ".1%",
-                "position": "bottom",
-                "font": {"size": 9, "family": T["font_stack"]},
-            }
-        return ind
 
     laws_last = float(last_cat.get("laws", float("nan")))
     laws_ref = float(first_cat.get("laws", float("nan"))) if "laws" in first_cat else None
@@ -1491,11 +1712,16 @@ def _build_plotly_monitor_figure_single(
         summary_lines.append("Training trend improving" if last_ov >= first_ov else "Training trend degrading")
     if math.isfinite(last_ov) and not is_high_admissibility(last_ov):
         summary_lines.append("Recommend: adjust optimizer, residual weighting, or data scaling")
-    summary_text = "Summary:<br>- " + "<br>- ".join(summary_lines[:4]) if summary_lines else "Summary: insufficient diagnostics"
+    if show_primary_issue and cat_labels_raw:
+        wl = cat_labels_raw[0].lower()
+        if ("governing" in wl or "law" in wl) and TROUBLESHOOT_HINT_GOVERNING not in summary_lines:
+            summary_lines.append(TROUBLESHOOT_HINT_GOVERNING)
+        elif "constitutive" in wl and TROUBLESHOOT_HINT_CONSTITUTIVE not in summary_lines:
+            summary_lines.append(TROUBLESHOOT_HINT_CONSTITUTIVE)
+    summary_text = "Summary:<br>- " + "<br>- ".join(summary_lines[:5]) if summary_lines else "Summary: insufficient diagnostics"
 
     title_text = (figure_title or "").strip()
     fs = T["font_stack"]
-    _main_title_px = 20  # same for training and eval default titles
     if title_text:
         esc_ft = (
             title_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -1536,16 +1762,17 @@ def _build_plotly_monitor_figure_single(
     )
     if export_buttons:
         fig.update_layout(modebar_add=["toImage"])
-    fig.add_annotation(
-        text="Ifimo Lab: Moju Forensic Suite",
-        x=0.995,
-        y=1.08,
-        xref="paper",
-        yref="paper",
-        showarrow=False,
-        xanchor="right",
-        font=dict(size=10, color=muted, family=T["font_stack"]),
-    )
+    if show_branding:
+        fig.add_annotation(
+            text="Ifimo Lab: Moju Forensic Suite",
+            x=0.995,
+            y=1.08,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            xanchor="right",
+            font=dict(size=10, color=muted, family=T["font_stack"]),
+        )
     fig.add_annotation(
         text=summary_text,
         x=0.5,
@@ -1641,35 +1868,6 @@ def _build_kpi_figure(
     return fig
 
 
-def _build_eval_kpi_tab_placeholder() -> Any:
-    """Dash KPI tab for eval: no single overall score (avoid a misleading zero gauge)."""
-    import plotly.graph_objects as go
-
-    T = _ENTERPRISE_THEME
-    fig = go.Figure()
-    fig.update_layout(
-        template="plotly_white",
-        paper_bgcolor=T["paper_bg"],
-        plot_bgcolor=T["paper_bg"],
-        font=dict(family=T["font_stack"], color=T["font_color"]),
-        margin=dict(l=40, r=40, t=60, b=40),
-        height=360,
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-    )
-    fig.add_annotation(
-        text="Eval mode does not define a single overall score. Use the Admissibility tab for category KPIs and breakdown.",
-        x=0.5,
-        y=0.5,
-        xref="paper",
-        yref="paper",
-        showarrow=False,
-        font=dict(size=13, family=T["font_stack"], color=T["font_color"]),
-        align="center",
-    )
-    return fig
-
-
 def _build_forensic_heatmap_figure(
     bundle: Dict[str, Any], *, spatial_heatmap_colorscale: Optional[str] = None
 ) -> Any:
@@ -1721,7 +1919,7 @@ def _build_forensic_heatmap_figure(
             x=x,
             y=list(range(n)),
             z=Z,
-            colorscale=(spatial_heatmap_colorscale or "Jet"),
+            colorscale=(spatial_heatmap_colorscale or DEFAULT_SPATIAL_HEATMAP_COLORSCALE),
             colorbar=dict(title="log10(|residual| + ε)"),
             customdata=np.broadcast_to(np.asarray(scales, dtype=float)[:, None], Z.shape),
             hovertemplate=(
@@ -1758,6 +1956,8 @@ def build_plotly_monitor_dash_payload(
     theme: str = "light",
     baseline_score: Optional[float] = None,
     export_buttons: bool = True,
+    show_branding: bool = False,
+    density: str = "comfortable",
 ) -> Dict[str, Any]:
     _require_light_theme(theme)
     full = _build_plotly_monitor_figure_single(
@@ -1769,9 +1969,11 @@ def build_plotly_monitor_dash_payload(
         theme=theme,
         baseline_score=baseline_score,
         export_buttons=export_buttons,
+        show_branding=show_branding,
+        density=density,
     )
     if (bundle.get("mode") or "") == "eval":
-        kpi = _build_eval_kpi_tab_placeholder()
+        kpi = _build_eval_kpi_figure(bundle)
     else:
         kpi = _build_kpi_figure(bundle.get("overall_adm") or [], baseline_score=baseline_score)
     forensic = _build_forensic_heatmap_figure(bundle, spatial_heatmap_colorscale=spatial_heatmap_colorscale)
@@ -1800,6 +2002,8 @@ def build_plotly_monitor_figure(
     theme: str = "light",
     baseline_score: Optional[float] = None,
     export_buttons: bool = True,
+    show_branding: bool = False,
+    density: str = "comfortable",
 ) -> Any:
     _require_light_theme(theme)
     if dashboard_mode == "dash-tabs":
@@ -1812,6 +2016,8 @@ def build_plotly_monitor_figure(
             theme=theme,
             baseline_score=baseline_score,
             export_buttons=export_buttons,
+            show_branding=show_branding,
+            density=density,
         )
     return _build_plotly_monitor_figure_single(
         bundle,
@@ -1822,6 +2028,8 @@ def build_plotly_monitor_figure(
         theme=theme,
         baseline_score=baseline_score,
         export_buttons=export_buttons,
+        show_branding=show_branding,
+        density=density,
     )
 
 def build_plotly_law_rnorm_final_bar_figure(

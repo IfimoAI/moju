@@ -26,7 +26,7 @@ Use after training (or any time you have a reference or want π-constant checks)
 - **π-constant** runs only for **Path A** (`state_builder` + `model`, `params`, `collocation`; no `state_pred` argument).
 - **`audit()`** does **not** define a single **overall** admissibility for eval logs (**`nan`** / **Unknown**); **`per_category`** and **`per_key`** still include **`data/`** when present.
 
-**`visualize(..., mode="eval")`** shows **three** KPI cards (Governing, Constitutive, Scaling) when those category scores exist—**no** Data KPI (data category remains in the breakdown / per-key). The figure title still includes the **overall admissibility (final)** line (e.g. **N/A** when the log’s rolled-up overall is undefined for eval). **`dashboard_mode="dash-tabs"`** uses a text placeholder on the KPI tab instead of an overall gauge. **`mode="test"`** is still accepted and behaves the same (no deprecation warning).
+**`visualize(..., mode="eval")`** shows **three** KPI cards (Governing, Constitutive, Scaling) when those category scores exist—**no** Data KPI (data category remains in the breakdown / per-key). When the log entry has **`run_mode="eval"`**, the title subtitle explains that roll-up overall is **not defined** (instead of an **N/A** “final overall” line). **`dashboard_mode="dash-tabs"`** KPI tab shows the same **category indicators** plus a short **`run_mode`** note (not an empty placeholder). **`mode="test"`** is still accepted and behaves the same (no deprecation warning).
 
 ## Law → π-constant defaults (opt-in)
 

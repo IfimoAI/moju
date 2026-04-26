@@ -705,6 +705,59 @@ class TestVisualize:
         assert "laws/x" in ct["laws"]["keys"]
         assert "constitutive/a/b" in ct["constitutive"]["keys"]
         assert "scaling" not in ct
+        wk = b.get("worst_keys_rows") or []
+        assert len(wk) >= 1
+        assert wk[0]["key"] in ("laws/x", "constitutive/a/b", "scaling/y/z")
+
+    def test_visualize_eval_title_when_overall_undefined(self):
+        pytest.importorskip("plotly")
+        log = [
+            {
+                "index": 0,
+                "run_mode": "eval",
+                "rms": {"laws/a": 1.0, "constitutive/b": 0.5},
+                "scale": {"laws/a": 1.0, "constitutive/b": 1.0},
+            },
+        ]
+        fig = visualize(log, backend="plotly", mode="eval")
+        lt = str(fig.layout.title.text or "")
+        assert "Overall admissibility (final)" not in lt
+        assert "not defined" in lt.lower() or "eval" in lt.lower()
+
+    def test_visualize_split_layout_returns_monitor_and_worst_keys(self):
+        pytest.importorskip("plotly")
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/b": 0.5}, "scale": {"laws/a": 2.0, "constitutive/b": 2.0}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/b": 0.25}, "scale": {"laws/a": 2.0, "constitutive/b": 2.0}},
+        ]
+        out = visualize(log, backend="plotly", mode="training", visualize_layout="split")
+        assert isinstance(out, dict)
+        assert "monitor" in out and "worst_keys" in out
+        wk = out["worst_keys"]
+        assert any(getattr(tr, "type", None) == "table" for tr in getattr(wk, "data", []))
+
+    def test_visualize_spatial_heatmap_default_colorscale_viridis(self):
+        pytest.importorskip("plotly")
+        import numpy as np
+
+        from moju.monitor.visualize_plotly import DEFAULT_SPATIAL_HEATMAP_COLORSCALE
+
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0}, "scale": {"laws/a": 1.0}},
+            {"index": 1, "rms": {"laws/a": 0.5}, "scale": {"laws/a": 1.0}},
+        ]
+        x = np.linspace(0, 1, 5)
+        fig = visualize(
+            log,
+            mode="training",
+            spatial_law_panel={"x": x, "values": {"a": np.ones(5) * 0.2}},
+        )
+        hm = [t for t in fig.data if getattr(t, "type", None) == "heatmap"]
+        assert hm
+        cs = getattr(hm[0], "colorscale", None)
+        assert cs == DEFAULT_SPATIAL_HEATMAP_COLORSCALE or (
+            isinstance(cs, (list, tuple)) and len(cs) > 0 and str(cs[0][1]).lower().startswith("#440154")
+        )
 
     def test_visualize_invalid_mode_raises(self):
         with pytest.raises(ValueError, match="mode"):
@@ -1112,9 +1165,9 @@ class TestVisualize:
         out_ev = visualize(log_ev, backend="plotly", mode="eval", dashboard_mode="dash-tabs")
         kpi_ev = (out_ev.get("tabs") or {}).get("kpi")
         assert kpi_ev is not None
-        assert not any(getattr(tr, "type", None) == "indicator" for tr in getattr(kpi_ev, "data", []))
+        assert any(getattr(tr, "type", None) == "indicator" for tr in getattr(kpi_ev, "data", []))
         anns_ev = list(getattr(kpi_ev.layout, "annotations", []) or [])
-        assert any("eval mode" in str(getattr(a, "text", "")).lower() for a in anns_ev)
+        assert any("run_mode" in str(getattr(a, "text", "")).lower() for a in anns_ev)
 
     def test_visualize_enterprise_threshold_line_and_scale_hover(self):
         pytest.importorskip("plotly")
@@ -1436,7 +1489,10 @@ class TestVisualize:
         assert getattr(fig.layout, "paper_bgcolor", None) == "#ffffff"
         assert getattr(fig.layout, "plot_bgcolor", None) == "#ffffff"
         anns = list(getattr(fig.layout, "annotations", []) or [])
-        assert any("Ifimo Lab: Moju Forensic Suite" in str(getattr(a, "text", "")) for a in anns)
+        assert not any("Ifimo Lab: Moju Forensic Suite" in str(getattr(a, "text", "")) for a in anns)
+        fig_b = visualize(log, backend="plotly", mode="eval", show_branding=True)
+        anns_b = list(getattr(fig_b.layout, "annotations", []) or [])
+        assert any("Ifimo Lab: Moju Forensic Suite" in str(getattr(a, "text", "")) for a in anns_b)
         shapes = list(getattr(fig.layout, "shapes", []) or [])
         assert any(getattr(s, "type", None) == "line" and abs(float(getattr(s, "x0", -1)) - 0.95) < 1e-9 for s in shapes)
         hovers = [str(getattr(tr, "hovertemplate", "")) for tr in fig.data]

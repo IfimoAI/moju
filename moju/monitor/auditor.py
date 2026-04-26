@@ -776,6 +776,67 @@ def _parse_spatial_rnorm_panel(spatial_rnorm_panel: Optional[Any]) -> Optional[D
     return _parse_spatial_values_panel(spatial_rnorm_panel, law_style=False)
 
 
+def _worst_keys_table_rows(
+    log: List[Dict[str, Any]],
+    plot_keys: List[str],
+    metrics: List[Dict[str, Any]],
+    *,
+    top_n: int = 12,
+) -> List[Dict[str, Any]]:
+    """Final-step per-key rows sorted by R_norm descending (for troubleshooting table)."""
+    if not log or not metrics:
+        return []
+    from moju.monitor.visualize_labels import pretty_residual_key
+
+    last_entry = log[-1]
+    scale_map = last_entry.get("scale") or {}
+    per = metrics[-1].get("per_key_report") or {}
+    rows: List[Dict[str, Any]] = []
+    for k in plot_keys:
+        rep = per.get(k)
+        if not isinstance(rep, Mapping):
+            continue
+        try:
+            rn_f = float(rep.get("r_norm"))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(rn_f):
+            continue
+        try:
+            r_eff = float(rep.get("rms"))
+        except (TypeError, ValueError):
+            r_eff = float("nan")
+        sk_raw = scale_map.get(k)
+        try:
+            sk_f = float(sk_raw) if sk_raw is not None else float("nan")
+        except (TypeError, ValueError):
+            sk_f = float("nan")
+        if not math.isfinite(sk_f) or sk_f <= 0:
+            if math.isfinite(r_eff) and rn_f != 0.0:
+                sk_f = abs(r_eff / rn_f)
+            else:
+                sk_f = float("nan")
+        try:
+            adm_f = float(rep.get("admissibility_score"))
+        except (TypeError, ValueError):
+            adm_f = float("nan")
+        prefix = k.split("/", 1)[0] if "/" in str(k) else "other"
+        rows.append(
+            {
+                "key": k,
+                "display": pretty_residual_key(str(k)),
+                "r_eff": r_eff,
+                "scale_k": sk_f,
+                "r_norm": rn_f,
+                "admissibility": adm_f,
+                "category": prefix,
+            }
+        )
+    rows.sort(key=lambda r: r["r_norm"], reverse=True)
+    cap = max(1, int(top_n))
+    return rows[:cap]
+
+
 def _build_visualize_bundle(
     log: List[Dict[str, Any]],
     keys: Optional[List[str]],
@@ -786,6 +847,7 @@ def _build_visualize_bundle(
     spatial_rnorm_parsed: Optional[Dict[str, Any]] = None,
     mode: str,
     spatial_normalize: bool = False,
+    worst_keys_top_n: int = 12,
 ) -> Optional[Dict[str, Any]]:
     """
     Shared arrays and metadata for :func:`visualize` (Plotly).
@@ -886,6 +948,10 @@ def _build_visualize_bundle(
         "nr_title": nr_title,
         "np": np,
         "spatial_normalize": bool(spatial_normalize),
+        "worst_keys_rows": _worst_keys_table_rows(
+            log, plot_keys, metrics, top_n=worst_keys_top_n
+        ),
+        "monitor_run_mode": log[-1].get("run_mode"),
     }
 
 
@@ -952,6 +1018,7 @@ def build_monitor_visualize_bundle(
     spatial_prefer_last_t: bool = True,
     spatial_normalize: bool = False,
     engine: Optional[Any] = None,
+    worst_keys_top_n: int = 12,
 ) -> Optional[Dict[str, Any]]:
     """
     Build the internal visualization bundle (same as :func:`visualize` uses for Plotly).
@@ -995,6 +1062,7 @@ def build_monitor_visualize_bundle(
         spatial_rnorm_parsed=spatial_rnorm_parsed,
         mode=mode,
         spatial_normalize=spatial_normalize,
+        worst_keys_top_n=worst_keys_top_n,
     )
 
 
@@ -1022,6 +1090,10 @@ def visualize(
     theme: str = "light",
     baseline_score: Optional[float] = None,
     export_buttons: bool = True,
+    show_branding: bool = False,
+    visualize_layout: str = "single",
+    worst_keys_top_n: int = 12,
+    density: str = "comfortable",
 ) -> Any:
     """
     Monitor dashboard from ``ResidualEngine`` log entries (``rms``, ``scale``).
@@ -1047,11 +1119,12 @@ def visualize(
     - ``training`` (single log entry) — horizontal bars for normalized residuals, category
       admissibility bars, spatial row (|residual| vs position by default).
     - ``eval`` — Uses the **last** log entry for scalar metrics; **no vs-step admissibility
-      panel** (category breakdown is **full width** on its row). **Second row:** up to **four**
-      KPI indicators (Governing, Constitutive, Scaling, Data) when category scores exist.
-      **Spatial row** shows |residual| vs position by default (same log/linear display scale as
-      training for heatmaps), plus horizontal bar chart of normalized residuals and category
-      admissibility. The legacy value ``mode="test"`` is accepted and treated like ``eval``.
+      panel** (category breakdown is **full width** on its row). **Second row:** **three**
+      KPI indicators (Governing, Constitutive, Scaling; **no** Data KPI card—``data/`` remains
+      in breakdown and per-key views). **Spatial row** shows |residual| vs position by default
+      (same log/linear display scale as training for heatmaps), plus horizontal bar chart of
+      normalized residuals and category admissibility. The legacy value ``mode="test"`` is
+      accepted and treated like ``eval``.
 
     **Spatial panel**
 
@@ -1132,8 +1205,19 @@ def visualize(
         panels; ``linear`` plots raw ``R_norm``. Does not affect the overall admissibility
         axis.
     spatial_heatmap_colorscale
-        Plotly colorscale name for optional spatial heatmaps (e.g. ``\"Jet\"``, ``\"Viridis\"``).
-        Default ``None`` uses ``Jet`` in the Plotly backend.
+        Plotly colorscale name for optional spatial heatmaps (e.g. ``\"Viridis\"``, ``\"Cividis\"``).
+        Default ``None`` uses ``Viridis`` in the Plotly backend.
+    show_branding
+        If True, show the Moju forensic-suite watermark on the main dashboard. Default False.
+    visualize_layout
+        ``\"single\"`` (default) returns one Plotly figure (or dash-tabs payload). ``\"split\"``
+        also includes a separate ``worst_keys`` table figure: for ``single-figure`` the return value
+        is ``{\"monitor\": fig, \"worst_keys\": table_fig}``; for ``dash-tabs`` the payload dict
+        gains a ``\"worst_keys\"`` entry.
+    worst_keys_top_n
+        Number of rows in the worst-keys table (final step, sorted by ``R_norm``).
+    density
+        ``\"comfortable\"`` (default) or ``\"compact\"`` — slightly tighter typography on the main figure.
     theme
         Must be ``\"light\"`` (default). Plotly monitor figures use a single light enterprise style;
         ``\"dark\"`` is not supported.
@@ -1154,6 +1238,10 @@ def visualize(
         raise ValueError("r_norm_scale must be 'log' or 'linear'")
     if dashboard_mode not in ("single-figure", "dash-tabs"):
         raise ValueError("dashboard_mode must be 'single-figure' or 'dash-tabs'")
+    if visualize_layout not in ("single", "split"):
+        raise ValueError("visualize_layout must be 'single' or 'split'")
+    if density not in ("comfortable", "compact"):
+        raise ValueError("density must be 'comfortable' or 'compact'")
     if theme != "light":
         raise ValueError("visualize Plotly styling supports theme='light' only; dark mode is no longer supported.")
 
@@ -1188,6 +1276,7 @@ def visualize(
         spatial_rnorm_parsed=spatial_rnorm_parsed,
         mode=mode,
         spatial_normalize=spatial_normalize,
+        worst_keys_top_n=worst_keys_top_n,
     )
     if bundle is None:
         return None
@@ -1195,9 +1284,12 @@ def visualize(
     resolved_title = _resolve_visualize_figure_title(mode, figure_title)
 
     try:
-        from moju.monitor.visualize_plotly import build_plotly_monitor_figure
+        from moju.monitor.visualize_plotly import (
+            build_plotly_monitor_figure,
+            build_worst_keys_table_figure,
+        )
 
-        return build_plotly_monitor_figure(
+        out = build_plotly_monitor_figure(
             bundle,
             figure_title=resolved_title,
             step_label=step_label,
@@ -1207,7 +1299,17 @@ def visualize(
             theme=theme,
             baseline_score=baseline_score,
             export_buttons=export_buttons,
+            show_branding=show_branding,
+            density=density,
         )
+        if visualize_layout == "split":
+            wk = build_worst_keys_table_figure(bundle)
+            if isinstance(out, dict):
+                out = dict(out)
+                out["worst_keys"] = wk
+                return out
+            return {"monitor": out, "worst_keys": wk}
+        return out
     except ImportError:
         return None
 
