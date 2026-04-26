@@ -998,13 +998,12 @@ def _build_eval_kpi_figure(bundle: Dict[str, Any]) -> Any:
 
     laws_last = float(last_cat.get("laws", float("nan")))
     const_last = float(last_cat.get("constitutive", float("nan")))
-    sc_last = float(last_cat.get("scaling", float("nan")))
 
     fig = make_subplots(
         rows=1,
-        cols=3,
-        specs=[[{"type": "domain"}, {"type": "domain"}, {"type": "domain"}]],
-        horizontal_spacing=0.04,
+        cols=2,
+        specs=[[{"type": "domain"}, {"type": "domain"}]],
+        horizontal_spacing=0.06,
     )
     fig.add_trace(
         _go_category_kpi_indicator(
@@ -1027,17 +1026,6 @@ def _build_eval_kpi_figure(bundle: Dict[str, Any]) -> Any:
         ),
         row=1,
         col=2,
-    )
-    fig.add_trace(
-        _go_category_kpi_indicator(
-            sc_last if math.isfinite(sc_last) else 0.0,
-            "Scaling Score",
-            ref_for("scaling"),
-            font_color=font_color,
-            warn_color=warn_color,
-        ),
-        row=1,
-        col=3,
     )
     overall = float(metrics[-1].get("overall_admissibility_score", float("nan")))
     overall_pct = format_admissibility_pct(overall) if math.isfinite(overall) else "N/A"
@@ -1161,15 +1149,15 @@ def _build_plotly_monitor_figure_single(
         None,
         None,
     ]
-    # Eval: three KPIs (Governing, Constitutive, Scaling); same 8-slot colspan pattern as training row.
+    # Eval: two KPIs (Governing, Constitutive), same 8-slot pattern as training.
     kpi_row_eval = [
         None,
         None,
         {"type": "domain", "colspan": 2},
         None,
-        {"type": "domain", "colspan": 2},
         None,
         {"type": "domain", "colspan": 2},
+        None,
         None,
     ]
     specs: List[List[Any]] = [
@@ -1256,55 +1244,23 @@ def _build_plotly_monitor_figure_single(
     laws_ref = float(first_cat.get("laws", float("nan"))) if "laws" in first_cat else None
     const_last = float(last_cat.get("constitutive", float("nan")))
     const_ref = float(first_cat.get("constitutive", float("nan"))) if "constitutive" in first_cat else None
-    scaling_cat_last = float(last_cat.get("scaling", float("nan")))
-    scaling_cat_ref = (
-        float(first_cat.get("scaling", float("nan"))) if "scaling" in first_cat else None
+    # Governing + Constitutive (cols 3–4 and 6–7).
+    fig.add_trace(
+        _kpi_indicator(
+            laws_last if math.isfinite(laws_last) else 0.0, "Governing Score", laws_ref
+        ),
+        row=2,
+        col=3,
     )
-    if not is_eval:
-        # Training: Governing + Constitutive only (cols 3–4 and 6–7).
-        fig.add_trace(
-            _kpi_indicator(
-                laws_last if math.isfinite(laws_last) else 0.0, "Governing Score", laws_ref
-            ),
-            row=2,
-            col=3,
-        )
-        fig.add_trace(
-            _kpi_indicator(
-                const_last if math.isfinite(const_last) else 0.0,
-                "Constitutive Score",
-                const_ref,
-            ),
-            row=2,
-            col=6,
-        )
-    else:
-        # Eval: Governing, Constitutive, Scaling (no Data KPI; data/ still in category bars / per_key).
-        fig.add_trace(
-            _kpi_indicator(
-                laws_last if math.isfinite(laws_last) else 0.0, "Governing Score", laws_ref
-            ),
-            row=2,
-            col=3,
-        )
-        fig.add_trace(
-            _kpi_indicator(
-                const_last if math.isfinite(const_last) else 0.0,
-                "Constitutive Score",
-                const_ref,
-            ),
-            row=2,
-            col=5,
-        )
-        fig.add_trace(
-            _kpi_indicator(
-                scaling_cat_last if math.isfinite(scaling_cat_last) else 0.0,
-                "Scaling Score",
-                scaling_cat_ref,
-            ),
-            row=2,
-            col=7,
-        )
+    fig.add_trace(
+        _kpi_indicator(
+            const_last if math.isfinite(const_last) else 0.0,
+            "Constitutive Score",
+            const_ref,
+        ),
+        row=2,
+        col=6,
+    )
 
     trend_y_min: Optional[float] = None
     trend_y_top: Optional[float] = None

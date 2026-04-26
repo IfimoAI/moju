@@ -91,20 +91,18 @@ Pe = Groups.pe(re=Re, pr=Pr)
 
 cfg = MonitorConfig(
     laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
+    groups=[
+        {
+            "name": "pe",
+            "output_key": "Pe",
+            "state_map": {"re": "Re", "pr": "Pr"},
+        }
+    ],
     constitutive_audit=[
         AuditSpec(
             name="sutherland_mu",
             output_key="mu",
             state_map={"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
-            predicted_spatial=["T"],
-        )
-    ],
-    scaling_audit=[
-        AuditSpec(
-            name="pe",
-            output_key="Pe",
-            state_map={"re": "Re", "pr": "Pr"},
-            predicted_spatial=["Re"],
         )
     ],
 )
@@ -118,13 +116,9 @@ state_pred = {
     "T0": T0,
     "S": S,
     "mu": mu,
-    "d_T_dx": jnp.array(0.0),
-    "d_mu_dx": jnp.array(0.0),
     "Re": Re,
     "Pr": Pr,
     "Pe": Pe,
-    "d_Re_dx": jnp.array(0.0),
-    "d_Pe_dx": jnp.array(0.0),
 }
 
 residuals = engine.compute_residuals(state_pred)
@@ -141,7 +135,7 @@ print("Categories:", report["per_category"])
 Physics Admissibility Report
 Overall score:   report["overall_admissibility_score"]
 Overall level:  report["overall_admissibility_level"]
-Category scores: report["per_category"]["laws"|"constitutive"|"scaling"]
+Category scores: report["per_category"]["laws"|"constitutive"|"data"|…]
 Per-key metrics: report["per_key"]
     </pre>
 
@@ -154,7 +148,7 @@ Per-key metrics: report["per_key"]
       <li><strong>Models</strong> → Constitutive relationships</li>
       <li><strong>Groups</strong> → Dimensionless quantities (π-groups)</li>
       <li><strong>Laws</strong> → Governing equations</li>
-      <li><strong>ResidualEngine</strong> → Builds residuals and audit logs (constitutive/scaling: <code>ref_delta</code>, constitutive <code>implied_delta</code>, scaling <code>pi_constant</code> on Path A; optional Path B FD for registered law inputs; see <a href="doc/overview.html">Overview</a>)</li>
+      <li><strong>ResidualEngine</strong> → Builds residuals and audit logs (laws, <strong>groups</strong>, constitutive <code>ref_delta</code> / <code>implied_delta</code>, <code>data/</code> when <code>state_ref</code> is set in eval; optional Path B FD for registered law inputs; see <a href="doc/overview.html">Overview</a>)</li>
       <li><strong>Law-linked implied audits</strong> (default) → Auto <code>implied_delta</code> rows from selected laws (e.g. Fourier → <code>thermal_diffusivity</code> vs α from fields); <a href="law_implied_audits.md">law_implied_audits.md</a></li>
       <li><strong>build_loss</strong> → Physics loss from law residuals</li>
       <li><strong>audit</strong> → Physics admissibility scoring</li>

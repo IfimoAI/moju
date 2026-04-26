@@ -7,14 +7,11 @@ from typing import Any, Callable, Dict, List, Optional
 @dataclass(frozen=True)
 class AuditSpec:
     """
-    Typed config for a Model/Group audit.
+    Typed config for a Model audit (constitutive closure).
 
-    - name: Models.<name> or Groups.<name>
-    - output_key: state key for F output (used by ref_delta and implied_delta evaluation)
+    - name: Models.<name>
+    - output_key: state key for F output (used for ref_delta and implied_delta evaluation)
     - state_map: function arg name -> state key
-    - invariance_pi_constant (scaling only, Path A): second forward with constants scaled so
-      the audited Group stays fixed; residual on invariance_compare_keys; flat key
-      scaling/<name>/pi_constant. Requires built-in recipe and keys in engine.constants.
     - implied_value_key (optional): state/constants key holding implied constitutive value;
       residual constitutive/<name>/implied_delta is always a **nondimensional** discrepancy vs
       ``F(pred args)`` (see ``moju.monitor.closure_registry``). Mutually exclusive with
@@ -37,11 +34,6 @@ class AuditSpec:
     # Optional reference tensor key for implied/ref ND discrepancy denominator (|ref|); else symmetric scale.
     implied_delta_ref_key: Optional[str] = None
     ref_delta_ref_key: Optional[str] = None
-    # π-constant closure (Path A only): perturb constants along a built-in recipe so the
-    # audited Group stays fixed; compare merged state keys between baseline and scaled runs.
-    invariance_pi_constant: bool = False
-    invariance_compare_keys: List[str] = field(default_factory=list)
-    invariance_scale_c: float = 10.0
 
     def to_dict(self) -> Dict[str, Any]:
         # implied_fn omitted (not JSON-serializable); use audit_spec_to_engine_dict for engine.
@@ -49,9 +41,6 @@ class AuditSpec:
             "name": self.name,
             "output_key": self.output_key,
             "state_map": dict(self.state_map),
-            "invariance_pi_constant": self.invariance_pi_constant,
-            "invariance_compare_keys": list(self.invariance_compare_keys),
-            "invariance_scale_c": self.invariance_scale_c,
             "implied_value_key": self.implied_value_key,
             "residual_basename": self.residual_basename,
             "include_ref_delta": self.include_ref_delta,
@@ -68,21 +57,30 @@ class AuditSpec:
             "closure_mode",
             "quadrature_weights",
             "chain_spatial_axes",
+            "invariance_pi_constant",
+            "invariance_compare_keys",
+            "invariance_scale_c",
         }
         legacy = sorted(k for k in removed_keys if k in (d or {}))
         if legacy:
             raise ValueError(
-                "AuditSpec no longer supports chain-closure configuration. "
-                f"Remove legacy keys {legacy} from your config/spec. "
-                "Moju clean-out removed chain_dx/dy/dz/dt and all related fields."
+                "AuditSpec no longer supports removed keys "
+                f"{legacy}. Scaling audit and π-constant fields were removed from Moju; "
+                "use constitutive_audit only."
+            )
+        legacy2 = sorted(
+            k
+            for k in ("scaling_custom",)
+            if k in (d or {})
+        )
+        if legacy2:
+            raise ValueError(
+                f"AuditSpec: remove unsupported keys {legacy2}."
             )
         return AuditSpec(
             name=d["name"],
             output_key=d["output_key"],
             state_map=dict(d.get("state_map") or {}),
-            invariance_pi_constant=bool(d.get("invariance_pi_constant", False)),
-            invariance_compare_keys=list(d.get("invariance_compare_keys") or []),
-            invariance_scale_c=float(d.get("invariance_scale_c", 10.0)),
             implied_value_key=(d.get("implied_value_key") or None),
             implied_fn=d.get("implied_fn"),
             residual_basename=(d.get("residual_basename") or None),
@@ -97,7 +95,6 @@ def audit_spec_to_engine_dict(spec: AuditSpec) -> Dict[str, Any]:
     d = spec.to_dict()
     if spec.implied_fn is not None:
         d["implied_fn"] = spec.implied_fn
-    # to_dict already includes residual_basename (may be None) and include_ref_delta
     return d
 
 
@@ -110,7 +107,6 @@ class MonitorConfig:
     # for each selected law (e.g. Fourier -> thermal_diffusivity vs α implied from T_t, T_laplacian).
     law_implied_audits: bool = True
     constitutive_audit: List[AuditSpec] = field(default_factory=list)
-    scaling_audit: List[AuditSpec] = field(default_factory=list)
     constitutive_custom: List[Dict[str, Any]] = field(default_factory=list)
     # Ordered steps: each {"output_key": str, "expr": dict} evaluated before groups / FD / laws.
     derived_state_chain: List[Dict[str, Any]] = field(default_factory=list)
@@ -123,14 +119,6 @@ class MonitorConfig:
     # Optional Path A state builder (callable is not JSON-serializable; excluded from to_dict)
     state_builder: Optional[Callable[..., Dict[str, Any]]] = None
 
-    # Opt-in: when building an eval engine via ``build_residual_engine_for_pi_constant_eval``,
-    # append π-constant scaling_audit rows from :mod:`moju.monitor.law_group_defaults`.
-    pi_constant_law_defaults_enabled: bool = False
-    pi_constant_default_c: float = 10.0
-    pi_constant_law_group_overrides: Dict[str, List[str]] = field(default_factory=dict)
-    pi_constant_extra_groups: List[str] = field(default_factory=list)
-    pi_constant_default_compare_keys: List[str] = field(default_factory=list)
-
     def to_dict(self) -> Dict[str, Any]:
         return {
             "constants": dict(self.constants),
@@ -138,47 +126,48 @@ class MonitorConfig:
             "groups": list(self.groups),
             "law_implied_audits": bool(self.law_implied_audits),
             "constitutive_audit": [s.to_dict() for s in self.constitutive_audit],
-            "scaling_audit": [s.to_dict() for s in self.scaling_audit],
             "constitutive_custom": list(self.constitutive_custom),
             "derived_state_chain": list(self.derived_state_chain),
             "primary_fields": list(self.primary_fields),
-            "pi_constant_law_defaults_enabled": bool(self.pi_constant_law_defaults_enabled),
-            "pi_constant_default_c": float(self.pi_constant_default_c),
-            "pi_constant_law_group_overrides": {
-                k: list(v) for k, v in self.pi_constant_law_group_overrides.items()
-            },
-            "pi_constant_extra_groups": list(self.pi_constant_extra_groups),
-            "pi_constant_default_compare_keys": list(self.pi_constant_default_compare_keys),
         }
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "MonitorConfig":
+        """Parse and validate; raises if removed scaling_audit / pi_constant keys are present."""
         legacy_sc = d.get("scaling_custom") or []
         if legacy_sc:
             raise ValueError(
-                "MonitorConfig no longer supports scaling_custom; remove it from JSON "
-                "and use scaling_audit (Groups.*) with ref_delta and optional π-constant only."
+                "MonitorConfig no longer supports scaling_custom; remove it from JSON."
             )
-        ov = d.get("pi_constant_law_group_overrides") or {}
-        if not isinstance(ov, dict):
-            raise ValueError("pi_constant_law_group_overrides must be a dict[str, list[str]]")
-        overrides: Dict[str, List[str]] = {
-            str(k): list(v) if isinstance(v, (list, tuple)) else [str(v)] for k, v in ov.items()
-        }
+        if "scaling_audit" in d:
+            raise ValueError(
+                "MonitorConfig no longer supports scaling_audit (Groups.* closure audits and "
+                "π-constant were removed). Remove scaling_audit from your config; run similarity "
+                "sweeps outside ResidualEngine if needed."
+            )
+        pi_keys = [
+            k
+            for k in (
+                "pi_constant_law_defaults_enabled",
+                "pi_constant_default_c",
+                "pi_constant_law_group_overrides",
+                "pi_constant_extra_groups",
+                "pi_constant_default_compare_keys",
+            )
+            if k in d
+        ]
+        if pi_keys:
+            raise ValueError(
+                "MonitorConfig no longer supports π-constant law defaults "
+                f"({pi_keys}). Remove these keys from your config."
+            )
         return MonitorConfig(
             constants=dict(d.get("constants") or {}),
             laws=list(d.get("laws") or []),
             groups=list(d.get("groups") or []),
             law_implied_audits=bool(d.get("law_implied_audits", True)),
             constitutive_audit=[AuditSpec.from_dict(x) for x in (d.get("constitutive_audit") or [])],
-            scaling_audit=[AuditSpec.from_dict(x) for x in (d.get("scaling_audit") or [])],
             constitutive_custom=list(d.get("constitutive_custom") or []),
             derived_state_chain=list(d.get("derived_state_chain") or []),
             primary_fields=list(d.get("primary_fields") or ["T", "u", "v", "w", "p", "rho"]),
-            pi_constant_law_defaults_enabled=bool(d.get("pi_constant_law_defaults_enabled", False)),
-            pi_constant_default_c=float(d.get("pi_constant_default_c", 10.0)),
-            pi_constant_law_group_overrides=overrides,
-            pi_constant_extra_groups=list(d.get("pi_constant_extra_groups") or []),
-            pi_constant_default_compare_keys=list(d.get("pi_constant_default_compare_keys") or []),
         )
-

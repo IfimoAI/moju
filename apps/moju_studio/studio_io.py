@@ -240,8 +240,18 @@ def parse_monitor_config_json(raw: str) -> Dict[str, Any]:
     d = json.loads(raw or "{}")
     if not isinstance(d, dict):
         raise ValueError("MonitorConfig JSON must be an object")
+    d = dict(d)
+    # Removed from Moju: strip legacy keys so pasted JSON does not fail from_dict.
+    d.pop("scaling_audit", None)
+    for _pk in (
+        "pi_constant_law_defaults_enabled",
+        "pi_constant_default_c",
+        "pi_constant_law_group_overrides",
+        "pi_constant_extra_groups",
+        "pi_constant_default_compare_keys",
+    ):
+        d.pop(_pk, None)
     if "constants" in d and isinstance(d["constants"], dict):
-        d = dict(d)
         d["constants"] = {k: _coerce_constant_leaf(v) for k, v in d["constants"].items()}
     return d
 

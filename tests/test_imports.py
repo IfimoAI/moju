@@ -39,7 +39,6 @@ def test_import_monitor_all():
         visualize,
         list_constitutive_models,
         list_scaling_closure_ids,
-        list_pi_constant_group_names,
     )
     assert callable(build_monitor_visualize_bundle)
     assert callable(build_spatial_rnorm_panels_from_residuals)
@@ -63,11 +62,6 @@ def test_monitor_module_has_all():
         "apply_closure_discrepancy_normalize",
         "list_constitutive_models",
         "list_scaling_closure_ids",
-        "list_pi_constant_group_names",
-        "LAW_PRIMARY_PI_GROUPS",
-        "resolve_pi_groups_for_laws",
-        "merge_scaling_audit_with_pi_law_defaults",
-        "build_residual_engine_for_pi_constant_eval",
         "AuditSpec",
         "MonitorConfig",
         "audit_spec_to_engine_dict",

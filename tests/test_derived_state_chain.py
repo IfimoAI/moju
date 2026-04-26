@@ -116,7 +116,6 @@ def test_residual_engine_required_state_keys_respects_chain():
         laws=[],
         groups=[],
         constitutive_audit=[],
-        scaling_audit=[],
         derived_state_chain=chain,
     )
     keys = engine.required_state_keys()

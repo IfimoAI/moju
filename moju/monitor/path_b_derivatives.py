@@ -492,7 +492,6 @@ def fill_path_b_derivatives(
     state_pred: Dict[str, Any],
     *,
     constitutive_audit: Sequence[Dict[str, Any]] = (),
-    scaling_audit: Sequence[Dict[str, Any]] = (),
     laws_spec: Sequence[Dict[str, Any]] = (),
     constants: Optional[Dict[str, Any]] = None,
     grid: Optional[PathBGridConfig] = None,
@@ -504,8 +503,7 @@ def fill_path_b_derivatives(
     ``Laws.*`` inputs (gradients, Laplacians, time derivatives) from primitive fields on the
     same grid; see ``moju.monitor.law_fd_recipes``.
 
-    ``constitutive_audit`` / ``scaling_audit`` are accepted for API compatibility but are not
-    used for finite-difference fill.
+    ``constitutive_audit`` is accepted for API compatibility but is not used for finite-difference fill.
 
     Returns ``(new_state, warnings)``.
     """

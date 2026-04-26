@@ -306,7 +306,6 @@ DEFAULT_CONFIG_FRAGMENT = """{
   "groups": [],
   "law_implied_audits": true,
   "constitutive_audit": [],
-  "scaling_audit": [],
   "derived_state_chain": []
 }
 """
@@ -323,25 +322,12 @@ DEMO_LAPLACE = """{
   "groups": [],
   "law_implied_audits": true,
   "constitutive_audit": [],
-  "scaling_audit": [],
   "derived_state_chain": []
 }
 """
 
 DEMO_CONSTANTS = """{}
 """
-
-
-def _apply_pi_c_to_scaling_audit_dict(d: Dict[str, Any], c: float) -> Dict[str, Any]:
-    out = {**d}
-    audits = []
-    for spec in d.get("scaling_audit") or []:
-        spec = dict(spec)
-        if spec.get("invariance_pi_constant"):
-            spec["invariance_scale_c"] = float(c)
-        audits.append(spec)
-    out["scaling_audit"] = audits
-    return out
 
 
 def _parse_float_dict(raw: str, label: str) -> Dict[str, float]:
@@ -751,11 +737,11 @@ with tab_cfg:
             help="Each model becomes one constitutive_audit row with automatic chain keys from your NPZ.",
         )
         st.multiselect(
-            "Groups → dimensionless groups + scaling audits",
+            "Groups → dimensionless groups (for laws)",
             options=list(STUDIO_GROUP_NAMES_EFFECTIVE),
             default=[],
             key="st_auto_groups",
-            help="Each group builds a `groups` entry and a matching `scaling_audit` entry.",
+            help="Each group builds a `groups` entry so Moju can compute e.g. `fo`, `re` before laws.",
         )
         st.text_area(
             "Optional JSON override (merge into auto fragment: laws, groups, audits, primary_fields, derived_state_chain)",
@@ -905,7 +891,6 @@ with tab_run:
                 st.stop()
 
             expert_cfg = bool(st.session_state.get("cfg_expert_mode", False))
-            pi_c_run = float(st.session_state.get("sf_pi_c_global", 10.0))
             append_log = bool(st.session_state.get("sb_append_log", False))
 
             try:
@@ -937,7 +922,6 @@ with tab_run:
                     frag_d = merge_monitor_config_fragment(
                         frag_d, {"constants": st.session_state.get("constants_dict") or {}}
                     )
-                    frag_d = _apply_pi_c_to_scaling_audit_dict(frag_d, pi_c_run)
                     frag_d = enrich_fragment_from_model_audits(frag_d)
                     sb = None
                     if not path_b:
@@ -950,7 +934,7 @@ with tab_run:
                     try:
                         validate_studio_pi_gating(
                             use_path_b=path_b,
-                            scaling_audit_specs=list(frag_d.get("scaling_audit") or []),
+                            scaling_audit_specs=[],
                             state_builder=sb,
                         )
                     except ValueError as e:
@@ -1279,14 +1263,6 @@ with tab_dash:
             max_value=64,
             value=16,
             key="dashboard_max_leg",
-        )
-        st.slider(
-            "invariance_scale_c (scaling audits with π enabled in expert JSON)",
-            min_value=1.01,
-            max_value=100.0,
-            value=10.0,
-            step=0.01,
-            key="sf_pi_c_global",
         )
 
     studio_redraw_plotly_fragment()

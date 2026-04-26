@@ -42,6 +42,7 @@ def test_merge_monitor_config_fragment_constants():
 def test_parse_monitor_config_json():
     d = parse_monitor_config_json(json.dumps({"laws": [], "scaling_audit": []}))
     assert d["laws"] == []
+    assert "scaling_audit" not in d
 
 
 def test_load_npy_bytes():
@@ -121,7 +122,6 @@ def test_studio_core_laplace_path_b():
         "laws": [{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
         "groups": [],
         "constitutive_audit": [],
-        "scaling_audit": [],
         "constants": {},
     }
     cfg = monitor_config_from_merged_dict(frag)

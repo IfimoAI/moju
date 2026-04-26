@@ -1,19 +1,19 @@
 """
-ResidualEngine: residuals for governing laws, constitutive, and scaling/similarity audits.
+ResidualEngine: residuals for governing laws, optional groups (dimensionless numbers), constitutive audits, and data comparison in eval.
 
 - compute_residuals(..., state_ref=None, run_mode=\"training\"|\"eval\", ...)
 - build_loss: cascaded **R_eff** over laws only (training); **R_eff** matches logged ``rms`` (see below).
 - audit / visualize: same metrics (**R_eff**, R_norm, admissibility) for all residual keys;
   visualize builds Plotly training/eval dashboards (optional spatial law panel for x slices).
 
-Constitutive and scaling/similarity audits are tied to Models.* and Groups.* functions via
-**ref_delta**, **implied_delta** (constitutive only), and **π-constant** checks (scaling, Path A).
+Constitutive audits are tied to Models.* functions via
+**ref_delta** and **implied_delta**.
 **implied_delta** and **ref_delta** are always **nondimensional** (see
 ``moju.monitor.closure_registry.apply_closure_discrepancy_normalize``). Logged ``rms`` per key is
 **R_eff** uses **RMS_δ(r)** = √(mean(r²)+δ²) with tiny **δ²** = :data:`R_EFF_RMS_JITTER_SQ` (AD-smooth at **r=0**), times **Q^0.5**; **Q** = RMS(m)/mean(m), **m_i** = sqrt(r_i²+ε²); **Q=1** when magnitudes are
 uniform across collocation points (single-point tensors use **Q=1**). **R_norm** = **R_eff**/scale_k.
 For **R_norm**, default **scale_k** is **2×10⁻²** (plus ``_SCALE_EPS``) for **laws/** and for nondimensional closure keys;
-other **constitutive/** / **scaling/** residuals and **data/** use state- or reference-derived scales. Optional ``audit(..., r_ref=...)`` overrides
+other **constitutive/** residuals and **data/** use state- or reference-derived scales. Optional ``audit(..., r_ref=...)`` overrides
 **scale_k** per key. Per-key **admissibility_score** is ``1 / (1 + R_norm)`` when finite.
 :func:`admissibility_level` maps scores in ``[0, 1]`` to four bands (see its docstring). Metrics are
 consistency indicators, not certification.
@@ -31,16 +31,11 @@ import jax.numpy as jnp
 from moju.piratio.groups import Groups
 from moju.piratio.laws import Laws
 from moju.monitor.closure_registry import (
-    GROUP_FNS,
     MODEL_FNS,
     compute_implied_delta,
     compute_ref_delta,
 )
 from moju.monitor.derived_state_chain import all_ref_keys_from_chain, keys_produced_by_chain
-from moju.monitor.pi_constant_recipes import (
-    GROUP_PI_CONSTANT_RECIPES,
-    apply_pi_constant_recipe,
-)
 from moju.monitor.law_implied_diagnostics import (
     merge_fragment_law_implied_audit_specs,
     merge_law_implied_audit_specs,
@@ -307,7 +302,6 @@ def _state_derived_scale_per_key(
     merged: Dict[str, Any],
     _laws_spec: List[Dict[str, Any]],
     constitutive_audit: List[Dict[str, Any]],
-    scaling_audit: List[Dict[str, Any]],
     state_ref_built: Optional[Dict[str, Any]] = None,
     *,
     to_python: bool = True,
@@ -316,7 +310,7 @@ def _state_derived_scale_per_key(
     Per-key scale for ``R_norm = R_eff / scale_k`` (``R_eff`` in ``entry["rms"]``) stored on each log entry (``entry["scale"]``).
 
     Default **scale_k** is **≈ 2×10⁻²** (plus ε) for governing **laws/** and for nondimensional
-    **implied_delta** / **ref_delta** under **constitutive/** and **scaling/**. Other audit keys and
+    **implied_delta** / **ref_delta** under **constitutive/**. Other audit keys and
     **data/** use RMS of relevant state (or reference) fields. Optional ``r_ref`` in
     :func:`audit` overrides per key after logging.
     """
@@ -367,39 +361,8 @@ def _state_derived_scale_per_key(
             out[k] = float(jax.device_get(scale)) if to_python else float(scale)
             continue
         if prefix == "scaling":
-            if _suffix_is_nd_closure(rest):
-                out[k] = _default_unit_scale_k(to_python=to_python)
-                continue
-            name = rest.split("/")[0]
-            spec = next(
-                (
-                    s
-                    for s in scaling_audit
-                    if s.get("name") == name
-                    or (s.get("residual_basename") or "").split("/")[0] == name
-                ),
-                None,
-            )
-            if spec is None:
-                scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
-            else:
-                state_map = spec.get("state_map") or {}
-                output_key = spec.get("output_key")
-                parts = []
-                for sk in state_map.values():
-                    if sk in merged:
-                        parts.append(jnp.ravel(jnp.asarray(merged[sk])))
-                if output_key and output_key in merged:
-                    parts.append(jnp.ravel(jnp.asarray(merged[output_key])))
-                ivk_s = spec.get("implied_value_key")
-                if ivk_s and ivk_s in merged:
-                    parts.append(jnp.ravel(jnp.asarray(merged[ivk_s])))
-                if parts:
-                    big = jnp.concatenate(parts)
-                    scale = _SCALE_EPS + _rms_scalar(big)
-                else:
-                    scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
-            out[k] = float(jax.device_get(scale)) if to_python else float(scale)
+            # Legacy logs only (scaling audit removed from engine). Same default as unknown keys.
+            out[k] = _default_unit_scale_k(to_python=to_python)
             continue
         if prefix == "data":
             state_key = rest
@@ -877,7 +840,7 @@ def _build_visualize_bundle(
 
     buckets = _keys_by_category(plot_keys)
     category_training: Dict[str, Dict[str, Any]] = {}
-    cat_order = ("laws", "constitutive") if mode == "training" else ("laws", "constitutive", "scaling")
+    cat_order = ("laws", "constitutive")
     for cat in cat_order:
         cat_keys = sorted(buckets.get(cat, []))[:cap]
         nk = len(cat_keys)
@@ -1360,17 +1323,16 @@ class ResidualEngine:
         with ``run_mode=\"eval\"`` (default ``run_mode=\"training\"`` ignores ``state_ref`` for
         ref_delta and for the ``data/`` pred−ref block). Unless the spec sets ``include_ref_delta=False``.
       - **implied_delta** runs for **constitutive** specs when ``implied_value_key`` or ``implied_fn``
-        is set; omitted if implied is missing. **Scaling** audits support **ref_delta** and **π-constant**
-        (Path A) only—not **implied_delta**. **π-constant** runs only for ``run_mode=\"eval\"`` and Path A.
+        is set; omitted if implied is missing.
       - **ref_delta** / **implied_delta** residuals are nondimensional (see ``closure_registry``).
       - A spec with no applicable closure does nothing (optional omit log).
       - Law-linked implied rows (see ``moju.monitor.law_implied_diagnostics``) are prepended when
         ``law_implied_audits`` is true (``MonitorConfig`` default). Use optional ``residual_basename``
         for unique flat keys under each category.
 
-    Audit spec shape (constitutive_audit / scaling_audit items):
+    Audit spec shape (constitutive_audit items):
       {
-        "name": "sutherland_mu",               # Models.<name> or Groups.<name>
+        "name": "sutherland_mu",               # Models.<name>
         "output_key": "mu",                    # state key for F output (ref_delta / implied_delta)
         "state_map": {"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},  # fn arg -> state key
       }
@@ -1392,7 +1354,6 @@ class ResidualEngine:
         groups: Optional[List[Dict[str, Any]]] = None,
         *,
         constitutive_audit: Optional[List[Dict[str, Any]]] = None,
-        scaling_audit: Optional[List[Dict[str, Any]]] = None,
         constitutive_custom: Optional[List[Dict[str, Any]]] = None,
         derived_state_chain: Optional[List[Dict[str, Any]]] = None,
         state_builder: Optional[
@@ -1412,7 +1373,6 @@ class ResidualEngine:
                 laws = config.laws
                 groups = config.groups
                 constitutive_audit = [audit_spec_to_engine_dict(s) for s in config.constitutive_audit]
-                scaling_audit = [audit_spec_to_engine_dict(s) for s in config.scaling_audit]
                 constitutive_custom = config.constitutive_custom
                 derived_state_chain = list(config.derived_state_chain or [])
                 primary_fields = list(config.primary_fields)
@@ -1426,12 +1386,9 @@ class ResidualEngine:
         self.laws_spec = list(laws or [])
         self.groups_spec = list(groups or [])
         self.constitutive_audit = list(constitutive_audit or [])
-        self.scaling_audit = list(scaling_audit or [])
-        li_c, li_s = merge_law_implied_audit_specs(self.laws_spec, enabled=law_implied_enabled)
+        li_c, _li_s = merge_law_implied_audit_specs(self.laws_spec, enabled=law_implied_enabled)
         mc, rc = merge_fragment_law_implied_audit_specs(li_c, self.constitutive_audit)
-        ms, rs = merge_fragment_law_implied_audit_specs(li_s, self.scaling_audit)
         self.constitutive_audit = mc + rc
-        self.scaling_audit = ms + rs
         self.constitutive_custom = list(constitutive_custom or [])
         self.derived_state_chain = list(derived_state_chain or [])
         self.state_builder = state_builder
@@ -1462,8 +1419,6 @@ class ResidualEngine:
                         f"{category}:{name} use only one of implied_value_key and implied_fn, not both"
                     )
         _validate_specs(self.constitutive_audit, MODEL_FNS, "constitutive")
-        _validate_specs(self.scaling_audit, GROUP_FNS, "scaling")
-        self._validate_pi_constant_specs()
 
         self._log: List[Dict[str, Any]] = []
         self._index = 0
@@ -1486,43 +1441,6 @@ class ResidualEngine:
         self._log.clear()
         self._index = 0
         self._last_residuals = None
-
-    def _validate_pi_constant_specs(self) -> None:
-        for spec in self.scaling_audit:
-            if not spec.get("invariance_pi_constant"):
-                continue
-            name = spec["name"]
-            if name not in GROUP_PI_CONSTANT_RECIPES:
-                raise ValueError(
-                    f"scaling:{name} invariance_pi_constant requires a built-in π-constant recipe; "
-                    f"supported: {sorted(GROUP_PI_CONSTANT_RECIPES.keys())}"
-                )
-            recipe = GROUP_PI_CONSTANT_RECIPES[name]
-            sm = spec.get("state_map") or {}
-            for arg_name, _ in recipe:
-                if arg_name not in sm:
-                    raise ValueError(
-                        f"scaling:{name} π-constant recipe needs state_map entry for arg {arg_name!r}"
-                    )
-            cmp_keys = list(spec.get("invariance_compare_keys") or [])
-            if not cmp_keys:
-                raise ValueError(
-                    f"scaling:{name} invariance_pi_constant requires non-empty invariance_compare_keys"
-                )
-            c = float(spec.get("invariance_scale_c", 10.0))
-            if c <= 1.0:
-                raise ValueError(f"scaling:{name} invariance_scale_c must be > 1, got {c}")
-            for arg_name, _ in recipe:
-                sk = sm[arg_name]
-                if sk not in self.constants:
-                    raise ValueError(
-                        f"scaling:{name} π-constant requires key {sk!r} in ResidualEngine.constants "
-                        f"(arg {arg_name!r})"
-                    )
-            if self.state_builder is None:
-                raise ValueError(
-                    f"scaling:{name} invariance_pi_constant requires ResidualEngine(state_builder=...) (Path A only)"
-                )
 
     def _state_builder(
         self,
@@ -1552,9 +1470,9 @@ class ResidualEngine:
         Path B: pass state_pred directly.
 
         ``run_mode``:
-          - ``\"training\"`` (default): **ref_delta**, ``data/`` pred−ref, and **π-constant** are
-            skipped even if ``state_ref`` is passed (use for the optimization loop).
-          - ``\"eval\"``: reference and π-constant audits run when configured.
+          - ``\"training\"`` (default): **ref_delta** and ``data/`` pred−ref are skipped even if
+            ``state_ref`` is passed (use for the optimization loop).
+          - ``\"eval\"``: reference **ref_delta** and ``data/`` run when configured.
 
         If ``auto_path_b_derivatives`` is True, uses default ``PathBGridConfig``; if a
         ``PathBGridConfig`` instance, uses that layout. When ``fill_law_fd`` is also True, missing
@@ -1566,15 +1484,6 @@ class ResidualEngine:
         """
         if run_mode not in ("training", "eval"):
             raise ValueError("run_mode must be 'training' or 'eval'")
-        path_a = state_pred is None
-        pi_specs = [s for s in self.scaling_audit if s.get("invariance_pi_constant")]
-        if pi_specs and not path_a:
-            raise ValueError(
-                "π-constant scaling audit (invariance_pi_constant) requires Path A: "
-                "call compute_residuals(..., model=..., params=..., collocation=...) "
-                "without passing state_pred."
-            )
-
         residuals: Dict[str, Any] = {"laws": {}}
         pb_warn: List[str] = []
 
@@ -1649,7 +1558,6 @@ class ResidualEngine:
             state_pred_built, pb_warn = fill_path_b_derivatives(
                 state_pred_built,
                 constitutive_audit=self.constitutive_audit,
-                scaling_audit=self.scaling_audit,
                 laws_spec=self.laws_spec,
                 constants=self.constants,
                 grid=grid,
@@ -1721,10 +1629,6 @@ class ResidualEngine:
                         out[f"{base}/ref_delta"] = jnp.asarray(arr)
 
                 if has_implied:
-                    if category == "scaling":
-                        # Focused clean-out: scaling audits support ref_delta (Path A/B) and pi_constant (Path A) only.
-                        _maybe_log_omit(f"{category}:{name} omitted: implied_delta is not supported for scaling audits")
-                        continue
                     arr = compute_implied_delta(
                         fn=fn,
                         arg_names=arg_names,
@@ -1752,65 +1656,6 @@ class ResidualEngine:
             if c:
                 residuals["constitutive"] = c
 
-        pi_constant_scales: Dict[str, float] = {}
-        if self.scaling_audit:
-            s = _run_specs(self.scaling_audit, registry=GROUP_FNS, category="scaling")
-            if run_mode == "eval" and path_a and self.state_builder is not None:
-                for spec in self.scaling_audit:
-                    if not spec.get("invariance_pi_constant"):
-                        continue
-                    name = spec["name"]
-                    c = float(spec.get("invariance_scale_c", 10.0))
-                    if c <= 1.0:
-                        raise ValueError(f"scaling:{name} invariance_scale_c must be > 1, got {c}")
-                    recipe = GROUP_PI_CONSTANT_RECIPES[name]
-                    state_map = spec.get("state_map") or {}
-                    constants_scaled = apply_pi_constant_recipe(
-                        self.constants, recipe, state_map, c
-                    )
-                    state_pred_pi = self.state_builder(model, params, collocation, constants_scaled)
-                    merged_scaled = {
-                        **self._state_builder(state_pred_pi, constants_scaled),
-                        **constants_scaled,
-                    }
-                    fn, arg_names = GROUP_FNS[name]
-                    kb = _kwargs_from_state(merged, self.constants, state_map)
-                    ks = _kwargs_from_state(merged_scaled, constants_scaled, state_map)
-                    val_b = fn(**{an: kb[an] for an in arg_names})
-                    val_s = fn(**{an: ks[an] for an in arg_names})
-                    if not jnp.allclose(
-                        jnp.asarray(val_b), jnp.asarray(val_s), rtol=1e-4, atol=1e-6
-                    ):
-                        raise ValueError(
-                            f"scaling:{name} π-constant scaled inputs did not preserve group value "
-                            f"(baseline {val_b!r} vs scaled {val_s!r})"
-                        )
-                    compare_keys = list(spec.get("invariance_compare_keys") or [])
-                    parts_r: List[jnp.ndarray] = []
-                    parts_scale: List[jnp.ndarray] = []
-                    for ck in compare_keys:
-                        if ck not in merged:
-                            raise KeyError(
-                                f"scaling:{name} invariance_compare_keys: {ck!r} missing from baseline merged state"
-                            )
-                        if ck not in merged_scaled:
-                            raise KeyError(
-                                f"scaling:{name} invariance_compare_keys: {ck!r} missing from scaled merged state"
-                            )
-                        vb = jnp.asarray(merged[ck])
-                        vs = jnp.asarray(merged_scaled[ck])
-                        parts_r.append(jnp.ravel(vs - vb))
-                        parts_scale.append(jnp.ravel(jnp.abs(vs)))
-                    r_pi = jnp.concatenate(parts_r) if parts_r else jnp.array([0.0])
-                    stacked_abs = jnp.concatenate(parts_scale) if parts_scale else jnp.array([0.0])
-                    flat_pi = f"{name}/pi_constant"
-                    s[flat_pi] = r_pi
-                    scale_key = f"scaling/{flat_pi}"
-                    mean_abs = float(jax.device_get(jnp.nanmean(stacked_abs)))
-                    pi_constant_scales[scale_key] = float(_SCALE_EPS + mean_abs)
-            if s:
-                residuals["scaling"] = s
-
         if ref_for_audits is not None:
             state_ref_built = self._state_builder(_state_ref_raw_after_derived(ref_for_audits))
             common = set(state_pred_built.keys()) & set(state_ref_built.keys())
@@ -1831,11 +1676,9 @@ class ResidualEngine:
             merged,
             self.laws_spec,
             self.constitutive_audit,
-            self.scaling_audit,
             state_ref_built_for_scale,
             to_python=log_to_python,
         )
-        scale_per_key.update(pi_constant_scales)
         entry: Dict[str, Any] = {
             "index": self._index,
             "rms": rms_per_key,
@@ -1873,7 +1716,7 @@ class ResidualEngine:
                 if ok:
                     keys.add(ok)
         if include_audits:
-            for spec in self.constitutive_audit + self.scaling_audit:
+            for spec in self.constitutive_audit:
                 keys |= set((spec.get("state_map") or {}).values())
                 ok = spec.get("output_key")
                 if ok:
@@ -1893,5 +1736,7 @@ def list_constitutive_models():
 
 
 def list_scaling_closure_ids():
+    """Registered **Groups.*** names (same as :func:`moju.monitor.closure_registry.list_groups`)."""
     from moju.monitor.closure_registry import list_groups
+
     return list_groups()

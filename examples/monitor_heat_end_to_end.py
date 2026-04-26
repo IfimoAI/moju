@@ -139,10 +139,6 @@ def main():
             {"name": "bi", "state_map": {"h": "h", "L": "L", "k_solid": "kappa"}, "output_key": "Bi", "fn": Groups.bi},
         ],
         # thermal_diffusivity implied_delta is prepended from fourier_conduction (law_implied_audits=True).
-        scaling_audit=[
-            {"name": "fo", "output_key": "Fo", "state_map": {"alpha": "alpha", "t": "t", "L": "L"}},
-            {"name": "bi", "output_key": "Bi", "state_map": {"h": "h", "L": "L", "k_solid": "kappa"}},
-        ],
     )
 
     print("Required state keys:", sorted(engine.required_state_keys()))

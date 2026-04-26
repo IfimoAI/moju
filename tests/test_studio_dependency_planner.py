@@ -62,7 +62,6 @@ def test_collect_required_state_keys_derived_chain_adds_refs_drops_outputs():
         "laws": [],
         "groups": [{"name": "fo", "output_key": "fo", "state_map": {"alpha": "alpha", "t": "t", "L": "L"}}],
         "constitutive_audit": [],
-        "scaling_audit": [],
         "derived_state_chain": [
             {
                 "output_key": "alpha",

@@ -73,18 +73,18 @@ Pe = Groups.pe(re=Re, pr=Pr)
 
 cfg = MonitorConfig(
     laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
+    groups=[
+        {
+            "name": "pe",
+            "output_key": "Pe",
+            "state_map": {"re": "Re", "pr": "Pr"},
+        }
+    ],
     constitutive_audit=[
         AuditSpec(
             name="sutherland_mu",
             output_key="mu",
             state_map={"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
-        )
-    ],
-    scaling_audit=[
-        AuditSpec(
-            name="pe",
-            output_key="Pe",
-            state_map={"re": "Re", "pr": "Pr"},
         )
     ],
 )
@@ -130,29 +130,28 @@ print("Per category:", report["per_category"])
 
 Moju gives you physics diagnostics, not just a loss. The audit report looks like this:
 
-| Category              | Score |
-| --------------------- | ----- |
-| Governing laws        | 0.92  |
-| Constitutive         | 0.94  |
-| Scaling and similarity | 0.96 |
+| Category       | Score |
+| -------------- | ----- |
+| Governing laws | 0.92  |
+| Constitutive   | 0.94  |
 
-**Overall admissibility score** — for **training** logs (`compute_residuals(..., run_mode="training")`, the default), the geometric mean of **governing laws** and **constitutive** only. For **eval** logs (`run_mode="eval"`), **not defined**: `report["overall_admissibility_score"]` is **`nan`** and `report["overall_admissibility_level"]` is **Unknown**. Legacy logs **without** `run_mode` still use the geometric mean of every present category (`laws`, `constitutive`, `scaling`, `data`).  
+**Overall admissibility score** — geometric mean of **finite** per-category scores included in the roll-up for that log entry. For **training** (`run_mode="training"`, the default), only **laws** and **constitutive** contribute. For **eval** (`run_mode="eval"`), **laws**, **constitutive**, and **`data`** (when present) contribute; legacy logs may still list a **`scaling`** category if an old session logged `scaling/...` keys. Logs **without** `run_mode` use every present category.  
 **Overall admissibility level** — for a finite overall score, derived in **`[0, 1]`** by `admissibility_level`: **&lt; 0.5** Non-Admissible; **0.5–0.75** Low Admissibility; **0.75–0.95** Moderate Admissibility; **&gt; 0.95** High Admissibility (same bands for per-key scores in `per_key`).
 
 Report keys: `report["per_category"]` (includes **`data`** when those keys exist), `report["overall_admissibility_score"]`, `report["overall_admissibility_level"]`, `report["monitor_run_mode"]`. Per-key **R_eff** (logged as `rms`), R_norm, and admissibility are in `report["per_key"]`.
 
-**Admissibility levels:** (1) each residual key has its own score in `per_key`; (2) each category score in `per_category` is the **geometric mean** of **finite** per-key scores in that category (NaN/inf keys are skipped; categories with no finite keys are omitted); (3) the **overall** score (training or legacy logs only) is the geometric mean of the relevant **finite** category scores as above. Logged **`rms`** is **R_eff** = √(mean(r²)+δ²)·**Q^0.5** (tiny **δ²** = **`R_EFF_RMS_JITTER_SQ`**, AD-smooth at **r→0**) with **Q** = RMS(m)/mean(m), **m_i** = √(r_i²+ε²); **Q = 1** when |r| is uniform across collocation points (and for single-point tensors). Default logged **`scale_k`** for **laws/** and nondimensional **implied_delta** / **ref_delta** is **2×10⁻²** (see **`DEFAULT_NONDIM_R_NORM_SCALE_K`** in `moju.monitor.auditor`). Optional **`audit(..., r_ref=...)`** / **`visualize(..., r_ref=...)`** overrides **`scale_k`** per flat key. **NaN-tolerant** reductions apply where applicable. New metrics use the same pipeline—for example optional **π-constant** checks on a scaling audit add a key `scaling/<name>/pi_constant` (eval + Path A only; see `docs/monitor_training_vs_eval.md`) and are included in the scaling category mean when you run **`run_mode="eval"`**. π-constant recipes exist for **every** registered dimensionless group (`list_pi_constant_group_names()`); each recipe scales selected inputs by powers of `c>1` so the group value is unchanged (see `moju.monitor.pi_constant_recipes`). For **Grashof** (`gr`), `g` is fixed inside `Groups.gr`; the recipe only varies the other arguments. End-to-end π-constant examples: `examples/cookbook_pi_constant_reynolds.py`, `examples/cookbook_pi_constant_prandtl.py`. Turbulence-related constitutive audit cookbooks: `examples/cookbook_turbulence_law_of_wall.py`, `examples/cookbook_turbulence_colebrook.py`, `examples/cookbook_constitutive_smagorinsky.py`, `examples/cookbook_constitutive_k_epsilon.py` (k–ε νₜ), `examples/cookbook_constitutive_k_omega.py` (k–ω νₜ). These νₜ closures are algebraic only; full k–ε/k–ω transport belongs in `Laws.*` if you need PDE residuals. **Implied constitutive audit** (`constitutive/<name>/implied_delta`): compare `Models.*` to an alternate value in `state_pred` via `AuditSpec.implied_value_key`, or to `implied_fn(state, constants)` (Python-only; omitted from `to_dict()`). Cookbooks: `examples/cookbook_constitutive_implied_ideal_gas_rho.py`, `examples/cookbook_constitutive_implied_power_law_fn.py`.
+**Admissibility levels:** (1) each residual key has its own score in `per_key`; (2) each category score in `per_category` is the **geometric mean** of **finite** per-key scores in that category (NaN/inf keys are skipped; categories with no finite keys are omitted); (3) the **overall** score is the geometric mean of the **finite** category scores that participate in the roll-up for that step (see above). Logged **`rms`** is **R_eff** = √(mean(r²)+δ²)·**Q^0.5** (tiny **δ²** = **`R_EFF_RMS_JITTER_SQ`**, AD-smooth at **r→0**) with **Q** = RMS(m)/mean(m), **m_i** = √(r_i²+ε²); **Q = 1** when |r| is uniform across collocation points (and for single-point tensors). Default logged **`scale_k`** for **laws/** and nondimensional **implied_delta** / **ref_delta** is **2×10⁻²** (see **`DEFAULT_NONDIM_R_NORM_SCALE_K`** in `moju.monitor.auditor`). Optional **`audit(..., r_ref=...)`** / **`visualize(..., r_ref=...)`** overrides **`scale_k`** per flat key. **NaN-tolerant** reductions apply where applicable. Turbulence-related constitutive audit cookbooks: `examples/cookbook_turbulence_law_of_wall.py`, `examples/cookbook_turbulence_colebrook.py`, `examples/cookbook_constitutive_smagorinsky.py`, `examples/cookbook_constitutive_k_epsilon.py` (k–ε νₜ), `examples/cookbook_constitutive_k_omega.py` (k–ω νₜ). These νₜ closures are algebraic only; full k–ε/k–ω transport belongs in `Laws.*` if you need PDE residuals. **Implied constitutive audit** (`constitutive/<name>/implied_delta`): compare `Models.*` to an alternate value in `state_pred` via `AuditSpec.implied_value_key`, or to `implied_fn(state, constants)` (Python-only; omitted from `to_dict()`). Cookbooks: `examples/cookbook_constitutive_implied_ideal_gas_rho.py`, `examples/cookbook_constitutive_implied_power_law_fn.py`.
 
-**Law-linked implied audits (default on)** — For several `Laws.*` entries, Moju **prepends** matching `constitutive_audit` / `scaling_audit` rows whose `implied_fn` recomputes a quantity by rearranging the law using your law `state_map` (e.g. **Fourier conduction** → `Models.thermal_diffusivity(k,rho,cp)` vs **α\_implied = T_t / T_laplacian**). Logged **`implied_delta`** / **`ref_delta`** tensors use the **default nondimensional symmetric normalization** (see “Residual conventions” above). Residual keys look like `constitutive/thermal_diffusivity/law_fourier_conduction/implied_delta`. We **do not** add a separate implied row for **Fo** when **α** is already checked (same information given fixed `t`, `L`). Toggle with `MonitorConfig(law_implied_audits=False)` or `ResidualEngine(..., law_implied_audits=False)`. With **`state_ref`** and **`run_mode="eval"`**, **`ref_delta`** runs for those rows (unless a spec sets `include_ref_delta: false`). In **`run_mode="training"`** (default), **`state_ref`** is ignored for **`ref_delta`** and for the **`data/`** pred−ref block—use a separate eval pass for ground-truth comparison. Registry: `list_laws_with_implied_diagnostics()`, `merge_law_implied_audit_specs`, `moju.monitor.law_implied_diagnostics`; Studio prepends the same rows in `build_studio_auto_fragment`. Details: [docs/law_implied_audits.md](docs/law_implied_audits.md).
+**Law-linked implied audits (default on)** — For several `Laws.*` entries, Moju **prepends** matching **`constitutive_audit`** rows whose `implied_fn` recomputes a quantity by rearranging the law using your law `state_map` (e.g. **Fourier conduction** → `Models.thermal_diffusivity(k,rho,cp)` vs **α\_implied = T_t / T_laplacian**). Logged **`implied_delta`** / **`ref_delta`** tensors use the **default nondimensional symmetric normalization** (see “Residual conventions” above). Residual keys look like `constitutive/thermal_diffusivity/law_fourier_conduction/implied_delta`. We **do not** add a separate implied row for **Fo** when **α** is already checked (same information given fixed `t`, `L`). Toggle with `MonitorConfig(law_implied_audits=False)` or `ResidualEngine(..., law_implied_audits=False)`. With **`state_ref`** and **`run_mode="eval"`**, **`ref_delta`** runs for those rows (unless a spec sets `include_ref_delta: false`). In **`run_mode="training"`** (default), **`state_ref`** is ignored for **`ref_delta`** and for the **`data/`** pred−ref block—use a separate eval pass for ground-truth comparison. Registry: `list_laws_with_implied_diagnostics()`, `merge_law_implied_audit_specs`, `moju.monitor.law_implied_diagnostics`; Studio prepends the same rows in `build_studio_auto_fragment`. Details: [docs/law_implied_audits.md](docs/law_implied_audits.md).
 
 ---
 
 ## Use cases
 
 - **Physics-Informed Neural Networks (PINNs)** — Residuals and loss from governing equations; audit score each step.
-- **CFD surrogate models** — Compare to high-fidelity data via `state_ref`; constitutive and scaling audits.
+- **CFD surrogate models** — Compare to high-fidelity data via `state_ref`; constitutive audits and law residuals.
 - **Digital twins** — Continuous audit of predictions against physics and data.
-- **Scale-invariant modeling** — Dimensionless groups (Re, Pr, Pe, …) and scaling-similarity audits.
+- **Scale-invariant modeling** — Dimensionless groups (Re, Pr, Pe, …) via **`groups`** specs; run similarity sweeps outside the engine if you need closure-style checks on those groups.
 
 ---
 
@@ -163,7 +162,7 @@ Report keys: `report["per_category"]` (includes **`data`** when those keys exist
 | **Models**      | Constitutive relationships (e.g. viscosity μ(T), density ρ(P,T)). |
 | **Groups**      | Dimensionless quantities (Re, Pr, Pe, Ma, …). |
 | **Laws**        | Governing equations (mass, momentum, energy, …); residuals go into `build_loss`. |
-| **ResidualEngine** | Builds state from config and optional predictions; runs laws and optional constitutive/scaling audits (`implied_delta` always when configured; `ref_delta` / `data/` / π-constant only with **`run_mode="eval"`**); produces residuals and a log. |
+| **ResidualEngine** | Builds state from config and optional predictions; runs laws, **`groups`**, and optional constitutive audits (`implied_delta` when configured; `ref_delta` / `data/` only with **`run_mode="eval"`**); produces residuals and a log. |
 | **build_loss**  | Builds a scalar physics loss from law residuals using the same **R_eff** reduction as the log’s `rms`. |
 | **audit**       | Takes the engine log; returns per-key and per-category admissibility and overall score. |
 
@@ -182,7 +181,7 @@ Optional extras:
 - `pip install moju[ref_foam]` — OpenFOAM snapshot loaders (meshio).
 - `pip install moju[ref_hdf5]` — HDF5 loaders (h5py).
 - `pip install moju[report]` — PDF Physics Admissibility Report from `audit(..., export_dir=...)`.
-- `pip install moju[viz]` — **plotly** for **`visualize(engine.log, backend="plotly"|"none")`** (default **`plotly`**), with `mode="training"|"eval"` (legacy **`mode="test"`** is a silent alias for **`eval`**), optional **`spatial_law_panel`**, **`spatial_heatmap_colorscale`** (default **Viridis**), **`step_label`**, **`r_norm_scale="log"|"linear"`**, **`figure_title`**, **`dashboard_mode`**, **`theme="light"`**, **`baseline_score`**, **`show_branding`** (optional watermark; default off), **`visualize_layout="single"|"split"`** ( **`split`** adds a **`worst_keys`** table figure), **`worst_keys_top_n`**, **`density="comfortable"|"compact"`**, and **`ResidualEngine.clear_log()`** between runs. The single-figure output is a decision-oriented **Physics Admissibility Report**. **Training:** two KPI cards (Governing / Constitutive), overall admissibility subtitle when defined, vs-step trend, category breakdown, residuals, spatial row, summary with troubleshooting hints when a category lags. **Eval:** three KPI cards; when **`run_mode="eval"`** in the log, the title explains that roll-up overall is undefined and points to category scores. **`dashboard_mode="dash-tabs"`:** the eval **KPI** tab mirrors those category indicators plus a **`run_mode`** note (no empty placeholder). Pass **`keys=[...]`** or **`r_ref=...`** to subset or rescale like `audit`. In **Jupyter or Colab**, **restart the kernel** after upgrading `moju` so `visualize` loads the matching `visualize_plotly` code.
+- `pip install moju[viz]` — **plotly** for **`visualize(engine.log, backend="plotly"|"none")`** (default **`plotly`**), with `mode="training"|"eval"` (legacy **`mode="test"`** is a silent alias for **`eval`**), optional **`spatial_law_panel`**, **`spatial_heatmap_colorscale`** (default **Viridis**), **`step_label`**, **`r_norm_scale="log"|"linear"`**, **`figure_title`**, **`dashboard_mode`**, **`theme="light"`**, **`baseline_score`**, **`show_branding`** (optional watermark; default off), **`visualize_layout="single"|"split"`** ( **`split`** adds a **`worst_keys`** table figure), **`worst_keys_top_n`**, **`density="comfortable"|"compact"`**, and **`ResidualEngine.clear_log()`** between runs. The single-figure output is a decision-oriented **Physics Admissibility Report**. **Training and eval:** two KPI cards (Governing / Constitutive), overall admissibility when defined, vs-step trend (training), category breakdown, residuals, spatial row, summary with troubleshooting hints when a category lags. **`dashboard_mode="dash-tabs"`:** the **KPI** tab shows category indicators plus a **`run_mode`** note when relevant. Pass **`keys=[...]`** or **`r_ref=...`** to subset or rescale like `audit`. In **Jupyter or Colab**, **restart the kernel** after upgrading `moju` so `visualize` loads the matching `visualize_plotly` code.
 - `pip install moju[studio]` — Streamlit + Plotly for **Moju Studio** (`streamlit run apps/moju_studio/Home.py` from a source checkout; see `apps/moju_studio/README.md`).
 - `pip install moju[studio-science]` — optional **HDF5 / NetCDF** state uploads in Studio (`h5py`, `xarray`, `netCDF4`); `.npz` / `.npy` work with `studio` alone.
 
@@ -216,7 +215,7 @@ Moju does not define physics. Moju provides a structured way to **enforce** and 
 
 ## Learn more
 
-**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, `MonitorConfig`, `AuditSpec`, `audit_spec_to_engine_dict`, `PathBGridConfig`, `fill_path_b_derivatives`, `fill_law_fd_from_primitives`, `list_law_fd_supported_laws`, **`merge_law_implied_audit_specs`**, **`list_laws_with_implied_diagnostics`**, **`law_implied_unsupported_reasons`**, **`effective_audit_specs_for_fragment`**, build_loss, audit, **`visualize(..., backend="plotly"|"none", mode="training"|"eval", spatial_law_panel=..., r_norm_scale=...)`** for training/eval dashboards (`test` still accepted as alias for `eval`), `pretty_residual_key` / `pretty_category_name` for display). Law-linked implied rows follow a strict constitutive-only policy; use `law_implied_unsupported_reasons()` for laws pending constitutive target/model support. Constitutive/scaling closure keys include `ref_delta`, `implied_delta`, and scaling `pi_constant` when configured. Path B optional FD: `compute_residuals(..., auto_path_b_derivatives=...)` with `fill_law_fd=True` fills missing **registered** `Laws.*` inputs on structured grids. Use `engine.required_state_keys()` for introspection.
+**API at a glance** — Two namespaces: **moju.piratio** (Groups, Models, Laws, Operators) and **moju.monitor** (ResidualEngine, `MonitorConfig`, `AuditSpec`, `audit_spec_to_engine_dict`, `PathBGridConfig`, `fill_path_b_derivatives`, `fill_law_fd_from_primitives`, `list_law_fd_supported_laws`, **`merge_law_implied_audit_specs`**, **`list_laws_with_implied_diagnostics`**, **`law_implied_unsupported_reasons`**, **`effective_audit_specs_for_fragment`**, build_loss, audit, **`visualize(..., backend="plotly"|"none", mode="training"|"eval", spatial_law_panel=..., r_norm_scale=...)`** for training/eval dashboards (`test` still accepted as alias for `eval`), `pretty_residual_key` / `pretty_category_name` for display). Law-linked implied rows follow a strict constitutive-only policy; use `law_implied_unsupported_reasons()` for laws pending constitutive target/model support. Constitutive closure keys include `ref_delta` and `implied_delta`. Path B optional FD: `compute_residuals(..., auto_path_b_derivatives=...)` with `fill_law_fd=True` fills missing **registered** `Laws.*` inputs on structured grids. Use `engine.required_state_keys()` for introspection.
 
 **Examples**
 

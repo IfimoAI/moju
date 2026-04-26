@@ -22,7 +22,7 @@ def test_readme_quick_start_runs():
 
 
 def test_readme_five_minute_example_runs():
-    """README-style smoke: laws + constitutive/scaling ref_delta with matching reference."""
+    """README-style smoke: laws + constitutive ref_delta and groups for dimensionless numbers."""
     import jax.numpy as jnp
     from moju.monitor import ResidualEngine, build_loss, audit, MonitorConfig, AuditSpec
     from moju.piratio import Models, Groups
@@ -40,18 +40,18 @@ def test_readme_five_minute_example_runs():
 
     cfg = MonitorConfig(
         laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
+        groups=[
+            {
+                "name": "pe",
+                "output_key": "Pe",
+                "state_map": {"re": "Re", "pr": "Pr"},
+            }
+        ],
         constitutive_audit=[
             AuditSpec(
                 name="sutherland_mu",
                 output_key="mu",
                 state_map={"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
-            )
-        ],
-        scaling_audit=[
-            AuditSpec(
-                name="pe",
-                output_key="Pe",
-                state_map={"re": "Re", "pr": "Pr"},
             )
         ],
     )
@@ -79,13 +79,13 @@ def test_readme_five_minute_example_runs():
     assert jnp.ndim(loss) == 0
     assert "overall_admissibility_score" in report
     assert "overall_admissibility_level" in report
-    assert not math.isfinite(float(report["overall_admissibility_score"]))
-    assert report["overall_admissibility_level"] == "Unknown"
+    assert math.isfinite(float(report["overall_admissibility_score"]))
+    assert report["overall_admissibility_level"] != "Unknown"
     assert "per_category" in report
     assert "per_key" in report
     assert "laws" in report["per_category"]
     assert "constitutive" in report["per_category"]
-    assert "scaling" in report["per_category"]
+    assert "scaling" not in report["per_category"]
 
 
 def test_readme_laws_example_runs():

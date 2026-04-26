@@ -2,7 +2,7 @@
 Law-linked implied constitutive / scaling audits.
 
 For selected :class:`Laws.*` entries, Moju can auto-append ``constitutive_audit`` /
-``scaling_audit`` rows whose ``implied_fn`` recomputes a quantity by rearranging the
+``constitutive_audit`` rows whose ``implied_fn`` recomputes a quantity by rearranging the
 law using ``state_pred`` (and the law's ``state_map``). Residuals use the existing
 ``implied_delta`` closure: ``F(catalog args) - implied``.
 
@@ -555,20 +555,17 @@ def law_implied_unsupported_reasons() -> Dict[str, str]:
 
 def effective_audit_specs_for_fragment(d: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    Return ``(constitutive_audit, scaling_audit)`` as the engine sees them: law-linked rows
-    (when ``law_implied_audits`` is true) merged with fragment lists (see
-    :func:`merge_fragment_law_implied_audit_specs`). Used by Studio dependency planning
-    and JSON fragments without ``implied_fn``.
+    Return ``(constitutive_audit, [])``: law-linked rows (when ``law_implied_audits`` is true)
+    merged with the fragment constitutive list. Second element is always empty (legacy
+    ``scaling_audit`` removed). Used by Studio dependency planning.
     """
-    lic, lis = merge_law_implied_audit_specs(
+    lic, _lis = merge_law_implied_audit_specs(
         d.get("laws") or [],
         enabled=bool(d.get("law_implied_audits", True)),
     )
     frag_c = list(d.get("constitutive_audit") or [])
-    frag_s = list(d.get("scaling_audit") or [])
     mc, rc = merge_fragment_law_implied_audit_specs(lic, frag_c)
-    ms, rs = merge_fragment_law_implied_audit_specs(lis, frag_s)
-    return mc + rc, ms + rs
+    return mc + rc, []
 
 
 def merge_law_implied_audit_specs(
@@ -577,16 +574,15 @@ def merge_law_implied_audit_specs(
     enabled: bool = True,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    Build extra ``constitutive_audit`` and ``scaling_audit`` dict rows for
-    :class:`ResidualEngine` from the selected laws.
+    Build extra ``constitutive_audit`` dict rows for :class:`ResidualEngine` from the selected laws.
 
     Rows include ``implied_fn`` (not JSON-serializable) and ``residual_basename`` for
-    unique log keys. When ``enabled`` is False, returns ``([], [])``.
+    unique log keys. When ``enabled`` is False, returns ``([], [])`` (second list is always
+    empty; kept for call-site compatibility).
     """
     if not enabled:
         return [], []
     constitutive: List[Dict[str, Any]] = []
-    scaling: List[Dict[str, Any]] = []
     seen_basenames: set[str] = set()
 
     for law in laws_spec:
@@ -609,12 +605,14 @@ def merge_law_implied_audit_specs(
                 "residual_basename": basename,
                 "include_ref_delta": bool(row.get("include_ref_delta", True)),
             }
-            if row["category"] == "constitutive":
-                constitutive.append(d)
-            else:
-                scaling.append(d)
+            if row["category"] != "constitutive":
+                raise ValueError(
+                    f"law_implied row for {law_name!r} has category {row['category']!r}; "
+                    "only constitutive is supported."
+                )
+            constitutive.append(d)
 
-    return constitutive, scaling
+    return constitutive, []
 
 
 def merge_fragment_law_implied_audit_specs(

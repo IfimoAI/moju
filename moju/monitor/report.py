@@ -170,7 +170,7 @@ def write_audit_pdf(
     story.append(
         Paragraph(
             "<i>These metrics are consistency indicators for declared laws, constitutive closures, "
-            "and scaling identities on the evaluated sample. They are not a certification of "
+            "on the evaluated sample. They are not a certification of "
             "physical correctness.</i>",
             body_style,
         )
@@ -179,9 +179,9 @@ def write_audit_pdf(
     if training_doc:
         story.append(
             Paragraph(
-                "<i>Training-style summary: reference (data/) and scaling similarity sections are "
+                "<i>Training-style summary: reference (data/) section is "
                 "omitted. Use <b>compute_residuals(..., run_mode='eval')</b> with <b>state_ref</b> "
-                "for ground-truth and ref-based scaling in the report.</i>",
+                "for ground-truth comparison in the report.</i>",
                 body_style,
             )
         )
@@ -214,12 +214,7 @@ def write_audit_pdf(
             ("constitutive", "Constitutive"),
         ]
         if not training_doc:
-            cat_rows.extend(
-                (
-                    ("scaling", "Scaling/similarity"),
-                    ("data", "Data / ground truth"),
-                )
-            )
+            cat_rows.append(("data", "Data / ground truth"))
         for key, label in cat_rows:
             if key in per_category:
                 table_data.append([label, format_admissibility_pct(float(per_category[key]))])

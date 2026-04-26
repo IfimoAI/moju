@@ -27,7 +27,7 @@ These implied residual keys are included in normal category/overall admissibilit
 
 | Mechanism | Behavior |
 |-----------|----------|
-| `MonitorConfig(law_implied_audits=True)` (default) | Prepend law-linked rows before your `constitutive_audit` / `scaling_audit`. |
+| `MonitorConfig(law_implied_audits=True)` (default) | Prepend law-linked rows before your `constitutive_audit`. |
 | `ResidualEngine(..., law_implied_audits=False)` | Skip prepending (dict-only construction). |
 | Expert JSON / `merge_simple_config_with_json_override` | Optional `"law_implied_audits": false` to disable. |
 

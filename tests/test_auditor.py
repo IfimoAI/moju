@@ -1,4 +1,4 @@
-"""Tests for ResidualEngine, build_loss, audit, visualize, constitutive/scaling closures."""
+"""Tests for ResidualEngine, build_loss, audit, visualize, constitutive closures."""
 
 import pytest
 import jax
@@ -11,7 +11,6 @@ from moju.monitor import (
     audit,
     build_loss,
     list_constitutive_models,
-    list_pi_constant_group_names,
     list_scaling_closure_ids,
     visualize,
 )
@@ -22,7 +21,6 @@ from moju.monitor.auditor import (
 )
 from moju.monitor.closure_registry import (
     apply_closure_discrepancy_normalize,
-    GROUP_FNS,
     MODEL_FNS,
     compute_implied_delta,
 )
@@ -281,26 +279,6 @@ class TestResidualEngineResidualDict:
         assert "constitutive" in residuals
         assert "sutherland_mu/ref_delta" in residuals["constitutive"]
         assert abs(float(residuals["constitutive"]["sutherland_mu/ref_delta"])) > 0.0
-
-    def test_scaling_pe_ref_delta_zero(self, rtol, atol):
-        core = ResidualEngine(
-            laws=[],
-            scaling_audit=[
-                {
-                    "name": "pe",
-                    "output_key": "Pe",
-                    "state_map": {"re": "Re", "pr": "Pr"},
-                }
-            ],
-        )
-        Re, Pr = 100.0, 0.7
-        Pe = Re * Pr
-        state_pred = {"Pe": Pe, "Re": Re, "Pr": Pr}
-        residuals = core.compute_residuals(
-            state_pred, state_ref=dict(state_pred), run_mode="eval"
-        )
-        assert "scaling" in residuals
-        assert jnp.allclose(residuals["scaling"]["pe/ref_delta"], 0.0, rtol=rtol, atol=atol)
 
     def test_state_ref_adds_data_residual(self, rtol, atol):
         core = ResidualEngine(
@@ -1201,7 +1179,11 @@ class TestVisualize:
         assert kpi_ev is not None
         assert any(getattr(tr, "type", None) == "indicator" for tr in getattr(kpi_ev, "data", []))
         anns_ev = list(getattr(kpi_ev.layout, "annotations", []) or [])
-        assert any("run_mode" in str(getattr(a, "text", "")).lower() for a in anns_ev)
+        assert any(
+            "rollup" in str(getattr(a, "text", "")).lower()
+            or "overall admissibility" in str(getattr(a, "text", "")).lower()
+            for a in anns_ev
+        )
 
     def test_visualize_enterprise_threshold_line_and_scale_hover(self):
         pytest.importorskip("plotly")
@@ -1771,46 +1753,16 @@ class TestMonitorConfig:
         cfg2 = MonitorConfig.from_dict(d)
         assert cfg2.to_dict() == d
 
-    def test_pi_constant_fields_roundtrip(self):
-        cfg = MonitorConfig(
-            pi_constant_law_defaults_enabled=True,
-            pi_constant_default_c=7.0,
-            pi_constant_law_group_overrides={"fourier_conduction": ["pr"]},
-            pi_constant_extra_groups=["nu"],
-            pi_constant_default_compare_keys=["T"],
-        )
-        cfg2 = MonitorConfig.from_dict(cfg.to_dict())
-        assert cfg2.pi_constant_law_defaults_enabled is True
-        assert cfg2.pi_constant_default_c == 7.0
-        assert cfg2.pi_constant_law_group_overrides["fourier_conduction"] == ["pr"]
-        assert cfg2.pi_constant_extra_groups == ["nu"]
-        assert cfg2.pi_constant_default_compare_keys == ["T"]
-
-
-class TestLawGroupDefaults:
-    def test_resolve_pi_groups_fourier(self):
-        from moju.monitor.law_group_defaults import resolve_pi_groups_for_laws
-
-        laws = [{"name": "fourier_conduction", "state_map": {}}]
-        g = resolve_pi_groups_for_laws(laws, law_group_overrides={}, extra_groups=[])
-        assert g == ["fo"]
-
-    def test_merge_scaling_disabled_unchanged_length(self):
-        from moju.monitor.law_group_defaults import merge_scaling_audit_with_pi_law_defaults
-
-        cfg = MonitorConfig(
-            laws=[{"name": "fourier_conduction", "state_map": {}}],
-            scaling_audit=[],
-            pi_constant_law_defaults_enabled=False,
-        )
-        assert len(merge_scaling_audit_with_pi_law_defaults(cfg)) == 0
+    def test_from_dict_rejects_scaling_audit(self):
+        with pytest.raises(ValueError, match="scaling_audit"):
+            MonitorConfig.from_dict({"laws": [], "scaling_audit": []})
 
 
 class TestRequiredKeys:
     def test_required_state_keys_union(self):
         engine = ResidualEngine(
             laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
-            scaling_audit=[
+            groups=[
                 {
                     "name": "pe",
                     "output_key": "Pe",
@@ -1821,180 +1773,6 @@ class TestRequiredKeys:
         state_keys = engine.required_state_keys()
         assert "phi_xx" in state_keys
         assert "Re" in state_keys and "Pr" in state_keys and "Pe" in state_keys
-
-    def test_scaling_pe_ref_delta_with_matching_ref(self, rtol, atol):
-        engine = ResidualEngine(
-            laws=[],
-            scaling_audit=[
-                {
-                    "name": "pe",
-                    "output_key": "Pe",
-                    "state_map": {"re": "u", "pr": "T"},
-                }
-            ],
-        )
-        state_pred = {"u": 1.0, "T": 2.0, "Pe": 2.0}
-        residuals = engine.compute_residuals(
-            state_pred, state_ref=dict(state_pred), run_mode="eval"
-        )
-        assert "scaling" in residuals
-        assert jnp.allclose(residuals["scaling"]["pe/ref_delta"], 0.0, rtol=rtol, atol=atol)
-
-
-def _re_pi_spec(*, compare_keys=("out",), scale_c=10.0):
-    return {
-        "name": "re",
-        "output_key": "Re",
-        "state_map": {"u": "u", "L": "L", "rho": "rho", "mu": "mu"},
-        "invariance_pi_constant": True,
-        "invariance_compare_keys": list(compare_keys),
-        "invariance_scale_c": scale_c,
-    }
-
-
-class TestPiConstantClosure:
-    def test_list_pi_constant_group_names(self):
-        names = list_pi_constant_group_names()
-        assert "re" in names and "pr" in names and "pe" in names
-        assert "st" in names and "gr" in names and "we" in names
-        assert set(names) == set(GROUP_FNS.keys())
-
-    def test_apply_pi_constant_recipe_re_preserves_re(self):
-        from moju.monitor.pi_constant_recipes import (
-            GROUP_PI_CONSTANT_RECIPES,
-            apply_pi_constant_recipe,
-        )
-
-        const = {"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0}
-        sm = {"u": "u", "L": "L", "rho": "rho", "mu": "mu"}
-        out = apply_pi_constant_recipe(const, GROUP_PI_CONSTANT_RECIPES["re"], sm, 10.0)
-        Re0 = const["rho"] * const["u"] * const["L"] / const["mu"]
-        Re1 = float(out["rho"] * out["u"] * out["L"] / out["mu"])
-        assert abs(Re0 - Re1) < 1e-9
-
-    def test_apply_pi_constant_recipe_c_must_exceed_one(self):
-        from moju.monitor.pi_constant_recipes import (
-            GROUP_PI_CONSTANT_RECIPES,
-            apply_pi_constant_recipe,
-        )
-
-        const = {"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0}
-        sm = {"u": "u", "L": "L", "rho": "rho", "mu": "mu"}
-        with pytest.raises(ValueError, match="c > 1"):
-            apply_pi_constant_recipe(const, GROUP_PI_CONSTANT_RECIPES["re"], sm, 1.0)
-
-    def test_engine_init_requires_recipe_or_compare_keys(self):
-        with pytest.raises(ValueError, match="invariance_compare_keys"):
-            ResidualEngine(
-                constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
-                laws=[],
-                groups=[],
-                scaling_audit=[_re_pi_spec(compare_keys=())],
-                state_builder=lambda m, p, col, ct: {"out": jnp.array(1.0)},
-            )
-
-    def test_all_registered_groups_have_pi_recipe(self):
-        from moju.monitor.pi_constant_recipes import assert_pi_recipes_cover_all_groups
-
-        assert_pi_recipes_cover_all_groups()
-
-    def test_engine_init_invariance_c_must_exceed_one(self):
-        with pytest.raises(ValueError, match="invariance_scale_c"):
-            ResidualEngine(
-                constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
-                laws=[],
-                groups=[],
-                scaling_audit=[_re_pi_spec(scale_c=1.0)],
-                state_builder=lambda m, p, col, ct: {"out": ct["L"] / ct["mu"]},
-            )
-
-    def test_pi_constant_skipped_when_run_mode_training(self, rtol, atol):
-        def sb(model, params, collocation, constants):
-            return {"out": constants["L"] / constants["mu"]}
-
-        engine = ResidualEngine(
-            constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
-            laws=[],
-            groups=[],
-            scaling_audit=[_re_pi_spec()],
-            state_builder=sb,
-        )
-        residuals = engine.compute_residuals(
-            None, model=0, params=0, collocation={}, run_mode="training"
-        )
-        assert "scaling" not in residuals or "re/pi_constant" not in residuals.get(
-            "scaling", {}
-        )
-
-    def test_path_b_forbidden_when_pi_enabled(self):
-        def sb(model, params, collocation, constants):
-            return {"out": constants["L"] / constants["mu"]}
-
-        engine = ResidualEngine(
-            constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
-            laws=[],
-            groups=[],
-            scaling_audit=[_re_pi_spec()],
-            state_builder=sb,
-        )
-        with pytest.raises(ValueError, match="Path A"):
-            engine.compute_residuals({"out": jnp.array(0.5), "Re": jnp.array(0.25), "u": jnp.array(1.0)})
-
-    def test_path_a_pi_residual_zero_when_invariant(self, rtol, atol):
-        def sb(model, params, collocation, constants):
-            return {"out": constants["L"] / constants["mu"]}
-
-        engine = ResidualEngine(
-            constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
-            laws=[],
-            groups=[],
-            scaling_audit=[_re_pi_spec()],
-            state_builder=sb,
-        )
-        residuals = engine.compute_residuals(
-            None, model=0, params=0, collocation={}, run_mode="eval"
-        )
-        r = residuals["scaling"]["re/pi_constant"]
-        assert jnp.allclose(r, 0.0, rtol=rtol, atol=atol)
-
-    def test_pi_constant_scale_uses_mean_abs_scaled_branch(self):
-        def sb(model, params, collocation, constants):
-            return {"out": constants["L"]}
-
-        engine = ResidualEngine(
-            constants={"L": 1.0, "mu": 2.0, "rho": 1.0, "u": 1.0},
-            laws=[],
-            groups=[],
-            scaling_audit=[_re_pi_spec()],
-            state_builder=sb,
-        )
-        engine.compute_residuals(
-            None, model=0, params=0, collocation={}, run_mode="eval"
-        )
-        entry = engine.log[-1]
-        scale = entry["scale"]["scaling/re/pi_constant"]
-        assert scale > 5.0
-        rms = entry["rms"]["scaling/re/pi_constant"]
-        assert rms > 0.01
-
-
-class TestAuditSpecPiFieldsRoundtrip:
-    def test_monitor_config_scaling_audit_pi_fields(self):
-        spec = AuditSpec(
-            name="re",
-            output_key="Re",
-            state_map={"u": "u", "L": "L", "rho": "rho", "mu": "mu"},
-            invariance_pi_constant=True,
-            invariance_compare_keys=["out"],
-            invariance_scale_c=7.0,
-        )
-        cfg = MonitorConfig(constants={}, scaling_audit=[spec])
-        d = cfg.to_dict()
-        cfg2 = MonitorConfig.from_dict(d)
-        s2 = cfg2.scaling_audit[0]
-        assert s2.invariance_pi_constant is True
-        assert s2.invariance_compare_keys == ["out"]
-        assert s2.invariance_scale_c == 7.0
 
 
 class TestKwargsFromStateLawHint:

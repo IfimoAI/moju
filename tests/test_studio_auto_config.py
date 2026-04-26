@@ -22,7 +22,7 @@ def test_build_fragment_laplace_only():
     assert d["laws"][0]["name"] == "laplace_equation"
     assert d["laws"][0]["state_map"] == {"phi_laplacian": "phi_laplacian"}
     assert d["constitutive_audit"] == []
-    assert d["scaling_audit"] == []
+    assert "scaling_audit" not in d
 
 
 def test_build_fragment_thermal_diffusivity_audit_minimal():
@@ -50,9 +50,6 @@ def test_user_selected_fo_group_output_key_matches_law_fo():
     fo_rows = [g for g in d["groups"] if g.get("name") == "fo"]
     assert len(fo_rows) == 1
     assert fo_rows[0]["output_key"] == "fo"
-    sa = [s for s in d["scaling_audit"] if s.get("name") == "fo"]
-    assert len(sa) == 1
-    assert sa[0]["output_key"] == "fo"
 
 
 def test_build_fragment_rejects_unknown_law():
@@ -97,8 +94,5 @@ def test_studio_includes_law_linked_implied_for_supported_laws():
             pred_keys=set(),
             constant_keys=set(),
         )
-        implied_rows = [
-            s for s in (d.get("constitutive_audit", []) + d.get("scaling_audit", []))
-            if s.get("implied_fn") is not None
-        ]
+        implied_rows = [s for s in d.get("constitutive_audit", []) if s.get("implied_fn") is not None]
         assert implied_rows, f"Studio missing implied row for {law_name}"

@@ -90,44 +90,9 @@ def validate_studio_pi_gating(
     scaling_audit_specs: List[Dict[str, Any]],
     state_builder: Optional[Callable[..., Dict[str, Any]]],
 ) -> None:
-    """
-    Enforce Studio policy: surface π-constant only when predictions can be recomputed under
-    scaled constants and compare keys are set.
-
-    Raises ``ValueError`` with a clear message if the configuration is invalid for Studio.
-    """
-    pi_specs = [s for s in scaling_audit_specs if s.get("invariance_pi_constant")]
-    if not pi_specs:
-        return
-
-    if use_path_b:
-        raise ValueError(
-            "π-constant (scale-invariance) scaling audits require **Path A** "
-            "(a `state_builder` forward, not uploaded `state_pred` only). "
-            "Switch **Execution path** to Path A, or disable π-constant on scaling audits."
-        )
-
-    if state_builder is None:
-        raise ValueError("Path A requires a state_builder for π-constant audits.")
-
-    if is_studio_npz_shim_state_builder(state_builder):
-        raise ValueError(
-            "Moju Studio: π-constant residuals are disabled with the **NPZ Path A shim**, "
-            "because `state_pred` does not change when constants are scaled — results would "
-            "not reflect scale invariance of a recomputing model. "
-            "Use a `state_builder` that recomputes from `constants` (Python API, or set "
-            "`st.session_state['studio_recomputing_state_builder']` to that callable), "
-            "or turn off π-constant on scaling audits."
-        )
-
-    for spec in pi_specs:
-        name = spec.get("name", "?")
-        ck = list(spec.get("invariance_compare_keys") or [])
-        if not ck:
-            raise ValueError(
-                f"scaling audit {name!r}: π-constant requires non-empty `invariance_compare_keys` "
-                "(which state keys to compare after scaling constants)."
-            )
+    """Legacy no-op; scaling audit / π-constant was removed from Moju."""
+    _ = (use_path_b, scaling_audit_specs, state_builder)
+    return
 
 
 def flatten_residuals(residuals: Dict[str, Any]) -> Dict[str, Any]:

@@ -1,4 +1,4 @@
-"""Law-linked implied constitutive / scaling diagnostics."""
+"""Law-linked implied constitutive diagnostics."""
 
 import jax.numpy as jnp
 

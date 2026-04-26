@@ -77,15 +77,6 @@ def implied_group_specs_for_laws(law_names: Iterable[str]) -> List[Dict[str, Any
     return _topological_sort_group_specs(specs)
 
 
-def implied_scaling_audit_specs_for_laws(
-    law_names: Iterable[str],
-    pred_keys: Set[str],
-) -> List[Dict[str, Any]]:
-    """Chain-rule scaling audits were removed; no implied scaling rows are injected."""
-    _ = (law_names, pred_keys)
-    return []
-
-
 def _topological_sort_group_specs(specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Run groups whose inputs are other groups' outputs after their producers."""
     if not specs:

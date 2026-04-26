@@ -99,7 +99,6 @@ def test_enrich_skips_when_output_not_needed_by_groups():
                 "state_map": {"k": "k", "rho": "rho", "cp": "cp"},
             }
         ],
-        "scaling_audit": [],
         "derived_state_chain": [],
     }
     enriched = enrich_fragment_from_model_audits(frag)

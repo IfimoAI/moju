@@ -64,23 +64,17 @@ def build_audit_spec_dict(
     output_key: str,
     state_map: Dict[str, str],
     implied_value_key: Optional[str] = None,
-    invariance_pi_constant: bool = False,
-    invariance_compare_keys: Optional[Sequence[str]] = None,
-    invariance_scale_c: float = 10.0,
 ) -> Dict[str, Any]:
-    """Build a JSON-compatible dict for MonitorConfig.from_dict (constitutive or scaling row)."""
+    """Build a JSON-compatible dict for MonitorConfig.from_dict (constitutive row)."""
+    if category != "constitutive":
+        raise ValueError("category must be constitutive")
     d: Dict[str, Any] = {
         "name": name,
         "output_key": output_key,
         "state_map": dict(state_map),
-        "invariance_pi_constant": bool(invariance_pi_constant),
-        "invariance_compare_keys": list(invariance_compare_keys or []),
-        "invariance_scale_c": float(invariance_scale_c),
     }
     if implied_value_key:
         d["implied_value_key"] = implied_value_key
-    if category not in ("constitutive", "scaling"):
-        raise ValueError("category must be constitutive or scaling")
     return d
 
 
@@ -111,7 +105,7 @@ def merge_simple_config_with_json_override(
 ) -> Dict[str, Any]:
     """
     Start from ``simple`` fragment. For each of ``laws``, ``groups``, ``constitutive_audit``,
-    ``scaling_audit``, and ``derived_state_chain``, if that key is present in the parsed
+    and ``derived_state_chain``, if that key is present in the parsed
     override JSON, the override list replaces the form-built list (including explicit ``[]``).
     ``constants`` are shallow-merged; ``primary_fields`` are replaced if present in the override.
     """
@@ -119,7 +113,6 @@ def merge_simple_config_with_json_override(
         "laws": list(simple.get("laws") or []),
         "groups": list(simple.get("groups") or []),
         "constitutive_audit": list(simple.get("constitutive_audit") or []),
-        "scaling_audit": list(simple.get("scaling_audit") or []),
         "constants": dict(simple.get("constants") or {}),
         "primary_fields": list(simple.get("primary_fields") or []),
         "derived_state_chain": list(simple.get("derived_state_chain") or []),
@@ -132,7 +125,7 @@ def merge_simple_config_with_json_override(
     if not isinstance(j, dict):
         raise ValueError("JSON override must be an object")
 
-    for key in ("laws", "groups", "constitutive_audit", "scaling_audit", "derived_state_chain"):
+    for key in ("laws", "groups", "constitutive_audit", "derived_state_chain"):
         if key in j and j[key] is not None:
             out[key] = list(j[key])
 

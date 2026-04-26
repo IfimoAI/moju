@@ -25,11 +25,9 @@ from apps.moju_studio.config_forms import (
     group_parameter_names,
     law_parameter_names,
     model_parameter_names,
-    scaling_fn_parameter_names,
 )
 from apps.moju_studio.studio_implied_groups import (
     implied_group_specs_for_laws,
-    implied_scaling_audit_specs_for_laws,
     merge_implied_groups_first,
 )
 from moju.monitor.closure_registry import GROUP_FNS, MODEL_FNS
@@ -46,7 +44,7 @@ STUDIO_LAW_NAMES: tuple[str, ...] = tuple(list_law_fd_supported_laws())
 
 STUDIO_MODEL_NAMES: tuple[str, ...] = tuple(sorted(closure_model_names()))
 
-# Common dimensionless groups for scaling audits + engine ``groups`` specs.
+# Common dimensionless groups for engine ``groups`` specs (computed before laws).
 STUDIO_GROUP_NAMES: tuple[str, ...] = (
     "re",
     "pr",
@@ -99,11 +97,10 @@ MODEL_DEFAULT_OUTPUT_KEY: Dict[str, str] = {
 
 def _group_default_output_key(name: str) -> str:
     """
-    Default ``output_key`` for a user-selected scaling ``group`` row.
+    Default ``output_key`` for a user-selected ``group`` row.
 
     Must match **Laws.*** dimensionless argument names (``fo``, ``re``, ``pe``, …) and
     implied-group injection so the planner does not ask for ``Fo`` when the law expects ``fo``.
-    Multi-segment registry names keep Pascal-style joining except where ``specials`` override.
     """
     specials = {
         "nu": "Nu",
@@ -129,10 +126,11 @@ def build_studio_auto_fragment(
     constant_keys: Set[str],
 ) -> Dict[str, Any]:
     """
-    Build ``laws``, ``groups``, ``constitutive_audit``, ``scaling_audit``, ``primary_fields``.
+    Build ``laws``, ``groups``, ``constitutive_audit``, ``primary_fields``.
 
     Raises ``ValueError`` if any name is not allowlisted or missing from registries.
     """
+    _ = constant_keys
     allow_laws = set(STUDIO_LAW_NAMES)
     allow_models = set(STUDIO_MODEL_NAMES)
     allow_groups = set(STUDIO_GROUP_NAMES_EFFECTIVE)
@@ -145,7 +143,7 @@ def build_studio_auto_fragment(
             raise ValueError(f"Model {n!r} is not in the Studio constitutive allowlist")
     for n in group_names:
         if n not in allow_groups or n not in GROUP_FNS:
-            raise ValueError(f"Group {n!r} is not in the Studio scaling allowlist")
+            raise ValueError(f"Group {n!r} is not in the Studio group allowlist")
 
     laws: List[Dict[str, Any]] = []
     for name in law_names:
@@ -170,36 +168,17 @@ def build_studio_auto_fragment(
         )
 
     user_groups: List[Dict[str, Any]] = []
-    scaling: List[Dict[str, Any]] = []
     for name in group_names:
         out_k = _group_default_output_key(name)
         args = group_parameter_names(name)
         sm = {a: a for a in args}
         user_groups.append(build_group_spec(name, out_k, sm))
-        scaling.append(
-            build_audit_spec_dict(
-                category="scaling",
-                name=name,
-                output_key=out_k,
-                state_map=sm,
-                invariance_pi_constant=False,
-            )
-        )
-
-    implied_sa = implied_scaling_audit_specs_for_laws(law_names, pred_keys)
-    have_scaling_out = {s.get("output_key") for s in scaling}
-    for row in implied_sa:
-        ok = row.get("output_key")
-        if ok not in have_scaling_out:
-            scaling.insert(0, row)
-            have_scaling_out.add(ok)
 
     implied = implied_group_specs_for_laws(law_names)
     groups = merge_implied_groups_first(implied, user_groups)
 
-    li_c, li_s = merge_law_implied_audit_specs(laws, enabled=True)
+    li_c, _li_s = merge_law_implied_audit_specs(laws, enabled=True)
     constitutive = li_c + constitutive
-    scaling = li_s + scaling
 
     pf = sorted(k for k in pred_keys if k not in _COORD_ALL)[:24]
     if not pf:
@@ -209,7 +188,6 @@ def build_studio_auto_fragment(
         "laws": laws,
         "groups": groups,
         "constitutive_audit": constitutive,
-        "scaling_audit": scaling,
         "law_implied_audits": True,
         "primary_fields": pf,
         "derived_state_chain": [],
