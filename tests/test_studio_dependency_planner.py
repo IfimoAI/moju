@@ -118,6 +118,7 @@ def test_plan_fourier_t_laplacian_derivable_with_fd():
     )
     assert "T_laplacian" in p.derivable_law_fd_if_enabled
     assert not p.has_blocking_gaps()
+    assert p.implied_manual_laws == []
 
 
 def test_plan_fourier_fo_not_required_in_npz_when_implied_group():
@@ -151,6 +152,26 @@ def test_plan_markdown_coordinate_t_hint_when_t_missing():
     assert "Note (`t`)" in md
     assert "mesh time coordinate" in md
     assert "key_t" in md
+
+
+def test_plan_marks_manual_implied_laws_when_no_auto_mapping():
+    frag = build_studio_auto_fragment(
+        law_names=["laplace_equation"],
+        model_names=[],
+        group_names=[],
+        pred_keys={"phi_laplacian"},
+        constant_keys=set(),
+    )
+    p = plan_dependencies(
+        frag,
+        pred_keys={"phi_laplacian"},
+        constant_keys=set(),
+        auto_path_b_derivatives=False,
+        fill_law_fd=False,
+    )
+    assert "laplace_equation" in p.implied_manual_laws
+    md = p.to_markdown()
+    assert "Manual constitutive implied specs recommended" in md
 
 
 def test_plan_fourier_blocked_without_primitive():

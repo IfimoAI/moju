@@ -16,6 +16,7 @@ from moju.monitor.law_fd_recipes import (
     _resolve_source_state_key,
 )
 from moju.monitor.law_implied_diagnostics import effective_audit_specs_for_fragment
+from moju.monitor.law_implied_diagnostics import supported_auto_implied_laws_for
 from moju.monitor.path_b_derivatives import PathBGridConfig
 
 
@@ -210,6 +211,7 @@ class DependencyPlan:
     derivable_audit_if_auto_fd: List[str] = field(default_factory=list)
     audit_fd_blocked: List[str] = field(default_factory=list)
     unresolved_state_keys: List[str] = field(default_factory=list)
+    implied_manual_laws: List[str] = field(default_factory=list)
 
     def has_blocking_gaps(self) -> bool:
         """True if the user likely needs to change NPZ, constants, or Run FD options."""
@@ -277,6 +279,16 @@ class DependencyPlan:
             for k in self.unresolved_state_keys:
                 lines.append(f"- `{k}`")
             lines.append("")
+        if self.implied_manual_laws:
+            lines.append(
+                "**Manual constitutive implied specs recommended** (no auto law-linked implied mapping)"
+            )
+            for n in self.implied_manual_laws:
+                lines.append(f"- `{n}`")
+            lines.append(
+                "Add explicit `constitutive_audit` rows if you want implied constitutive checks for these laws."
+            )
+            lines.append("")
         if not any(
             [
                 self.missing_state_direct,
@@ -314,6 +326,10 @@ def plan_dependencies(
         set(pred_keys), ckeys
     )
     chain_axes = chain_axes_from_audits(frag_d)
+    _li_supported, _li_manual = supported_auto_implied_laws_for(
+        frag_d.get("laws") or []
+    )
+    plan.implied_manual_laws = sorted(_li_manual)
 
     eff = plan.effective_available_keys
     group_outputs = collect_group_output_keys_from_fragment(frag_d)

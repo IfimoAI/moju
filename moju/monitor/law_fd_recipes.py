@@ -140,7 +140,7 @@ LAW_FD_RECIPES: Dict[str, Dict[str, LawFDArgRecipe]] = {
         "p_grad": LawFDArgRecipe("grad_scalar", source_arg="p"),
     },
     "viscous_dissipation": {"u_grad": LawFDArgRecipe("jacobian", source_arg="u")},
-    # faraday_law: curl E — not supported
+    "faraday_law": {},  # curl E requires dedicated vector-curl support (not generic FD yet)
     "hookes_law_residual": {},
 }
 

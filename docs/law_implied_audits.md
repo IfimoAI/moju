@@ -1,6 +1,6 @@
 # Law-linked implied audits
 
-When you select a governing law in `ResidualEngine` or `MonitorConfig`, Moju can **automatically** add matching **constitutive** or **scaling** audit rows. Each row uses the standard **`implied_delta`** closure.
+When you select a governing law in `ResidualEngine` or `MonitorConfig`, Moju can **automatically** add matching **constitutive** audit rows for supported laws. Each row uses the standard **`implied_delta`** closure.
 
 Let \(F\) be the catalog model output (`Models.*` from state) and \(\tilde F\) the **implied** value from rearranging the law (`implied_fn` / `implied_value_key`). The stored tensor is **always** the nondimensional discrepancy
 
@@ -19,7 +19,7 @@ There is **no** raw SI-difference mode. **`Models.*`** still uses your physical 
 **Implied \(\tilde F\)** is computed by **rearranging the law** using the fields referenced by that law’s **`state_map`** (e.g. α\_implied = T_t / T_laplacian for Fourier conduction).
 
 This answers: *“Does the constitutive closure in the catalog agree with what the PDE fields imply locally?”* without requiring **`state_ref`**. It is **not** a claim that the closure matches experiment—only that it matches the **same predicted state** you pass to the law.
-These implied residual keys are included in normal category/overall admissibility scoring by default (same as other constitutive/scaling residual keys).
+These implied residual keys are included in normal category/overall admissibility scoring by default (same as other constitutive residual keys).
 
 **Training vs eval:** **`implied_delta`** law-linked rows run in both **`run_mode="training"`** (default) and **`run_mode="eval"`**. **`ref_delta`** on those rows (and separate scaling **`ref_delta`** / **`data/`** pred−ref) runs only when you call **`compute_residuals(..., run_mode="eval", state_ref=...)`**. See [monitor_training_vs_eval.md](monitor_training_vs_eval.md).
 
@@ -64,6 +64,8 @@ The mapping lives in **`moju/monitor/law_implied_diagnostics.py`** (`_LAW_IMPLIE
 | `momentum_navier_stokes` | `dynamic_viscosity_from_re` | μ\_implied from momentum-balance-implied Re and μ = ρ|u|L/Re. |
 | `stokes_flow` | `dynamic_viscosity_from_re` | μ\_implied from Stokes-balance-implied Re and μ = ρ|u|L/Re. |
 | `burgers_equation` | `dynamic_viscosity_from_re` | μ\_implied from Burgers-balance-implied Re and μ = ρ|u|L/Re. |
+| `momentum_incompressible_newtonian_laplacian` | `turbulent_viscous_acceleration_*` | Three auto rows: k-ω, k-ε, and Smagorinsky viscous acceleration closures. |
+| `momentum_compressible_newtonian_laplacian` | `turbulent_viscous_acceleration_compressible_*` | Three auto rows: compressible k-ω, k-ε, and Smagorinsky viscous acceleration closures. |
 
 ## Unsupported laws (best effort)
 
@@ -73,6 +75,8 @@ Laws without an entry add **no** law-linked implied rows. These gaps are intenti
 - geometry/material specific inversion not encoded as one catalog closure (`laplace_beltrami`, `hookes_law_residual`),
 - model-context-dependent closure choice (`darcy_flow`, `brinkman_extension`),
 - laws requiring domain-specific closure/model choices not yet encoded in the constitutive registry.
+
+If you still want implied constitutive checks for unsupported laws, add explicit rows under `constitutive_audit` (for example with `implied_fn`).
 
 ## Studio and dependency planning
 

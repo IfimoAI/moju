@@ -15,9 +15,10 @@ See README "Law-linked implied audits" and :func:`merge_law_implied_audit_specs`
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import jax.numpy as jnp
+from moju.piratio.laws import Laws
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -536,6 +537,7 @@ _LAW_IMPLIED_UNSUPPORTED_REASONS: Dict[str, str] = {
     "brinkman_extension": "mixed porous/viscous closure needs medium-specific constitutive choices",
     "viscous_dissipation": "dissipation source does not map to one implied constitutive/scaling scalar",
     "hookes_law_residual": "elastic constitutive inversion is material-model specific",
+    "faraday_law": "curl-based electromagnetic closure requires domain-specific constitutive target choice",
 }
 
 
@@ -551,6 +553,66 @@ def law_implied_unsupported_reasons() -> Dict[str, str]:
     law-linked implied registry rather than leaving them implicit.
     """
     return dict(_LAW_IMPLIED_UNSUPPORTED_REASONS)
+
+
+def all_law_names() -> Tuple[str, ...]:
+    """All public ``Laws.*`` registry names."""
+    names = [
+        n
+        for n in dir(Laws)
+        if not n.startswith("_") and callable(getattr(Laws, n))
+    ]
+    return tuple(sorted(names))
+
+
+def classify_laws_for_implied_diagnostics() -> Dict[str, str]:
+    """
+    Law coverage map for auto implied constitutive diagnostics.
+
+    Values are one of:
+    - ``"supported"``: law has entries in ``_LAW_IMPLIED_ROWS``
+    - ``"user_specified_only"``: law is intentionally unsupported in
+      ``_LAW_IMPLIED_UNSUPPORTED_REASONS`` (user can add manual audits)
+    - ``"unclassified"``: law is in ``Laws.*`` but absent from both maps
+    """
+    supported: Set[str] = set(_LAW_IMPLIED_ROWS.keys())
+    unsupported: Set[str] = set(_LAW_IMPLIED_UNSUPPORTED_REASONS.keys())
+    out: Dict[str, str] = {}
+    for n in all_law_names():
+        if n in supported:
+            out[n] = "supported"
+        elif n in unsupported:
+            out[n] = "user_specified_only"
+        else:
+            out[n] = "unclassified"
+    return out
+
+
+def list_unclassified_laws_for_implied_diagnostics() -> Tuple[str, ...]:
+    """``Laws.*`` names missing from both supported and unsupported implied maps."""
+    cls = classify_laws_for_implied_diagnostics()
+    return tuple(sorted(n for n, c in cls.items() if c == "unclassified"))
+
+
+def supported_auto_implied_laws_for(
+    laws_spec: Sequence[Dict[str, Any]],
+) -> Tuple[List[str], List[str]]:
+    """
+    For selected laws, return ``(supported, user_specified_only)`` names.
+
+    ``supported`` are those that auto-prepend implied constitutive rows.
+    ``user_specified_only`` are intentionally unsupported laws where users should
+    provide explicit constitutive audit specs.
+    """
+    selected = {
+        str(law.get("name") or "")
+        for law in laws_spec
+        if isinstance(law, dict) and str(law.get("name") or "")
+    }
+    cls = classify_laws_for_implied_diagnostics()
+    supported = sorted(n for n in selected if cls.get(n) == "supported")
+    manual = sorted(n for n in selected if cls.get(n) == "user_specified_only")
+    return supported, manual
 
 
 def effective_audit_specs_for_fragment(d: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:

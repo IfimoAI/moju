@@ -1261,10 +1261,11 @@ def _build_plotly_monitor_figure_single(
     # Training: vs-step Overall Admissibility (eval mode uses full-width category row only).
     if (not is_eval) and any(np.isfinite(overall_adm)):
         adm_hover = [format_admissibility_pct(float(y)) if np.isfinite(y) else "N/A" for y in overall_adm]
+        overall_adm_pct = overall_adm * 100.0
         fig.add_trace(
             go.Scatter(
                 x=indices,
-                y=overall_adm,
+                y=overall_adm_pct,
                 mode="lines",
                 name="Overall Admissibility",
                 line=dict(color=OVERALL_ADMISSIBILITY_TREND_LINE_COLOR, width=2.8),
@@ -1304,14 +1305,15 @@ def _build_plotly_monitor_figure_single(
             fig.add_trace(
                 go.Scatter(
                     x=[final_idx],
-                    y=[last_ov],
+                    y=[last_ov * 100.0],
                     mode="markers",
                     marker=dict(
                         size=10,
                         color=OVERALL_ADMISSIBILITY_TREND_LINE_COLOR,
                         line=dict(width=2, color="#ffffff"),
                     ),
-                    hovertemplate="Final<br>%{y:.2%}<extra></extra>",
+                    text=[format_admissibility_pct(last_ov)] if math.isfinite(last_ov) else ["N/A"],
+                    hovertemplate="Final<br>%{text}<extra></extra>",
                     showlegend=False,
                 ),
                 row=3,
@@ -1321,20 +1323,20 @@ def _build_plotly_monitor_figure_single(
         if finite.size:
             y_lo = float(np.min(finite))
             y_hi = float(np.max(finite))
-            ymin = max(0.0, y_lo - 0.05)
-            y_top = min(1.02, y_hi + 0.08)
-            if y_top - ymin < 0.08:
+            ymin = max(0.0, y_lo - 0.05) * 100.0
+            y_top = min(1.02, y_hi + 0.08) * 100.0
+            if y_top - ymin < 8.0:
                 mid = 0.5 * (ymin + y_top)
-                ymin = max(0.0, mid - 0.04)
-                y_top = min(1.02, mid + 0.04)
+                ymin = max(0.0, mid - 4.0)
+                y_top = min(102.0, mid + 4.0 + 6.0)
             trend_y_min, trend_y_top = ymin, y_top
 
     if mode_eff != "eval":
         fig.update_xaxes(title_text=step_label, row=3, col=1, automargin=True)
-        yaxis_kw: Dict[str, Any] = dict(title_text="Admissibility (%)", tickformat=".2f%", row=3, col=1, automargin=True)
+        yaxis_kw: Dict[str, Any] = dict(title_text="Admissibility (%)", tickformat=".0f", row=3, col=1, automargin=True)
         if trend_y_min is not None and trend_y_top is not None:
             yaxis_kw["range"] = [trend_y_min, trend_y_top]
-            yaxis_kw["tickvals"] = [0, 0.25, 0.5, 0.75, 1.0]
+            yaxis_kw["tickvals"] = [0, 25, 50, 75, 100]
         fig.update_yaxes(**yaxis_kw)
         _apply_enterprise_axis_style(fig, 3, 1, y_log=False, x_grid=False, y_grid=True)
 
@@ -1362,11 +1364,12 @@ def _build_plotly_monitor_figure_single(
         for v in cat_labels_raw
     ]
     cat_vals = [float(v) if math.isfinite(v) else 0.0 for _, v in labels_vals]
+    cat_x_pct = [v * 100.0 for v in cat_vals]
     cat_text = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for _, v in labels_vals]
     cat_colors = [_kpi_indicator_value_color(v, warn_color=warn_color) for v in cat_vals]
     fig.add_trace(
         go.Bar(
-            x=cat_vals,
+            x=cat_x_pct,
             y=cat_labels,
             orientation="h",
             width=CATEGORY_BREAKDOWN_BAR_WIDTH,
@@ -1384,8 +1387,8 @@ def _build_plotly_monitor_figure_single(
     cat_yaxis = getattr(fig.data[-1], "yaxis", "y2")
     fig.add_shape(
         type="line",
-        x0=ADM_HIGH_THRESHOLD,
-        x1=ADM_HIGH_THRESHOLD,
+        x0=ADM_HIGH_THRESHOLD * 100.0,
+        x1=ADM_HIGH_THRESHOLD * 100.0,
         y0=0,
         y1=1,
         xref=cat_axis,
@@ -1414,7 +1417,7 @@ def _build_plotly_monitor_figure_single(
     fig.update_xaxes(
         title_text="Admissibility (%)",
         range=list(category_adm_bar_axis_range_percent_full()),
-        tickformat=".2f%",
+        tickformat=".0f",
         row=3,
         col=cat_col,
         automargin=True,
@@ -2059,9 +2062,9 @@ def build_plotly_category_admissibility_bar_figure(
     metrics = bundle["metrics"]
     blabels, bvals = _three_pillar_labels_values(metrics)
     bcolors = [_adm_bar_color_plotly(v) for v in bvals]
-    bx = [v if math.isfinite(v) else 0.0 for v in bvals]
+    bx = [(float(v) * 100.0) if math.isfinite(v) else 0.0 for v in bvals]
     btext = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for v in bvals]
-    adm_ht = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for v in bx]
+    adm_ht = [format_admissibility_pct(v) if math.isfinite(v) else "N/A" for v in bvals]
 
     Tc = _ENTERPRISE_THEME
     fig = go.Figure()
@@ -2083,7 +2086,7 @@ def build_plotly_category_admissibility_bar_figure(
     fig.update_xaxes(
         title_text="Admissibility (%)",
         range=list(_adm_full),
-        tickformat=".2f%",
+        tickformat=".0f",
         automargin=True,
     )
     fig.update_yaxes(automargin=True)

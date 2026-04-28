@@ -4,10 +4,13 @@ import jax.numpy as jnp
 
 from moju.monitor import ResidualEngine, audit
 from moju.monitor.law_implied_diagnostics import (
+    classify_laws_for_implied_diagnostics,
     law_implied_unsupported_reasons,
+    list_unclassified_laws_for_implied_diagnostics,
     list_laws_with_implied_diagnostics,
     merge_fragment_law_implied_audit_specs,
     merge_law_implied_audit_specs,
+    supported_auto_implied_laws_for,
 )
 from moju.piratio.groups import Groups
 from moju.piratio.laws import Laws
@@ -148,6 +151,30 @@ def test_unsupported_reasons_present_and_disjoint_from_supported():
     assert unsupported
     assert all(bool(v and str(v).strip()) for v in unsupported.values())
     assert supported.isdisjoint(set(unsupported.keys()))
+
+
+def test_all_laws_are_classified_for_implied_diagnostics():
+    cls = classify_laws_for_implied_diagnostics()
+    assert cls
+    assert set(cls.values()) <= {"supported", "user_specified_only", "unclassified"}
+    assert list_unclassified_laws_for_implied_diagnostics() == ()
+
+
+def test_faraday_law_has_explicit_unsupported_reason():
+    unsupported = law_implied_unsupported_reasons()
+    assert "faraday_law" in unsupported
+    assert "curl" in unsupported["faraday_law"].lower()
+
+
+def test_supported_auto_implied_laws_for_selected_specs():
+    supported, manual = supported_auto_implied_laws_for(
+        [
+            {"name": "fourier_conduction", "state_map": {}},
+            {"name": "laplace_equation", "state_map": {}},
+        ]
+    )
+    assert "fourier_conduction" in supported
+    assert "laplace_equation" in manual
 
 
 def test_fick_implied_mass_diffusivity_near_zero():

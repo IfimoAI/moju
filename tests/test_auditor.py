@@ -15,6 +15,7 @@ from moju.monitor import (
     visualize,
 )
 from moju.monitor.auditor import (
+    ADM_HIGH_THRESHOLD,
     DEFAULT_VISUALIZE_TITLE_EVAL,
     DEFAULT_VISUALIZE_TITLE_TEST,
     DEFAULT_VISUALIZE_TITLE_TRAINING,
@@ -1126,11 +1127,11 @@ class TestVisualize:
         fig = visualize(log, backend="plotly", mode="training")
         assert fig is not None
 
-        # Overall Admissibility axis stays percentage with two decimals.
+        # Overall Admissibility trend: y-axis 0–100 with integer ticks (title still Admissibility (%)).
         yaxes = [getattr(fig.layout, k) for k in dir(fig.layout) if k.startswith("yaxis")]
         assert any(
             getattr(getattr(ax, "title", None), "text", None) == "Admissibility (%)"
-            and getattr(ax, "tickformat", None) == ".2f%"
+            and getattr(ax, "tickformat", None) == ".0f"
             for ax in yaxes
         )
 
@@ -1204,7 +1205,12 @@ class TestVisualize:
         ), "overall line is merged into layout title, not a separate annotation"
         assert not any("Final Step:" in str(getattr(a, "text", "") or "") for a in anns)
         shapes = list(getattr(fig.layout, "shapes", []) or [])
-        assert any(abs(float(getattr(s, "x0", -1)) - 0.95) < 1e-9 for s in shapes if getattr(s, "type", None) == "line")
+        _thr_x = ADM_HIGH_THRESHOLD * 100.0
+        assert any(
+            abs(float(getattr(s, "x0", -1)) - _thr_x) < 1e-6
+            for s in shapes
+            if getattr(s, "type", None) == "line"
+        )
         hover_templates = [str(getattr(t, "hovertemplate", "")) for t in fig.data]
         assert any("scale_k=" in h for h in hover_templates)
 
@@ -1510,7 +1516,11 @@ class TestVisualize:
         anns_b = list(getattr(fig_b.layout, "annotations", []) or [])
         assert any("Ifimo Lab: Moju Forensic Suite" in str(getattr(a, "text", "")) for a in anns_b)
         shapes = list(getattr(fig.layout, "shapes", []) or [])
-        assert any(getattr(s, "type", None) == "line" and abs(float(getattr(s, "x0", -1)) - 0.95) < 1e-9 for s in shapes)
+        _thr_x = ADM_HIGH_THRESHOLD * 100.0
+        assert any(
+            getattr(s, "type", None) == "line" and abs(float(getattr(s, "x0", -1)) - _thr_x) < 1e-6
+            for s in shapes
+        )
         hovers = [str(getattr(tr, "hovertemplate", "")) for tr in fig.data]
         assert any("scale_k=" in ht for ht in hovers)
 

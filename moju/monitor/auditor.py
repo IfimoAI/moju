@@ -39,6 +39,7 @@ from moju.monitor.derived_state_chain import all_ref_keys_from_chain, keys_produ
 from moju.monitor.law_implied_diagnostics import (
     merge_fragment_law_implied_audit_specs,
     merge_law_implied_audit_specs,
+    supported_auto_implied_laws_for,
 )
 from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
@@ -1504,6 +1505,15 @@ class ResidualEngine:
         def _maybe_log_infer(msg: str) -> None:
             if self.enable_omit_messages:
                 inferred_msgs.append(msg)
+
+        _auto_implied_supported, _auto_implied_manual = supported_auto_implied_laws_for(
+            self.laws_spec
+        )
+        if _auto_implied_manual:
+            _maybe_log_infer(
+                "law_implied_audits: user-specified constitutive audits required for laws without "
+                f"auto implied mapping: {', '.join(_auto_implied_manual)}"
+            )
 
         ref_for_audits = state_ref if run_mode == "eval" else None
         if run_mode == "training" and state_ref is not None:

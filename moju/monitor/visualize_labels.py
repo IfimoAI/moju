@@ -103,10 +103,10 @@ def category_adm_bar_x_range(vals: List[float]) -> Tuple[float, float]:
 
 def category_adm_bar_axis_range_percent_full() -> Tuple[float, float]:
     """
-    Fixed horizontal axis range for category admissibility bar charts so the x-axis
-    always spans 0–100% (data remain in [0, 1]; use with tickformat ``.2f%``).
+    Fixed axis range for category admissibility bar charts when values are plotted on a
+    **0–100** admissibility scale (fraction × 100). Use with axis title ``Admissibility (%)``.
     """
-    return (0.0, 1.0)
+    return (0.0, 100.0)
 
 
 def pretty_residual_key(flat_key: str) -> str:

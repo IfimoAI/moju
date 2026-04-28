@@ -17,6 +17,7 @@ class TestListSupported:
         names = list_law_fd_supported_laws()
         assert "laplace_equation" in names
         assert "mass_incompressible" in names
+        assert "faraday_law" not in names
 
 
 class TestFillLawFdLaplace:

@@ -57,7 +57,7 @@ def test_category_adm_bar_x_range_empty_defaults_unit_interval():
 
 
 def test_category_adm_bar_axis_range_percent_full():
-    assert category_adm_bar_axis_range_percent_full() == (0.0, 1.0)
+    assert category_adm_bar_axis_range_percent_full() == (0.0, 100.0)
 
 
 def test_category_adm_bar_x_range_high_scores_cap_at_one():
