@@ -263,3 +263,53 @@ def test_ns_stokes_burgers_implied_mu_keys_present():
         engine = ResidualEngine(laws=[{"name": law_name, "state_map": sm}], law_implied_audits=True)
         r = engine.compute_residuals(dict(common))
         assert key in r["constitutive"]
+
+
+def test_fourier_implied_works_with_user_fns_materializing_k_rho_alpha():
+    """
+    Users can avoid precomputing constitutive inputs by supplying callables keyed by output state.
+    Here: k(T), rho(T), and alpha(k,rho,cp) are built via user_fns so implied thermal_diffusivity runs.
+    """
+    cp = jnp.array(900.0)
+    engine = ResidualEngine(
+        constants={"cp": cp},
+        laws=[
+            {
+                "name": "fourier_conduction",
+                "state_map": {
+                    "T_t": "T_t",
+                    "T_laplacian": "T_xx",
+                    "fo": "fo",
+                    "t": "t",
+                    "L": "L",
+                },
+                "fn": Laws.fourier_conduction,
+            }
+        ],
+        groups=[
+            {
+                "name": "fo",
+                "output_key": "fo",
+                "state_map": {"alpha": "alpha", "t": "t", "L": "L"},
+                "fn": Groups.fo,
+            }
+        ],
+        user_fns={
+            "k": lambda T: 200.0 * (1.0 + 0.001 * (jnp.asarray(T) - 400.0)),
+            "rho": lambda T: 2700.0 * (1.0 - 0.0001 * (jnp.asarray(T) - 400.0)),
+            "alpha": lambda k, rho, cp: jnp.asarray(k) / (jnp.asarray(rho) * jnp.asarray(cp)),
+        },
+        law_implied_audits=True,
+    )
+    T_xx = jnp.array(2.0)
+    T_t = jnp.array(1.0)
+    state = {
+        "T": jnp.array(420.0),
+        "T_t": T_t,
+        "T_xx": T_xx,
+        "t": jnp.array(5.0),
+        "L": jnp.array(0.02),
+    }
+    r = engine.compute_residuals(state)
+    key = "thermal_diffusivity/law_fourier_conduction/implied_delta"
+    assert key in r["constitutive"]

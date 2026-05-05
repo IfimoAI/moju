@@ -2,7 +2,20 @@
 
 `ResidualEngine.compute_residuals` supports **`run_mode="training"`** (default) and **`run_mode="eval"`**.
 
-Per flat residual key, the log’s **`rms`** field is **R_eff** = √(mean(r²)+δ²)·**Q^0.5** with **δ²** = **`R_EFF_RMS_JITTER_SQ`** in `moju.monitor.auditor`, **Q** = RMS(m)/mean(m), **m_i** = √(r_i²+ε²) over collocation values (**Q = 1** when |r| is uniform, or for a single point). **R_norm** = **R_eff**/scale_k as elsewhere in the monitor. Default **`scale_k`** for **laws/** and nondimensional **implied_delta** / **ref_delta** is **2×10⁻²** (`DEFAULT_NONDIM_R_NORM_SCALE_K` in `moju.monitor.auditor`). Optional **`audit` / `visualize`** argument **`r_ref`** overrides **`scale_k`** per key.
+Per flat residual key, the log’s **`rms`** field is **R_eff** = √(mean(r²)+δ²)·**Q^0.5** with **δ²** = **`R_EFF_RMS_JITTER_SQ`** in `moju.monitor.auditor`, **Q** = RMS(m)/mean(m), **m_i** = √(r_i²+ε²) over collocation values (**Q = 1** when |r| is uniform, or for a single point). **R_norm** = **R_eff**/scale_k as elsewhere in the monitor. Default **`scale_k`** for **laws/** and nondimensional **implied_delta** / **ref_delta** is **2×10⁻³** (`DEFAULT_NONDIM_R_NORM_SCALE_K` in `moju.monitor.auditor`). Optional **`audit` / `visualize`** argument **`r_ref`** overrides **`scale_k`** per key.
+
+For minimal workflows, `build_minimal_residual_engine(law_names=[...], coord_dimension=1|2|3)` can auto-wire identity law specs plus inferred `Groups.*` rows and run in best-effort partial mode (skips unresolved rows and logs `unresolved_dependencies`). The configured `coord_dimension` is reused when `compute_residuals(..., auto_path_b_derivatives=True)` builds default FD grid settings.
+
+## Minimal inputs by dimension (quick helper)
+
+For Path B finite-difference inference (`auto_path_b_derivatives=True`), provide:
+
+- **1D:** coordinate `x`
+- **2D:** coordinates `x`, `y`
+- **3D:** coordinates `x`, `y`, `z`
+- **Unsteady terms** (e.g., `_t`, `_tt`): add coordinate `t` in any dimension
+
+Also provide the primitive field(s) used by your selected law(s), such as `T` or `u`, plus any required material/property terms not inferable from your supplied state/constants.
 
 ## Training (`run_mode="training"`)
 

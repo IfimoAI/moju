@@ -31,7 +31,13 @@ import optax
 from moju.piratio import Operators
 from moju.piratio.groups import Groups
 from moju.piratio.laws import Laws
-from moju.monitor import ResidualEngine, audit, build_loss, visualize
+from moju.monitor import (
+    ResidualEngine,
+    audit,
+    build_loss,
+    build_minimal_residual_engine,
+    visualize,
+)
 
 L = 0.02
 k_solid = 200.0
@@ -186,6 +192,14 @@ engine = ResidualEngine(
         },
     ],
 )
+
+# Minimal-input variant (law-first). Keep explicit engine above for full control.
+# engine = build_minimal_residual_engine(
+#     law_names=["fourier_conduction"],
+#     constants={"cp": cp},
+#     coord_dimension=1,  # set once per problem (1D/2D/3D)
+#     best_effort_partial=True,
+# )
 
 
 def build_state_for_engine(params, t, x):

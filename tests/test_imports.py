@@ -34,14 +34,22 @@ def test_import_monitor_all():
         admissibility_level,
         audit,
         build_loss,
+        build_minimal_residual_engine,
+        build_law_spec_identity,
         build_monitor_visualize_bundle,
         build_spatial_rnorm_panels_from_residuals,
+        implied_group_specs_for_laws,
+        merge_implied_groups_first,
         visualize,
         list_constitutive_models,
         list_scaling_closure_ids,
     )
+    assert callable(build_minimal_residual_engine)
+    assert callable(build_law_spec_identity)
     assert callable(build_monitor_visualize_bundle)
     assert callable(build_spatial_rnorm_panels_from_residuals)
+    assert callable(implied_group_specs_for_laws)
+    assert callable(merge_implied_groups_first)
     assert ResidualEngine is not None
     assert callable(list_constitutive_models)
     assert callable(list_scaling_closure_ids)
@@ -55,10 +63,14 @@ def test_monitor_module_has_all():
         "ResidualEngine",
         "admissibility_level",
         "build_loss",
+        "build_minimal_residual_engine",
         "audit",
         "build_monitor_visualize_bundle",
         "visualize",
         "build_spatial_rnorm_panels_from_residuals",
+        "build_law_spec_identity",
+        "implied_group_specs_for_laws",
+        "merge_implied_groups_first",
         "apply_closure_discrepancy_normalize",
         "list_constitutive_models",
         "list_scaling_closure_ids",

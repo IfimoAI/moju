@@ -5,10 +5,16 @@ from moju.monitor.auditor import (
     admissibility_level,
     audit,
     build_loss,
+    build_minimal_residual_engine,
     build_monitor_visualize_bundle,
     list_constitutive_models,
     list_scaling_closure_ids,
     visualize,
+)
+from moju.monitor.law_group_inference import (
+    build_law_spec_identity,
+    implied_group_specs_for_laws,
+    merge_implied_groups_first,
 )
 from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
 from moju.monitor.config import AuditSpec, MonitorConfig, audit_spec_to_engine_dict
@@ -37,6 +43,7 @@ __all__ = [
     "ResidualEngine",
     "admissibility_level",
     "build_loss",
+    "build_minimal_residual_engine",
     "audit",
     "build_monitor_visualize_bundle",
     "visualize",
@@ -62,4 +69,7 @@ __all__ = [
     "pretty_residual_key",
     "pretty_category_name",
     "build_spatial_rnorm_panels_from_residuals",
+    "build_law_spec_identity",
+    "implied_group_specs_for_laws",
+    "merge_implied_groups_first",
 ]

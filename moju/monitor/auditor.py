@@ -24,6 +24,7 @@ from __future__ import annotations
 import datetime
 import math
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Union
+import inspect
 
 import jax
 import jax.numpy as jnp
@@ -40,6 +41,11 @@ from moju.monitor.law_implied_diagnostics import (
     merge_fragment_law_implied_audit_specs,
     merge_law_implied_audit_specs,
     supported_auto_implied_laws_for,
+)
+from moju.monitor.law_group_inference import (
+    build_law_spec_identity,
+    implied_group_specs_for_laws,
+    merge_implied_groups_first,
 )
 from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
@@ -169,6 +175,30 @@ def _build_state(
         state_map = spec["state_map"]
         output_key = spec["output_key"]
         kwargs = _kwargs_from_state(merged, constants, state_map)
+        fn = _get_fn(spec, Groups)
+        state[output_key] = fn(**kwargs)
+        merged[output_key] = state[output_key]
+    return state
+
+
+def _build_state_best_effort(
+    state_pred: Dict[str, Any],
+    constants: Dict[str, Any],
+    groups_spec: List[Dict],
+    *,
+    log_skip: Callable[[str], None],
+) -> Dict[str, Any]:
+    """Best-effort group execution: skip groups whose inputs are unavailable."""
+    state = dict(state_pred)
+    merged = {**constants, **state}
+    for spec in groups_spec:
+        state_map = spec["state_map"]
+        output_key = spec["output_key"]
+        try:
+            kwargs = _kwargs_from_state(merged, constants, state_map)
+        except KeyError as err:
+            log_skip(f"group:{spec.get('name')} skipped in best_effort_partial mode: {err}")
+            continue
         fn = _get_fn(spec, Groups)
         state[output_key] = fn(**kwargs)
         merged[output_key] = state[output_key]
@@ -1310,6 +1340,71 @@ def _coord_snapshot_from_merged(merged: Mapping[str, Any]) -> Dict[str, List[flo
     return out
 
 
+def _default_minimal_user_fns() -> Dict[str, Callable[..., Any]]:
+    """
+    Default helper closures for the minimal-input path.
+    These are only used when the caller does not provide the same key in ``user_fns``.
+    """
+    return {
+        "alpha": lambda k, rho, cp: jnp.asarray(k) / (jnp.asarray(rho) * jnp.asarray(cp)),
+        "D": lambda fo_mass, t, L: jnp.asarray(fo_mass) * (jnp.asarray(L) ** 2) / jnp.asarray(t),
+        "nu": lambda mu, rho: jnp.asarray(mu) / jnp.asarray(rho),
+        "mu": lambda rho, nu: jnp.asarray(rho) * jnp.asarray(nu),
+        "kappa": lambda u, L, pe: jnp.asarray(u) * jnp.asarray(L) / jnp.asarray(pe),
+        "c": lambda omega, L, st_wave: jnp.asarray(omega) * jnp.asarray(L) / jnp.asarray(st_wave),
+    }
+
+
+def build_minimal_residual_engine(
+    *,
+    law_names: Sequence[str],
+    constants: Optional[Dict[str, Any]] = None,
+    groups: Optional[List[Dict[str, Any]]] = None,
+    constitutive_audit: Optional[List[Dict[str, Any]]] = None,
+    user_fns: Optional[Dict[str, Callable[..., Any]]] = None,
+    derived_state_chain: Optional[List[Dict[str, Any]]] = None,
+    state_builder: Optional[
+        Callable[[Any, Any, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
+    ] = None,
+    primary_fields: Optional[List[str]] = None,
+    law_implied_audits: bool = True,
+    enable_omit_messages: bool = True,
+    best_effort_partial: bool = True,
+    coord_dimension: int = 1,
+) -> "ResidualEngine":
+    """
+    Build a law-first :class:`ResidualEngine` for minimal-input workflows.
+
+    The engine auto-builds identity law specs from ``law_names`` and prepends implied
+    groups for those laws. User-provided group specs override inferred groups by
+    ``output_key``.
+    """
+    if coord_dimension not in (1, 2, 3):
+        raise ValueError("coord_dimension must be one of {1, 2, 3}")
+    law_names = [str(n) for n in (law_names or []) if str(n).strip()]
+    if not law_names:
+        raise ValueError("build_minimal_residual_engine requires at least one law name")
+    laws = [build_law_spec_identity(n) for n in law_names]
+    implied_groups = implied_group_specs_for_laws(law_names)
+    merged_groups = merge_implied_groups_first(implied_groups, list(groups or []))
+    eff_user_fns = dict(_default_minimal_user_fns())
+    eff_user_fns.update(dict(user_fns or {}))
+    return ResidualEngine(
+        constants=constants,
+        laws=laws,
+        groups=merged_groups,
+        constitutive_audit=constitutive_audit,
+        derived_state_chain=derived_state_chain,
+        state_builder=state_builder,
+        user_fns=eff_user_fns,
+        enable_omit_messages=enable_omit_messages,
+        primary_fields=primary_fields,
+        law_implied_audits=law_implied_audits,
+        best_effort_partial=best_effort_partial,
+        default_coord_dimension=coord_dimension,
+    )
+
+
 class ResidualEngine:
     """
     Governing laws (Laws.*), optional group specs to enrich state, and model/group closures.
@@ -1360,9 +1455,12 @@ class ResidualEngine:
         state_builder: Optional[
             Callable[[Any, Any, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
         ] = None,
+        user_fns: Optional[Dict[str, Callable[..., Any]]] = None,
         enable_omit_messages: bool = True,
         primary_fields: Optional[List[str]] = None,
         law_implied_audits: bool = True,
+        best_effort_partial: bool = False,
+        default_coord_dimension: int = 1,
     ):
         law_implied_enabled = bool(law_implied_audits)
         # MonitorConfig convenience
@@ -1393,26 +1491,49 @@ class ResidualEngine:
         self.constitutive_custom = list(constitutive_custom or [])
         self.derived_state_chain = list(derived_state_chain or [])
         self.state_builder = state_builder
+        self.user_fns = dict(user_fns or {})
         self.enable_omit_messages = bool(enable_omit_messages)
         self.primary_fields = list(primary_fields or ["T", "u", "v", "w", "p", "rho"])
+        self.best_effort_partial = bool(best_effort_partial)
+        if default_coord_dimension not in (1, 2, 3):
+            raise ValueError("default_coord_dimension must be one of {1, 2, 3}")
+        self.default_coord_dimension = int(default_coord_dimension)
 
         # Config-time validation (low effort)
-        def _validate_specs(specs: Sequence[Dict[str, Any]], registry: Dict[str, Any], category: str) -> None:
+        def _validate_specs(
+            specs: Sequence[Dict[str, Any]],
+            registry: Dict[str, Any],
+            category: str,
+        ) -> None:
             for spec in specs:
                 if "name" not in spec:
                     raise ValueError(f"{category} spec missing 'name'")
                 name = spec["name"]
+                pred_fn_key = spec.get("pred_fn_key")
+                pred_state_map = spec.get("pred_state_map")
                 reg = registry.get(name)
-                if reg is None:
+                if reg is None and pred_fn_key is None:
                     raise ValueError(f"{category} spec name {name!r} is not registered")
                 if "output_key" not in spec:
                     raise ValueError(f"{category}:{name} missing 'output_key'")
                 if "state_map" not in spec or not isinstance(spec["state_map"], dict):
                     raise ValueError(f"{category}:{name} missing 'state_map' dict")
-                _, arg_names = reg
-                missing_args = [an for an in arg_names if an not in spec["state_map"]]
-                if missing_args:
-                    raise ValueError(f"{category}:{name} state_map missing args: {missing_args}")
+                if pred_fn_key is not None:
+                    if category != "constitutive":
+                        raise ValueError(
+                            f"{category}:{name} pred_fn_key is only supported for constitutive specs"
+                        )
+                    if not isinstance(pred_fn_key, str) or not pred_fn_key.strip():
+                        raise ValueError(f"{category}:{name} pred_fn_key must be a non-empty string")
+                    if pred_state_map is None or not isinstance(pred_state_map, dict):
+                        raise ValueError(f"{category}:{name} pred_state_map missing dict")
+                    if not pred_state_map:
+                        raise ValueError(f"{category}:{name} pred_state_map must be non-empty")
+                else:
+                    _, arg_names = reg
+                    missing_args = [an for an in arg_names if an not in spec["state_map"]]
+                    if missing_args:
+                        raise ValueError(f"{category}:{name} state_map missing args: {missing_args}")
                 ivk = spec.get("implied_value_key")
                 ifn = spec.get("implied_fn")
                 if ivk and ifn is not None:
@@ -1533,7 +1654,119 @@ class ResidualEngine:
             for w in _dwarn:
                 _maybe_log_infer(f"derived_state: {w}")
 
-        state_pred_built = self._state_builder(state_for_groups)
+        def _materialize_user_keys(
+            state: Dict[str, Any],
+            *,
+            needed_keys: Set[str],
+            stage: str,
+        ) -> None:
+            """
+            Best-effort: for each missing required key in ``needed_keys``, if a callable is present in
+            ``self.user_fns`` under that key, compute and add it to ``state`` (and log inferred).
+            Keys are treated as **output state keys**: e.g. key ``'k'`` uses ``user_fns['k']``.
+            """
+            if not self.user_fns:
+                return
+            # Multi-pass so dependencies like alpha(k,rho,cp) can resolve after k and rho are built.
+            max_passes = max(2, len(needed_keys) * 2)
+            missing_inputs_last: Dict[str, List[str]] = {}
+            for _ in range(max_passes):
+                progressed = False
+                for k in sorted(needed_keys):
+                    if k in state or k in self.constants:
+                        continue
+                    fn = self.user_fns.get(k)
+                    if fn is None:
+                        continue
+                    try:
+                        sig = inspect.signature(fn)
+                    except (TypeError, ValueError):
+                        sig = None
+                    if sig is None:
+                        raise TypeError(
+                            f"user_fns[{k!r}] must be a Python callable with an inspectable signature"
+                        )
+                    kwargs: Dict[str, Any] = {}
+                    missing: List[str] = []
+                    for p in sig.parameters.values():
+                        if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
+                            raise TypeError(
+                                f"user_fns[{k!r}] must not use *args/**kwargs; declare explicit inputs"
+                            )
+                        pn = str(p.name)
+                        v = state.get(pn)
+                        if v is None:
+                            v = self.constants.get(pn)
+                        if v is None:
+                            missing.append(pn)
+                        else:
+                            kwargs[pn] = v
+                    if missing:
+                        # Not computable yet; try again after other keys materialize.
+                        missing_inputs_last[str(k)] = list(missing)
+                        continue
+                    out_v = fn(**kwargs)
+                    if out_v is None:
+                        continue
+                    if isinstance(out_v, str):
+                        raise TypeError(
+                            f"user_fns[{k!r}] returned a string; expected numeric array-like"
+                        )
+                    state[k] = out_v
+                    progressed = True
+                    _maybe_log_infer(f"user_fns({stage}): materialized {k!r} from callable inputs")
+                    if str(k) in missing_inputs_last:
+                        missing_inputs_last.pop(str(k), None)
+                if not progressed:
+                    break
+
+            # If a required key has a callable but still can't be computed, raise a targeted error.
+            blocked = [
+                k
+                for k in sorted(needed_keys)
+                if k not in state
+                and k not in self.constants
+                and k in self.user_fns
+                and k in missing_inputs_last
+            ]
+            if blocked and not self.best_effort_partial:
+                avail = sorted(set(state.keys()) | set(self.constants.keys()))
+                lines = [
+                    f"user_fns could not materialize required keys at stage={stage!r}:"
+                ]
+                for k in blocked[:32]:
+                    miss = missing_inputs_last.get(k) or []
+                    lines.append(f"- {k!r}: missing inputs {miss}")
+                lines.append("")
+                lines.append(f"Available keys (state ∪ constants): {avail[:64]}")
+                if len(avail) > 64:
+                    lines.append(f"... (+{len(avail) - 64} more)")
+                raise KeyError("\n".join(lines))
+            if blocked and self.best_effort_partial:
+                _maybe_log_omit(
+                    f"user_fns({stage}) unresolved outputs in best_effort_partial mode: {blocked}"
+                )
+
+        # Materialize keys needed to run groups (inputs only).
+        group_needed: Set[str] = set()
+        for spec in self.groups_spec:
+            sm = spec.get("state_map") or {}
+            if isinstance(sm, dict):
+                group_needed |= set(str(v) for v in sm.values())
+        # Include transitive deps: a needed key (e.g. 'alpha') may require other user_fns outputs
+        # (e.g. 'k', 'rho') to be materialized first.
+        group_needed |= set(self.user_fns.keys())
+        _materialize_user_keys(state_for_groups, needed_keys=group_needed, stage="pre_groups")
+
+        if self.best_effort_partial:
+            state_pred_built = _build_state_best_effort(
+                state_for_groups,
+                self.constants,
+                self.groups_spec,
+                log_skip=_maybe_log_omit,
+            )
+        else:
+            state_pred_built = self._state_builder(state_for_groups)
         merged = {**self.constants, **state_pred_built}
 
         def _state_ref_raw_after_derived(sr: Dict[str, Any]) -> Dict[str, Any]:
@@ -1558,7 +1791,11 @@ class ResidualEngine:
             from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
 
             if auto_path_b_derivatives is True:
-                grid = PathBGridConfig()
+                grid = PathBGridConfig(spatial_dimension=self.default_coord_dimension)
+                _maybe_log_infer(
+                    f"path_b_derivatives: using engine default coord dimension "
+                    f"{self.default_coord_dimension}D"
+                )
             elif isinstance(auto_path_b_derivatives, PathBGridConfig):
                 grid = auto_path_b_derivatives
             else:
@@ -1577,6 +1814,22 @@ class ResidualEngine:
             merged = {**self.constants, **state_pred_built}
             for w in pb_warn:
                 _maybe_log_infer(f"path_b_derivatives: {w}")
+                if (
+                    self.best_effort_partial
+                    and self.default_coord_dimension > 1
+                    and ("coord" in w.lower() or "meshgrid" in w.lower() or "separable" in w.lower())
+                ):
+                    _maybe_log_omit(
+                        f"path_b_derivatives hint: configured coord_dimension="
+                        f"{self.default_coord_dimension} requires compatible coordinates"
+                    )
+
+        # Materialize any remaining required keys for laws/groups/audits (after groups + FD).
+        needed_all = self.required_state_keys()
+        _materialize_user_keys(state_pred_built, needed_keys=set(needed_all), stage="post_fd")
+        merged = {**self.constants, **state_pred_built}
+
+        unresolved_dependencies: List[Dict[str, Any]] = []
 
         for spec in self.laws_spec:
             name = spec["name"]
@@ -1586,6 +1839,25 @@ class ResidualEngine:
                     merged, self.constants, state_map, law_context=str(name)
                 )
             except KeyError as err:
+                if self.best_effort_partial:
+                    missing = sorted(
+                        {
+                            str(v)
+                            for v in state_map.values()
+                            if v not in merged and v not in self.constants
+                        }
+                    )
+                    unresolved_dependencies.append(
+                        {
+                            "stage": "law",
+                            "name": str(name),
+                            "missing_keys": missing,
+                        }
+                    )
+                    _maybe_log_omit(
+                        f"law:{name} skipped in best_effort_partial mode: missing {missing}"
+                    )
+                    continue
                 if pb_warn:
                     tail = "\n".join(f"  - {w}" for w in pb_warn[:32])
                     raise KeyError(
@@ -1607,17 +1879,55 @@ class ResidualEngine:
                 output_key = spec.get("output_key")
                 state_map = spec.get("state_map") or {}
                 has_implied = bool(spec.get("implied_value_key")) or spec.get("implied_fn") is not None
+                missing = sorted(
+                    {
+                        str(v)
+                        for v in state_map.values()
+                        if v not in merged and v not in self.constants
+                    }
+                )
+                if missing and self.best_effort_partial:
+                    unresolved_dependencies.append(
+                        {
+                            "stage": category,
+                            "name": str(name),
+                            "missing_keys": missing,
+                        }
+                    )
+                    _maybe_log_omit(
+                        f"{category}:{name} skipped in best_effort_partial mode: missing {missing}"
+                    )
+                    continue
                 if ref_for_audits is None and not has_implied:
                     _maybe_log_omit(
                         f"{category}:{name} omitted: no ref_delta or implied_delta applicable"
                     )
                     continue
 
-                reg = registry.get(name)
-                if reg is None:
-                    # unknown function name -> omit silently (config validation should catch)
-                    continue
-                fn, arg_names = reg
+                fn = None
+                arg_names: Sequence[str] = ()
+                # Optional: callable-backed constitutive audit for implied/ref deltas.
+                pred_fn_key = spec.get("pred_fn_key")
+                if pred_fn_key is not None:
+                    if category != "constitutive":
+                        continue
+                    fn = self.user_fns.get(str(pred_fn_key))
+                    if fn is None:
+                        raise KeyError(
+                            f"constitutive:{name} pred_fn_key {pred_fn_key!r} not found in user_fns; "
+                            f"available: {sorted(self.user_fns.keys())}"
+                        )
+                    pred_state_map = spec.get("pred_state_map") or {}
+                    if not isinstance(pred_state_map, dict) or not pred_state_map:
+                        raise ValueError(f"constitutive:{name} pred_state_map must be a non-empty dict")
+                    state_map = pred_state_map
+                    arg_names = list(str(a) for a in pred_state_map.keys())
+                else:
+                    reg = registry.get(name)
+                    if reg is None:
+                        # unknown function name -> omit silently (config validation should catch)
+                        continue
+                    fn, arg_names = reg
                 base = spec.get("residual_basename") or name
 
                 if (
@@ -1699,6 +2009,8 @@ class ResidualEngine:
             entry["omitted"] = omitted_msgs
         if inferred_msgs:
             entry["inferred"] = inferred_msgs
+        if unresolved_dependencies:
+            entry["unresolved_dependencies"] = unresolved_dependencies
         if "coord_snapshot" not in entry:
             cs = _coord_snapshot_from_merged(merged)
             if cs:

@@ -84,6 +84,27 @@ If you still want implied constitutive checks for unsupported laws, add explicit
 
 **`apps/moju_studio/studio_dependency_planner`** uses **`effective_audit_specs_for_fragment(fragment)`** so required keys (e.g. **k**, **rho**, **cp** for Fourier) appear in preflight even though JSON exports omit **`implied_fn`**.
 
+## User functions for constitutive terms (Python-only)
+
+If a law-linked implied constitutive row requires inputs like **`k`**, **`rho`**, or **`mu`**, you can supply them either as arrays/scalars in `state_pred` / `constants`, **or** as Python callables keyed by the **output state key** via `ResidualEngine(user_fns=...)`.
+
+Example: let Moju materialize `k`, `rho`, and `alpha` from `T` (so the Fourier implied `thermal_diffusivity` check can run without you precomputing those fields):
+
+```python
+engine = ResidualEngine(
+    constants={"cp": 900.0},
+    laws=[{"name": "fourier_conduction", "state_map": {"T_t": "T_t", "T_laplacian": "T_xx", "fo": "fo", "t": "t", "L": "L"}}],
+    groups=[{"name": "fo", "output_key": "fo", "state_map": {"alpha": "alpha", "t": "t", "L": "L"}}],
+    user_fns={
+        "k": lambda T: 200.0 * (1.0 + 0.001 * (T - 400.0)),
+        "rho": lambda T: 2700.0 * (1.0 - 0.0001 * (T - 400.0)),
+        "alpha": lambda k, rho, cp: k / (rho * cp),
+    },
+)
+```
+
+Notes:
+- `user_fns` are **Python-only** (not JSON-serializable); Studio config previews remain conservative and will still list the raw keys (e.g. `k`, `rho`) as required unless you provide them in NPZ/constants.\n+
 ## Custom extensions
 
 Public helpers such as **`implied_re_momentum_navier_stokes`**, **`implied_mu_from_re_balance`**, etc., can be wrapped in your own **`AuditSpec(..., implied_fn=...)`** if you need a different **`state_map`** or an extra audit not yet in the registry.
