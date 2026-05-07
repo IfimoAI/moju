@@ -18,10 +18,8 @@ import jax
 import jax.numpy as jnp
 
 from moju.monitor.path_b_derivatives import (
-    MIN_POINTS_FD_ORDER_4,
     PathBGridConfig,
     _align_1d_field_and_coord,
-    _diff2_uniform_4th_1d,
     _fill_spatial_derivative,
     _fill_spatial_derivative_steady,
     _fill_temporal_derivative,
@@ -29,13 +27,10 @@ from moju.monitor.path_b_derivatives import (
     _infer_spatial_dim,
     _is_steady_leading_time_stack,
     _jnp_gradient_multi,
-    _laplacian_uniform_4th_nd,
     _merged,
     _meshgrid_separable_axis_coords,
     _rectilinear_meshgrid_1d_axes,
     _separable_1d_coords,
-    _uniform_1d_spacing,
-    _uniform_spacing_per_axis,
 )
 
 
@@ -165,14 +160,6 @@ def _scalar_laplacian_steady(
         except ValueError as e:
             warnings.append(str(e))
             return None
-        if cfg.fd_order == 4:
-            hs = _uniform_spacing_per_axis(
-                coords, tuple(int(s) for s in K.shape), warnings, context="separable laplacian"
-            )
-            if hs is not None and all(
-                int(K.shape[i]) >= MIN_POINTS_FD_ORDER_4 for i in range(dim)
-            ):
-                return _laplacian_uniform_4th_nd(K, hs)
         try:
             grads = _jnp_gradient_multi(K, coords)
             acc = jnp.zeros_like(K)
@@ -189,15 +176,6 @@ def _scalar_laplacian_steady(
         if aligned is None:
             return None
         K1, c1, orig_shape = aligned
-        if cfg.fd_order == 4:
-            h = _uniform_1d_spacing(c1)
-            if h is not None and int(K1.shape[0]) >= MIN_POINTS_FD_ORDER_4:
-                lap = _diff2_uniform_4th_1d(K1, h)
-                return jnp.reshape(lap, orig_shape)
-            if h is None:
-                warnings.append(
-                    "meshgrid 1D laplacian: fd_order=4 needs uniform x; using 2nd-order composition"
-                )
         g = _fill_spatial_derivative_steady(K1, "x", cfg, c1, y, z, dim, warnings)
         if g is None:
             return None
@@ -207,14 +185,6 @@ def _scalar_laplacian_steady(
         return jnp.reshape(lap, orig_shape)
     rect1d = _rectilinear_meshgrid_1d_axes(K, x, y, z, dim)
     if rect1d is not None:
-        if cfg.fd_order == 4:
-            hs = _uniform_spacing_per_axis(
-                rect1d, tuple(int(s) for s in K.shape), warnings, context="rectilinear laplacian"
-            )
-            if hs is not None and all(
-                int(K.shape[i]) >= MIN_POINTS_FD_ORDER_4 for i in range(dim)
-            ):
-                return _laplacian_uniform_4th_nd(K, hs)
         try:
             grads = _jnp_gradient_multi(K, rect1d)
             acc = jnp.zeros_like(K)
@@ -227,14 +197,6 @@ def _scalar_laplacian_steady(
             return None
     sep_axes = _meshgrid_separable_axis_coords(K, x, y, z, dim)
     if sep_axes is not None:
-        if cfg.fd_order == 4:
-            hs = _uniform_spacing_per_axis(
-                sep_axes, tuple(int(s) for s in K.shape), warnings, context="meshgrid laplacian"
-            )
-            if hs is not None and all(
-                int(K.shape[i]) >= MIN_POINTS_FD_ORDER_4 for i in range(dim)
-            ):
-                return _laplacian_uniform_4th_nd(K, hs)
         try:
             grads = _jnp_gradient_multi(K, sep_axes)
             acc = jnp.zeros_like(K)
@@ -252,10 +214,6 @@ def _scalar_laplacian_steady(
                 warnings.append(f"meshgrid laplacian: need {ax} same shape as field")
                 return None
             coords_m.append(c)
-    if cfg.fd_order == 4:
-        warnings.append(
-            "fd_order=4: curvilinear meshgrid laplacian; using 2nd-order jnp.gradient composition"
-        )
     try:
         grads = jnp.gradient(K, *coords_m)
         acc = jnp.zeros_like(K)
@@ -370,30 +328,6 @@ def _second_time_derivative(
     m: Dict[str, Any],
     warnings: List[str],
 ) -> Optional[jnp.ndarray]:
-    t = _get_coord(m, cfg, "t")
-    if t is None:
-        warnings.append("missing t for d2/dt2")
-        return None
-    if K.ndim == 0:
-        return None
-    if t.shape[0] != K.shape[0]:
-        warnings.append("t length must match K leading dimension for d2/dt2")
-        return None
-    nt = int(K.shape[0])
-    ht = _uniform_1d_spacing(t)
-    if cfg.fd_order == 4 and ht is None:
-        warnings.append(
-            "fd_order=4: non-uniform t spacing; using 2nd-order composition for d2/dt2"
-        )
-    if cfg.fd_order == 4 and ht is not None and nt >= MIN_POINTS_FD_ORDER_4:
-        tail = int(jnp.prod(jnp.array(K.shape[1:]))) if K.ndim > 1 else 1
-        K2 = jnp.reshape(K, (nt, tail))
-
-        def col_d2(col: jnp.ndarray) -> jnp.ndarray:
-            return _diff2_uniform_4th_1d(col, ht)
-
-        d2 = jax.vmap(col_d2, in_axes=1, out_axes=1)(K2)
-        return jnp.reshape(d2, K.shape)
     dt1 = _fill_temporal_derivative(K, cfg, m, warnings)
     if dt1 is None:
         return None

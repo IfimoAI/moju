@@ -6,10 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Changed
-
-- **Path B law FD default accuracy:** `PathBGridConfig` now has **`fd_order`** (**`2`** or **`4`**, default **`4`**). Uniform structured grids use **explicit 4th-order** finite differences (interior and boundary bands) for spatial and temporal derivatives used by **`law_fd_recipes`** / **`fill_path_b_derivatives`**. **Non-uniform** spacing, **short** axes (**`n < 5`**), and **curvilinear** meshgrid layouts **fall back** to **`jnp.gradient`** (2nd order) with warnings where applicable. Residuals from FD-filled laws may **shift** vs previous defaults (2nd-order-only). Use **`fd_order=2`** to match legacy behavior. See **`docs/path_b_fd.md`**.
-
 ### Breaking
 
 - **Law-linked `implied_delta` (balance form):** Auto constitutive rows from `moju.monitor.law_implied_diagnostics` for Fourier, Fick, wave, advection–diffusion (κ), Navier–Stokes / Stokes / Burgers (μ) now use **`implied_balance_fn`** and a **no-division** PDE balance with the model coefficient (e.g. \(T_t - \alpha_{\text{model}}\,T_{\text{laplacian}}\)), not ratio-style rearrangements. **`implied_delta` numeric values** for those keys change vs 1.0.x (zeros still align when the law balance holds). Turbulent viscous-acceleration law-linked rows are unchanged (**`pred − implied_fn`**). See `docs/law_implied_audits.md` and `moju.monitor.closure_registry.compute_implied_delta`.
