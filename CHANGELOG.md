@@ -10,6 +10,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Law-linked `implied_delta` (balance form):** Auto constitutive rows from `moju.monitor.law_implied_diagnostics` for Fourier, Fick, wave, advection–diffusion (κ), Navier–Stokes / Stokes / Burgers (μ) now use **`implied_balance_fn`** and a **no-division** PDE balance with the model coefficient (e.g. \(T_t - \alpha_{\text{model}}\,T_{\text{laplacian}}\)), not ratio-style rearrangements. **`implied_delta` numeric values** for those keys change vs 1.0.x (zeros still align when the law balance holds). Turbulent viscous-acceleration law-linked rows are unchanged (**`pred − implied_fn`**). See `docs/law_implied_audits.md` and `moju.monitor.closure_registry.compute_implied_delta`.
 
+## [1.0.2] - 2026-05-13
+
+### Changed
+
+- Refreshed the PyPI-facing README with concise SciML / Physics AI positioning and a minimal Path B 1D slab cooling quickstart that includes `visualize(...)`.
+- Updated GitHub Pages landing and overview docs to match current monitor behavior, training/eval semantics, and law-linked implied audits.
+- Highlighted the new `moju.torch` subpackage in public docs and PyPI metadata.
+- Updated Studio and focused docs to remove stale active scaling/π-constant messaging outside migration/history notes.
+
 ## [1.0.1] - 2026-05-13
 
 ### Fixed

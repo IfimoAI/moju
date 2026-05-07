@@ -4,11 +4,13 @@
 
 Per flat residual key, the log’s **`rms`** field is **R_eff** = √(mean(r²)+δ²)·**Q**^**p** with **δ²** = **`R_EFF_RMS_JITTER_SQ`** in `moju.monitor.auditor`, exponent **p** = **`R_EFF_Q_POWER`** (default **2.0**), **Q** = RMS(m)/mean(m), **m_i** = √(r_i²+ε²) over collocation values (**Q = 1** when |r| is uniform, or for a single point). **R_norm** = **R_eff**/scale_k as elsewhere in the monitor. Default **`scale_k`** for **laws/** and nondimensional **implied_delta** / **ref_delta** is **2×10⁻²** (`DEFAULT_NONDIM_R_NORM_SCALE_K` in `moju.monitor.auditor`). Optional **`audit` / `visualize`** argument **`r_ref`** overrides **`scale_k`** per key.
 
-For minimal workflows, `build_minimal_residual_engine(law_names=[...], coord_dimension=1|2|3)` can auto-wire identity law specs plus inferred `Groups.*` rows and run in best-effort partial mode (skips unresolved rows and logs `unresolved_dependencies`). The configured `coord_dimension` is reused when `compute_residuals(..., auto_path_b_derivatives=True)` builds default FD grid settings.
+For minimal workflows, `build_minimal_residual_engine(law_names=[...], coord_dimension=1|2|3)` can auto-wire identity law specs plus inferred `Groups.*` rows and run in best-effort partial mode (skips unresolved rows and logs `unresolved_dependencies`). The configured `coord_dimension` is reused only when you explicitly ask for Path B finite-difference inference with `compute_residuals(..., auto_path_b_derivatives=True)`.
 
 ## Minimal inputs by dimension (quick helper)
 
-For Path B finite-difference inference (`auto_path_b_derivatives=True`), provide:
+For direct Path B use, you may provide law inputs and derivatives yourself. For example, a 1D Fourier slab-cooling state can include `T`, `T_t`, `T_laplacian`, `x`, `t`, `L`, `k`, `rho`, `cp`, and `alpha`; no finite-difference inference is needed when those derivative keys are already present.
+
+If you do use Path B finite-difference inference (`auto_path_b_derivatives=True`), provide:
 
 - **1D:** coordinate `x`
 - **2D:** coordinates `x`, `y`
