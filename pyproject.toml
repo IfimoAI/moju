@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moju"
-version = "1.0.1"
-description = "Physics-informed machine learning framework for enforcing governing equations, and auditing physical consistency across PINNs, CFD surrogates, and other state predictors"
+version = "1.0.2"
+description = "Physics supervision and audit tools for SciML models, with JAX-native residuals and PyTorch support."
 readme = "README.md"
 authors = [{ name = "Ifimo Lab", email = "lab@ifimoanalytics.com" }]
 maintainers = [
@@ -13,7 +13,7 @@ maintainers = [
 ]
 license = { text = "MIT" }
 requires-python = ">=3.9"
-keywords = ["physics", "jax", "sciml", "pinn", "dimensionless", "cfd", "differentiable", "residual"]
+keywords = ["physics", "jax", "torch", "pytorch", "sciml", "pinn", "dimensionless", "cfd", "differentiable", "residual"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
@@ -43,6 +43,13 @@ ref_vtk = ["meshio>=5.3.0"]
 ref_foam = ["meshio>=5.3.0"]
 ref_hdf5 = ["h5py>=3.8.0"]
 ref_all = ["xarray>=2023.1.0", "meshio>=5.3.0", "h5py>=3.8.0", "scipy>=1.10.0"]
+
+[project.urls]
+Homepage = "https://ifimoai.github.io/moju/"
+Documentation = "https://ifimoai.github.io/moju/doc/overview.html"
+Source = "https://github.com/IfimoAI/moju"
+Changelog = "https://github.com/IfimoAI/moju/blob/main/CHANGELOG.md"
+Issues = "https://github.com/IfimoAI/moju/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

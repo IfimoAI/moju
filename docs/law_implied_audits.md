@@ -45,6 +45,12 @@ There is **no** raw SI-difference mode. **`Models.*`** still uses your physical 
 This answers: *“Does the constitutive closure in the catalog agree with what the PDE fields imply locally?”* without requiring **`state_ref`**. It is **not** a claim that the closure matches experiment—only that it matches the **same predicted state** you pass to the law.
 These implied residual keys are included in normal category/overall admissibility scoring by default (same as other constitutive residual keys).
 
+In the README's minimal 1D slab-cooling example, the user supplies a Path B `state_pred`
+with `T`, `T_t`, `T_laplacian`, coordinates, and material properties. Because those
+derivative keys are already present, no finite-difference inference is needed. Selecting
+`fourier_conduction` through `build_minimal_residual_engine(...)` is enough for Moju to
+prepend the `thermal_diffusivity/law_fourier_conduction` implied audit.
+
 **Training vs eval:** **`implied_delta`** law-linked rows run in both **`run_mode="training"`** (default) and **`run_mode="eval"`**. **`ref_delta`** on those rows (and separate **`data/`** pred−ref) runs only when you call **`compute_residuals(..., run_mode="eval", state_ref=...)`**. See [monitor_training_vs_eval.md](monitor_training_vs_eval.md).
 
 ## Configuration

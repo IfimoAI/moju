@@ -1,33 +1,35 @@
-# Launch announcement (draft)
+# Project Messaging Snippets
 
-Use the text below for LinkedIn, X/Twitter, or a short blog post. After you run `twine upload dist/*` (see [PUBLISHING.md](PUBLISHING.md)), replace the GitHub repo link with the PyPI link where appropriate.
+Use these short descriptions for PyPI, GitHub Releases, LinkedIn, X/Twitter, or a short project note.
 
----
+## One-line Description
 
-**One-line pitch**
+Moju provides physics supervision and audit tools for SciML models, with JAX-native residuals and PyTorch support.
 
-JAX-native physics for AI: dimensionless scaling, PDE residuals, and differential operators in one library.
+## Short Description
 
-**Short post (e.g. LinkedIn or Twitter)**
+Moju turns predicted state fields into governing-law residuals, physics losses, constitutive consistency checks, and audit reports. It is useful for PINNs, CFD surrogates, neural operators, digital twins, and other workflows where model outputs can be represented as state dictionaries.
 
-We're launching **moju** — a Python library that keeps the physics you trust (Reynolds number, conservation laws, constitutive models) at the center of AI for flow, heat, and simulation.
+The core is JAX-native. The `moju.torch` subpackage provides a PyTorch-facing residual engine, R_eff loss helpers, nondimensionalization utilities, and wrappers for using Moju laws with Torch tensors.
 
-One place for:
-• Dimensionless groups (Re, Pr, Nu, Ma, …)
-• Physical models (viscosity, density, heat transfer)
-• Conservation-law residuals (mass, momentum, heat)
-• Differential operators (gradient, Laplacian, curl) for neural-network fields
+Install:
 
-JAX-native and fully differentiable. For PINNs, surrogates, digital twins, and hybrid solvers.
+```bash
+pip install moju
+pip install "moju[viz]"
+pip install "moju[torch]"
+```
 
-Install: `pip install moju`  
-GitHub: https://github.com/IfimoAI/moju  
-Release: https://github.com/IfimoAI/moju/releases/tag/v0.1.0
+Links:
 
-**Even shorter (e.g. tweet)**
+- PyPI: https://pypi.org/project/moju/
+- GitHub: https://github.com/IfimoAI/moju
+- Docs: https://ifimoai.github.io/moju/
 
-Launching moju: JAX-native physics for AI — dimensionless groups, PDE residuals, and differential operators in one library. For flow, heat, and simulation. pip install moju → https://github.com/IfimoAI/moju
+## Short Social Post
 
----
+Moju is a lightweight physics supervision layer for SciML and Physics AI: governing-law residuals, constitutive consistency checks, admissibility audits, and Plotly diagnostics from predicted state fields. JAX-native core; PyTorch support via `moju.torch`.
 
-After publishing to PyPI, add: PyPI: https://pypi.org/project/moju/
+Install: `pip install moju`
+
+Docs: https://ifimoai.github.io/moju/

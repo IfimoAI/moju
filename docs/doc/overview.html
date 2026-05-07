@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Overview — moju</title>
+  <title>Overview - moju</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -21,115 +21,130 @@
     </nav>
 
     <h1>Overview</h1>
-    <p>moju is a JAX-native library for physics-informed and physics-supervised SciML. The package provides <strong>moju.piratio</strong> (Groups, Models, Laws, Operators) and <strong>moju.monitor</strong> (ResidualEngine, build_loss, audit, visualize) so you can train or constrain models with the equations you trust.</p>
+    <p>
+      moju is a physics supervision and audit library for SciML. The core is JAX-native:
+      <strong>moju.piratio</strong> provides Groups, Models, Laws, and Operators, while
+      <strong>moju.monitor</strong> provides ResidualEngine, build_loss, audit, and visualize.
+      The <strong>moju.torch</strong> namespace exposes a PyTorch-facing engine and interop helpers.
+    </p>
 
     <h2>Installation</h2>
-    <pre><code>pip install moju</code></pre>
-    <p>Optional: <code>pip install moju[units]</code> for Pint-based units; <code>pip install moju[dev]</code> for pytest, black, ruff; <code>pip install moju[ref]</code> for <code>xarray</code>-based <code>state_ref</code> loaders (CFD snapshots → dict with optional interpolation); <code>pip install moju[ref_vtk]</code> for VTU/VTK loaders; <code>pip install moju[ref_foam]</code> for OpenFOAM loaders; <code>pip install moju[ref_hdf5]</code> for HDF5 loaders.</p>
-
-    <h2>Quick start</h2>
-    <pre><code>import moju
-from moju.piratio import Groups, Models
-
-# Reynolds number and air density
-Re = Groups.re(u=1.0, L=0.1, rho=1000.0, mu=1e-3)
-rho = Models.ideal_gas_rho(P=101325.0, R=287.0, T=300.0)</code></pre>
+    <pre><code>pip install moju
+pip install "moju[viz]"      # Plotly dashboards
+pip install "moju[torch]"    # PyTorch + jax2torch support</code></pre>
+    <p>
+      Optional reference loaders are available with <code>moju[ref]</code>,
+      <code>moju[ref_vtk]</code>, <code>moju[ref_foam]</code>, and <code>moju[ref_hdf5]</code>.
+      PDF reports use <code>moju[report]</code>. Moju Studio uses <code>moju[studio]</code>
+      and, for HDF5/NetCDF uploads, <code>moju[studio-science]</code>.
+    </p>
 
     <h2>API at a glance</h2>
     <ul>
-      <li><strong><a href="groups.html">Groups</a></strong> — Dimensionless numbers: Re, Pr, Nu, Ma, Gr, Pe, St, Bi, Fo, Sc, Le, Kn, Bo, Ca, Eu, Da, Ec.</li>
-      <li><strong><a href="models.html">Models</a></strong> — Viscosity (Sutherland, VFT, power-law), density (ideal gas, Boussinesq), heat (Stefan-Boltzmann, Fourier), friction (Darcy-Weisbach, Colebrook), and more.</li>
-      <li><strong><a href="laws.html">Laws</a></strong> — Residuals for mass, momentum (Navier-Stokes, Stokes, Euler), heat/diffusion, Darcy/Brinkman, Poisson, wave, Burgers, Schrödinger, etc.</li>
-      <li><strong><a href="operators.html">Operators</a></strong> — gradient, jacobian, divergence, laplacian, curl (2D/3D), time_derivative, time_derivative_second, advection, symmetric_gradient.</li>
-      <li><strong><a href="#training-and-monitoring-residual-engine">ResidualEngine</a></strong> (<code>moju.monitor</code>) — compute_residuals, build_loss, audit, visualize; single log for RMS and metrics.</li>
+      <li><strong><a href="groups.html">Groups</a></strong> - Dimensionless numbers such as Re, Pr, Pe, Fo, Ma, Bi, Sc, Da, and related quantities.</li>
+      <li><strong><a href="models.html">Models</a></strong> - Constitutive relationships such as viscosity, density, diffusivity, heat transfer, friction, and turbulence closures.</li>
+      <li><strong><a href="laws.html">Laws</a></strong> - Residuals for heat/diffusion, wave, mass, momentum, Darcy/Brinkman, Poisson, Burgers, Schrodinger, and related equations.</li>
+      <li><strong><a href="operators.html">Operators</a></strong> - JAX autodiff helpers: gradient, jacobian, divergence, laplacian, curl, time derivatives, advection, and symmetric gradient.</li>
+      <li><strong><a href="#training-and-monitoring-residual-engine">ResidualEngine</a></strong> - Build residuals, physics losses, audit logs, and visual diagnostics.</li>
+      <li><strong><a href="#pytorch-support">moju.torch</a></strong> - PyTorch-facing residual engine, R_eff loss helpers, nondimensionalization helpers, and JAX-law wrappers.</li>
     </ul>
 
-    <p>All functions are JIT-compiled and support single-point or batched inputs (leading batch dimension). Use them inside loss functions and training loops with full JAX autodiff.</p>
-
     <h2>High-level architecture</h2>
-    <p>User config (Laws, Groups, optional <code>constitutive_audit</code>, Constants) and inputs (<code>state_pred</code> with predicted fields, optional <code>state_ref</code> for <code>data/</code> and constitutive <code>ref_delta</code> in eval) feed into <strong>ResidualEngine</strong>. By default, <strong>law-linked implied audits</strong> prepend extra <strong>constitutive</strong> rows derived from selected laws (see <a href="../law_implied_audits.md"><code>law_implied_audits.md</code></a>); disable with <code>MonitorConfig(law_implied_audits=False)</code>. Merged state = <code>state_pred</code> + constants + group outputs (<code>output_key</code>). Residuals: <strong>laws</strong>; <strong>constitutive</strong> (<code>ref_delta</code>, <code>implied_delta</code>); and <strong>data</strong> when <code>state_ref</code> is set in <code>run_mode="eval"</code>. Legacy logs may still contain <code>scaling/...</code> keys from older Moju versions. <strong>build_loss</strong> uses laws only; <strong>audit</strong> / <strong>visualize</strong> use the full log.</p>
+    <p>
+      User config and state dictionaries flow through <strong>ResidualEngine</strong>. Groups
+      materialize dimensionless quantities into merged state. Laws produce governing residuals.
+      Constitutive audits compare catalog models against references or implied values. Optional
+      <code>data/</code> residuals run in eval mode when <code>state_ref</code> is supplied.
+      <strong>build_loss</strong> uses law residuals for optimization; <strong>audit</strong>
+      and <strong>visualize</strong> summarize the full log.
+    </p>
     <div class="mermaid">
 flowchart TB
   subgraph config [User config]
     Laws[Laws specs]
-    Groups[Groups materialize Fo Bi etc]
-    ConstAudit[constitutive_audit]
+    Groups[Groups specs]
+    Constitutive[Constitutive audits]
     Constants[Constants]
   end
 
   subgraph inputs [Inputs]
-    StatePred[state_pred fields]
+    StatePred[state_pred]
     StateRef[state_ref optional]
   end
 
-  subgraph core [ResidualEngine]
-    Merge[Merge + run groups]
-    LawsR[Laws residuals]
-    ConstR[Constitutive closures]
-    DataR[data residual if state_ref]
+  subgraph engine [ResidualEngine]
+    Merge[Merge state constants groups]
+    LawResiduals[Laws residuals]
+    ConstitutiveResiduals[Constitutive residuals]
+    DataResiduals[data residuals in eval]
+    Log[Audit log]
   end
 
   StatePred --> Merge
   Constants --> Merge
   Groups --> Merge
-  Merge --> LawsR
-  Merge --> ConstR
-  StateRef --> DataR
-  config --> LawsR
-  ConstAudit --> ConstR
-
-  LawsR --> ResidualDict[Flat RMS keys laws constitutive data]
-  ConstR --> ResidualDict
-  DataR --> ResidualDict
-
-  ResidualDict --> BuildLoss[build_loss laws only]
-  BuildLoss --> PhysicsLoss[Physics loss scalar]
-  PhysicsLoss -->|"user adds data loss"| TotalLoss[total_loss]
-
-  ResidualDict --> Log[Log object]
+  Merge --> LawResiduals
+  Merge --> ConstitutiveResiduals
+  StateRef --> DataResiduals
+  Laws --> LawResiduals
+  Constitutive --> ConstitutiveResiduals
+  LawResiduals --> Log
+  ConstitutiveResiduals --> Log
+  DataResiduals --> Log
+  LawResiduals --> BuildLoss[build_loss]
   Log --> Audit[audit]
   Log --> Visualize[visualize]
     </div>
 
     <h2 id="training-and-monitoring-residual-engine">Training and monitoring (ResidualEngine)</h2>
-    <p><strong>ResidualEngine</strong>: <code>from moju.monitor import ResidualEngine, MonitorConfig, AuditSpec, audit_spec_to_engine_dict, build_loss, audit, visualize</code>. Configure <strong>laws</strong>, <strong>groups</strong> (for <code>Groups.*</code> outputs merged into state), and optional <strong>constitutive_audit</strong> tied to <code>Models.*</code>. Prefer the typed config (<code>MonitorConfig</code>, <code>AuditSpec</code>) for IDE autocompletion; serialize with <code>to_dict()</code>/<code>from_dict()</code> (<code>AuditSpec.implied_fn</code> is not serialized). <code>ResidualEngine(config=MonitorConfig(...))</code> merges <code>implied_fn</code> from live <code>AuditSpec</code> objects; for hand-built dict specs use <code>audit_spec_to_engine_dict(spec)</code>. Two entry paths: <strong>Path A</strong> builds <code>state_pred</code> via <code>state_builder</code>; <strong>Path B</strong> passes <code>state_pred</code> directly. Primary closure keys: <code>constitutive/&lt;name&gt;/...</code> (<code>ref_delta</code>, <code>implied_delta</code>), plus <code>data/&lt;field&gt;</code> in eval when <code>state_ref</code> is set.</p>
+    <p>
+      Path A builds <code>state_pred</code> from <code>(model, params, collocation)</code>
+      using a <code>state_builder</code>. Path B passes <code>state_pred</code> directly,
+      which is convenient for CFD snapshots, saved neural-operator fields, or already-computed
+      derivatives.
+    </p>
+    <p>
+      In the minimal 1D slab cooling example, Path B supplies <code>T</code>,
+      <code>T_t</code>, <code>T_laplacian</code>, <code>x</code>, <code>t</code>,
+      <code>L</code>, and material properties directly. No finite-difference inference is
+      needed. The Fourier conduction law runs from those fields, and the default law-linked
+      implied audit checks <code>Models.thermal_diffusivity(k, rho, cp)</code> against the
+      diffusivity implied by the law fields.
+    </p>
     <ul>
-      <li><strong>compute_residuals(...)</strong> — Path B: <code>compute_residuals(state_pred, state_ref=None, ...)</code>. Path A: <code>compute_residuals(state_pred=None, model=..., params=..., collocation=..., ...)</code> with <code>ResidualEngine(state_builder=...)</code>. Always runs laws and merges <strong>groups</strong>. Optional Path B FD: <code>auto_path_b_derivatives=True</code> or a <code>PathBGridConfig</code> with <code>fill_law_fd=True</code> fills missing <strong>registered</strong> law inputs from primitives on the same grid (<code>law_fd_recipes</code>, <code>list_law_fd_supported_laws()</code>). Constitutive <code>ref_delta</code> needs <code>state_ref</code> in <code>run_mode="eval"</code>; <code>implied_delta</code> needs <code>AuditSpec.implied_value_key</code> or <code>implied_fn</code> (and a resolvable implied value). If nothing applies, the spec is skipped (optional omit log). Use <code>required_state_keys()</code> to see required keys. Logs per-key RMS. Use <code>log_to_python=False</code> inside <code>jax.jit</code> / <code>jax.grad</code>.</li>
-      <li><strong>build_loss</strong> — Cascaded over <strong>laws</strong> only.</li>
-      <li><strong>audit</strong> — R_norm(k) = RMS(r_k)/scale_k; scale is state-derived by default (stored in each log entry as <code>entry["scale"]</code>). Passing <code>r_ref</code> overrides scale for those keys (e.g. baseline or training curves). Admissibility: per-key scores in <code>per_key</code>; each <code>per_category</code> bucket (<code>laws</code>, <code>constitutive</code>, <code>data</code>, and legacy <code>scaling</code> if present) is the geometric mean of scores in that category; <code>overall_admissibility_score</code> follows training vs eval roll-up rules in <code>docs/monitor_training_vs_eval.md</code>. Optional PDF (<code>pip install moju[report]</code>).</li>
-      <li><strong>visualize</strong> — Multi-panel Plotly dashboard from the log alone (install <code>plotly</code> or <code>moju[viz]</code>): per-key RMS/admissibility, category and overall trajectories (including <code>data/</code> keys), heatmap, top <code>R_norm</code> keys, closure-type summary, omitted/inferred counts, twin RMS/<code>R_norm</code>, category radar, and worst-key traces. Optional <code>r_ref</code> (same as <code>audit</code>).</li>
+      <li><strong>compute_residuals</strong> - runs laws, groups, constitutive audits, and optional eval data comparisons.</li>
+      <li><strong>build_loss</strong> - cascades over law residuals only, using the same robust R_eff reduction family as the monitor log.</li>
+      <li><strong>audit</strong> - reports R_norm = R_eff / scale_k, per-key scores, category scores, and overall admissibility according to training/eval roll-up rules.</li>
+      <li><strong>visualize</strong> - Plotly dashboard for residuals, category scores, spatial fields, and constitutive divergence/dissonance when closure debug data is available.</li>
     </ul>
-    <p><strong>Discover valid <code>AuditSpec.name</code> ids:</strong> for constitutive audits, <code>AuditSpec.name</code> must match a <code>Models.*</code> registry id (e.g. <code>sutherland_mu</code>). Use <code>list_scaling_closure_ids()</code> to list <code>Groups.*</code> names for <strong>groups</strong> specs.</p>
-    <pre><code>from moju.monitor import list_constitutive_models, list_scaling_closure_ids
+    <p>
+      Use <a href="../monitor_training_vs_eval.md">monitor_training_vs_eval.md</a> for
+      run-mode details and <a href="../law_implied_audits.md">law_implied_audits.md</a>
+      for the law-linked constitutive audit registry.
+    </p>
 
-print("Constitutive (Models.*) ids:", list_constitutive_models())
-print("Scaling (Groups.*) ids:", list_scaling_closure_ids())</code></pre>
-    <p><strong>Derivative strategies (Path B / CFD):</strong> for governing laws, <code>fill_path_b_derivatives</code> / <code>compute_residuals(..., auto_path_b_derivatives=...)</code> with <code>fill_law_fd=True</code> can fill registered inputs such as <code>phi_laplacian</code> or <code>u_grad</code> from <code>phi</code> and <code>u</code> on structured grids when those keys are missing.</p>
-    <p><strong>CFD snapshot cookbook:</strong> see <code>examples/cfd_snapshot_cookbook_heat_1d.py</code> for an end-to-end reference workflow (xarray snapshot → optional interpolation → smoothing → eval <code>data/</code> residual vs reference → interpret RMS/admissibility).</p>
-    <p><strong>Path B auto-FD cookbooks:</strong> <code>examples/cookbook_path_b_fd_law_laplace.py</code> (law input fill for <code>laplace_equation</code>).</p>
-    <p><strong>Turbulence-related constitutive audits:</strong> <code>examples/cookbook_turbulence_law_of_wall.py</code> (<code>Models.law_of_the_wall</code>), <code>examples/cookbook_turbulence_colebrook.py</code> (<code>Models.colebrook_friction</code>), <code>examples/cookbook_constitutive_smagorinsky.py</code> (<code>Models.smagorinsky_nu_t</code> LES template), <code>examples/cookbook_constitutive_k_epsilon.py</code> (<code>Models.k_epsilon_nu_t</code>), and <code>examples/cookbook_constitutive_k_omega.py</code> (<code>Models.k_omega_nu_t</code>). The k–ε/k–ω examples audit algebraic νₜ only; transport PDEs for k, ε, ω are separate (<code>Laws.*</code> / custom).</p>
-    <p><strong>Implied constitutive audit (<code>implied_delta</code>, no <code>state_ref</code>):</strong> <code>examples/cookbook_constitutive_implied_ideal_gas_rho.py</code> (<code>implied_value_key</code>), <code>examples/cookbook_constitutive_implied_power_law_fn.py</code> (<code>implied_fn</code>). Residual <code>F(pred args) − implied</code>; omitted if implied is missing.</p>
+    <h2 id="pytorch-support">PyTorch support</h2>
+    <p>
+      Install <code>moju[torch]</code> to use the <code>moju.torch</code> namespace.
+      It provides <code>TorchResidualEngine</code>, <code>build_loss_torch</code>,
+      <code>r_eff_scalar_torch</code>, Torch-native nondimensionalization helpers, and
+      <code>wrap_law_torch</code> for calling JAX laws from Torch tensors through
+      <code>jax2torch</code>.
+    </p>
+    <p>
+      See <code>scripts/torch_laws_jax2torch_example.py</code>,
+      <code>tests/test_torch_engine.py</code>, and <code>tests/test_torch_interop.py</code>
+      for the current public surface.
+    </p>
 
-    <h3 id="custom-physics-fn">Custom physics (optional <code>fn</code>)</h3>
-    <p>In law or group specs, add <code>"fn": your_callable</code>; kwargs from <code>state_map</code>. <strong>Laws</strong> return the PDE residual. <strong>Groups</strong> return a value stored at <code>output_key</code> in merged state.</p>
-    <p>For extra closure residuals, use register-style audit lists on the engine.</p>
-    <pre><code>import jax.numpy as jnp
-from moju.monitor import ResidualEngine, build_loss
-
-def my_residual(x):
-    return x - 1.0
-
-engine = ResidualEngine(
-    constants={},
-    laws=[{"name": "my_law", "state_map": {"x": "x"}, "fn": my_residual}],
-    groups=[],
-)
-state = {"x": jnp.array(2.0)}
-residuals = engine.compute_residuals(state)
-loss = build_loss(residuals)</code></pre>
-
-    <h2>Before / After Moju</h2>
-    <p>Corrected code snippets for the &ldquo;Hardwiring reality into every iteration&rdquo; comparison (pure JAX PINN vs physics-native moju): <a href="../before-after-moju.md">Before / After Moju (corrected)</a>.</p>
+    <h2>Examples and guides</h2>
+    <ul>
+      <li><code>examples/slab_cooling_demo.py</code> - full 1D slab cooling demo.</li>
+      <li><code>examples/cfd_snapshot_cookbook_heat_1d.py</code> - xarray snapshot to eval audit.</li>
+      <li><code>examples/cookbook_path_b_fd_law_laplace.py</code> - optional Path B finite-difference fill.</li>
+      <li><code>examples/cookbook_constitutive_divergence.py</code> - constitutive divergence dashboard.</li>
+      <li><code>scripts/torch_laws_jax2torch_example.py</code> - basic Torch interop.</li>
+    </ul>
 
     <p class="doc-footer">MIT License. Ifimo Lab / Ifimo Analytics.</p>
   </div>

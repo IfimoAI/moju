@@ -2,190 +2,130 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-
-  <title>Moju — Physics Admissibility for All Models</title>
-
-  <meta name="description" content="Moju is a physics AI framework for enforcing governing equations, dimensionless groups, and constitutive laws in machine learning models with built-in physics admissibility scoring." />
-
-  <meta name="keywords" content="Physics AI, PINNs, scientific machine learning, physics-informed neural networks, CFD surrogate modeling, dimensionless analysis, Buckingham pi theorem, engineering simulation AI" />
-
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Moju - Physics Supervision for SciML</title>
+  <meta name="description" content="Moju provides physics supervision and audit tools for SciML models, with JAX-native residuals, training/eval diagnostics, and PyTorch support." />
+  <meta name="keywords" content="Physics AI, SciML, PINNs, JAX, PyTorch, CFD surrogate modeling, dimensionless groups, constitutive audits" />
   <link rel="stylesheet" href="doc/style.css" />
 </head>
-
 <body>
-
 <div class="wrap">
   <header>
     <h1>Moju</h1>
-    <p><strong>Make AI models physically admissible and auditable.</strong></p>
-    <a href="https://github.com/IfimoAI/moju" target="_blank" rel="noreferrer noopener">View on GitHub</a>
+    <p><strong>Physics supervision and audit tools for SciML and Physics AI.</strong></p>
+    <p>
+      <a href="https://github.com/IfimoAI/moju" target="_blank" rel="noreferrer noopener">GitHub</a>
+      &nbsp;|&nbsp;
+      <a href="https://pypi.org/project/moju/" target="_blank" rel="noreferrer noopener">PyPI</a>
+      &nbsp;|&nbsp;
+      <a href="doc/overview.html">API overview</a>
+    </p>
   </header>
 
   <section>
     <h2>What is Moju?</h2>
     <p>
-      Moju is a lightweight framework for <strong>Physics AI and Scientific Machine Learning</strong> that enables you to:
+      Moju turns predicted state fields into governing-law residuals, physics losses,
+      constitutive consistency checks, and audit reports. It is JAX-native at the core,
+      with a PyTorch-facing interface through <code>moju.torch</code>.
     </p>
     <ul>
-      <li>Enforce governing equations and constitutive relationships</li>
-      <li>Incorporate dimensionless groups (π-groups)</li>
-      <li>Build physics-aware loss functions automatically</li>
-      <li>Audit how well your model respects physics</li>
+      <li>Compose physics from <code>Models</code>, <code>Groups</code>, and <code>Laws</code>.</li>
+      <li>Use <code>build_loss</code> for governing-law training losses.</li>
+      <li>Use <code>audit</code> and <code>visualize</code> for training/eval diagnostics.</li>
+      <li>Infer law-linked constitutive checks, such as Fourier conduction implying thermal diffusivity.</li>
+      <li>Apply the same residual and audit ideas to JAX and PyTorch workflows.</li>
     </ul>
   </section>
 
   <section>
-    <h2>Why Moju?</h2>
-    <p>Most Physics-Informed models stop at adding physics loss.</p>
-
-    <p><strong>Moju goes further.</strong></p>
-
-    <ul>
-      <li>✔ Structured physics: Models, Groups, and Laws</li>
-      <li>✔ Automatic residual construction</li>
-      <li>✔ Built-in physics auditing (admissibility scores)</li>
-      <li>✔ Works across PINNs, CFD surrogates, and other state predictors</li>
-    </ul>
+    <h2>Install</h2>
+    <pre><code>pip install moju
+pip install "moju[viz]"
+pip install "moju[torch]"</code></pre>
   </section>
 
   <section>
-    <h2>The Big Idea</h2>
-    <p>Moju treats physics as composable building blocks:</p>
-
-    <pre>
-Predictions (state_pred)
-        ↓
-Constitutive models
-        ↓
-Dimensionless groups (π)
-        ↓
-Governing laws
-        ↓
-Residuals → build_loss(residuals) → audit(engine.log)
-    </pre>
-
+    <h2>5-Minute Example: 1D Slab Cooling</h2>
     <p>
-      Instead of manually wiring physics losses, Moju builds residuals for you and produces admissibility diagnostics.
+      Minimal Path B flow: pass <code>state_pred</code> directly. The derivatives are already
+      provided, so no finite-difference inference is needed.
     </p>
-  </section>
+    <pre><code>import jax.numpy as jnp
+from moju.monitor import audit, build_loss, build_minimal_residual_engine, visualize
 
-  <section>
-    <h2>5-Minute Example</h2>
+L = 0.02
+rho, cp, k = 2700.0, 900.0, 200.0
+alpha = k / (rho * cp)
 
-    <pre><code>
-import jax.numpy as jnp
-from moju.monitor import ResidualEngine, build_loss, audit, MonitorConfig, AuditSpec
-from moju.piratio import Models, Groups
-
-mu0 = jnp.array(1.8e-5)
-T0 = jnp.array(273.0)
-S = jnp.array(110.4)
-
-T = jnp.array(300.0)
-mu = Models.sutherland_mu(T=T, mu0=mu0, T0=T0, S=S)
-
-Re = jnp.array(10.0)
-Pr = jnp.array(2.0)
-Pe = Groups.pe(re=Re, pr=Pr)
-
-cfg = MonitorConfig(
-    laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
-    groups=[
-        {
-            "name": "pe",
-            "output_key": "Pe",
-            "state_map": {"re": "Re", "pr": "Pr"},
-        }
-    ],
-    constitutive_audit=[
-        AuditSpec(
-            name="sutherland_mu",
-            output_key="mu",
-            state_map={"T": "T", "mu0": "mu0", "T0": "T0", "S": "S"},
-        )
-    ],
-)
-
-engine = ResidualEngine(config=cfg)
+x = jnp.linspace(0.0, L, 64)
+t = jnp.ones_like(x) * 10.0
+T = 300.0 + 20.0 * (1.0 - x / L) ** 2
+T_laplacian = jnp.ones_like(x) * (40.0 / (L**2))
+T_t = alpha * T_laplacian
 
 state_pred = {
-    "phi_xx": jnp.array(0.0),
+    "x": x,
+    "t": t,
     "T": T,
-    "mu0": mu0,
-    "T0": T0,
-    "S": S,
-    "mu": mu,
-    "Re": Re,
-    "Pr": Pr,
-    "Pe": Pe,
+    "T_t": T_t,
+    "T_laplacian": T_laplacian,
+    "L": jnp.ones_like(x) * L,
+    "k": jnp.ones_like(x) * k,
+    "rho": jnp.ones_like(x) * rho,
+    "cp": jnp.ones_like(x) * cp,
+    "alpha": jnp.ones_like(x) * alpha,
 }
 
-residuals = engine.compute_residuals(state_pred)
+engine = build_minimal_residual_engine(
+    law_names=["fourier_conduction"],
+    coord_dimension=1,
+)
+residuals = engine.compute_residuals(state_pred, run_mode="training")
 loss = build_loss(residuals)
 report = audit(engine.log)
-
-print("Overall admissibility:", report["overall_admissibility_score"], report["overall_admissibility_level"])
-print("Categories:", report["per_category"])
-    </code></pre>
-
-    <p><strong>Output (keys you’ll get):</strong></p>
-
-    <pre>
-Physics Admissibility Report
-Overall score:   report["overall_admissibility_score"]
-Overall level:  report["overall_admissibility_level"]
-Category scores: report["per_category"]["laws"|"constitutive"|"data"|…]
-Per-key metrics: report["per_key"]
-    </pre>
-
+fig = visualize(engine.log, engine=engine)</code></pre>
+    <p>
+      The Fourier law automatically adds the law-linked <code>thermal_diffusivity</code>
+      implied audit. <code>fig</code> is the Plotly dashboard.
+    </p>
   </section>
 
   <section>
     <h2>Core Concepts</h2>
-
     <ul>
-      <li><strong>Models</strong> → Constitutive relationships</li>
-      <li><strong>Groups</strong> → Dimensionless quantities (π-groups)</li>
-      <li><strong>Laws</strong> → Governing equations</li>
-      <li><strong>ResidualEngine</strong> → Builds residuals and audit logs (laws, <strong>groups</strong>, constitutive <code>ref_delta</code> / <code>implied_delta</code>, <code>data/</code> when <code>state_ref</code> is set in eval; optional Path B FD for registered law inputs; see <a href="doc/overview.html">Overview</a>)</li>
-      <li><strong>Law-linked implied audits</strong> (default) → Auto <code>implied_delta</code> rows from selected laws (e.g. Fourier → <code>thermal_diffusivity</code> vs α from fields); <a href="law_implied_audits.md">law_implied_audits.md</a></li>
-      <li><strong>build_loss</strong> → Physics loss from law residuals</li>
-      <li><strong>audit</strong> → Physics admissibility scoring</li>
+      <li><strong>Models</strong> - constitutive relationships.</li>
+      <li><strong>Groups</strong> - dimensionless quantities materialized into state.</li>
+      <li><strong>Laws</strong> - governing-equation residuals.</li>
+      <li><strong>ResidualEngine</strong> - runs laws, groups, constitutive audits, and optional data comparisons.</li>
+      <li><strong>audit</strong> - admissibility scoring from the log.</li>
+      <li><strong>visualize</strong> - Plotly dashboards for residuals, categories, spatial fields, and constitutive diagnostics.</li>
+      <li><strong>moju.torch</strong> - PyTorch-facing residual engine, loss helpers, and JAX-law wrappers.</li>
     </ul>
   </section>
 
   <section>
-    <h2>Use Cases</h2>
-
+    <h2>Learn More</h2>
     <ul>
-      <li>Physics-Informed Neural Networks (PINNs)</li>
-      <li>CFD surrogate modeling</li>
-      <li>Digital twins</li>
-      <li>Scale-invariant modeling using π-groups</li>
+      <li><a href="doc/overview.html">API and architecture overview</a></li>
+      <li><a href="monitor_training_vs_eval.md">Training vs eval behavior</a></li>
+      <li><a href="law_implied_audits.md">Law-linked implied constitutive audits</a></li>
+      <li><a href="https://github.com/IfimoAI/moju/blob/main/README.md">Repository README</a></li>
+      <li><a href="https://github.com/IfimoAI/moju/tree/main/examples">Examples</a></li>
     </ul>
-  </section>
-
-  <section>
-    <h2>Installation</h2>
-
-    <pre><code>pip install moju</code></pre>
   </section>
 
   <section>
     <h2>Philosophy</h2>
-
     <blockquote>
-      Moju does not define physics.<br>
-      Moju provides a structured way to enforce and audit it.
+      Moju does not define physics for you. It provides a structured way to apply,
+      measure, and audit the physics you already trust.
     </blockquote>
-
   </section>
 
   <footer class="doc-footer">
-    <p>Built for the Physics AI and SciML community.</p>
+    <p>MIT License. Ifimo Lab / Ifimo Analytics.</p>
   </footer>
 </div>
-
 </body>
 </html>
