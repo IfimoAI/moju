@@ -1730,7 +1730,6 @@ class TestImpliedDeltaClosure:
         assert "constitutive" in rep["per_category"]
         assert rep["per_category"]["constitutive"] >= 0.0
 
-
 class TestRegistryHelpers:
     def test_list_constitutive_models(self):
         names = list_constitutive_models()

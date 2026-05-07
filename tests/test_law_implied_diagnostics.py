@@ -313,3 +313,5 @@ def test_fourier_implied_works_with_user_fns_materializing_k_rho_alpha():
     r = engine.compute_residuals(state)
     key = "thermal_diffusivity/law_fourier_conduction/implied_delta"
     assert key in r["constitutive"]
+
+
