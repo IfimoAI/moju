@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moju"
-version = "0.6.1"
+version = "1.0.0"
 description = "Physics-informed machine learning framework for enforcing governing equations, and auditing physical consistency across PINNs, CFD surrogates, and other state predictors"
 readme = "README.md"
 authors = [{ name = "Ifimo Lab", email = "lab@ifimoanalytics.com" }]
@@ -15,7 +15,7 @@ license = { text = "MIT" }
 requires-python = ">=3.9"
 keywords = ["physics", "jax", "sciml", "pinn", "dimensionless", "cfd", "differentiable", "residual"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
