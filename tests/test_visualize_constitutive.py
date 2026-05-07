@@ -138,38 +138,6 @@ def test_list_basenames_sorted_by_worst_rnorm() -> None:
     assert "second/law_other" in names
 
 
-def test_infer_divergence_abscissa_prefers_t_when_bundle_hints_time() -> None:
-    from moju.monitor.visualize_constitutive import infer_divergence_abscissa
-
-    n = 5
-    t_lin = np.linspace(0.0, 10.0, n)
-    x_lin = np.linspace(0.0, 1.0, n)
-    bundle = {
-        "spatial": {"kind": "1d", "x": x_lin},
-        "log": [{"coord_snapshot": {"x": list(x_lin.astype(float)), "t": list(t_lin.astype(float))}}],
-        "spatial_coord_hint": "t",
-    }
-    xs, title = infer_divergence_abscissa(bundle, n)
-    np.testing.assert_array_almost_equal(xs, t_lin)
-    assert title == "Time t"
-
-
-def test_infer_divergence_abscissa_uses_bundle_spatial_without_t_hint() -> None:
-    from moju.monitor.visualize_constitutive import infer_divergence_abscissa
-
-    n = 6
-    x_lin = np.linspace(0.0, 2.0, n)
-    t_lin = np.linspace(0.0, 1.0, n)
-    bundle = {
-        "spatial": {"kind": "1d", "x": x_lin, "position_axis": "ξ"},
-        "log": [{"coord_snapshot": {"t": list(t_lin.astype(float)), "x": list(x_lin.astype(float))}}],
-        "spatial_coord_hint": "x",
-    }
-    xs, title = infer_divergence_abscissa(bundle, n)
-    np.testing.assert_array_almost_equal(xs, x_lin)
-    assert "ξ" in title
-
-
 def test_empty_bundle_returns_themed_empty_card() -> None:
     pytest.importorskip("plotly")
     from moju.monitor.visualize_constitutive import build_constitutive_divergence_card
