@@ -10,7 +10,7 @@ Constitutive audits are tied to Models.* functions via
 **ref_delta** and **implied_delta**.
 **implied_delta** and **ref_delta** are always **nondimensional** (see
 ``moju.monitor.closure_registry.apply_closure_discrepancy_normalize``). Logged ``rms`` per key is
-**R_eff** uses **RMS_δ(r)** = √(mean(r²)+δ²) with tiny **δ²** = :data:`R_EFF_RMS_JITTER_SQ` (AD-smooth at **r=0**), times **Q^0.5**; **Q** = RMS(m)/mean(m), **m_i** = sqrt(r_i²+ε²); **Q=1** when magnitudes are
+**R_eff** uses **RMS_δ(r)** = √(mean(r²)+δ²) with tiny **δ²** = :data:`R_EFF_RMS_JITTER_SQ` (AD-smooth at **r=0**), times **Q^p** with **p** = :data:`R_EFF_Q_POWER`; **Q** = RMS(m)/mean(m), **m_i** = sqrt(r_i²+ε²); **Q=1** when magnitudes are
 uniform across collocation points (single-point tensors use **Q=1**). **R_norm** = **R_eff**/scale_k.
 For **R_norm**, default **scale_k** is **2×10⁻²** (plus ``_SCALE_EPS``) for **laws/** and for nondimensional closure keys;
 other **constitutive/** residuals and **data/** use state- or reference-derived scales. Optional ``audit(..., r_ref=...)`` overrides
@@ -57,7 +57,7 @@ DEFAULT_VISUALIZE_TITLE_TEST = DEFAULT_VISUALIZE_TITLE_EVAL
 # Admissibility score in [0, 1]; "High" is strictly above this threshold.
 ADM_HIGH_THRESHOLD = 0.95
 # Imbalance factor in **R_eff** = RMS_δ(r)·Q**p** (see :func:`_r_eff_scalar`).
-R_EFF_Q_POWER = 0.5
+R_EFF_Q_POWER = 2.0
 # Jitter inside **RMS_δ(r)** = sqrt(mean(r^2) + δ²) so **R_eff** is smooth in autodiff at r=0.
 R_EFF_RMS_JITTER_SQ = 1e-20
 # Logged ``scale_k`` for **laws/** and nondimensional **implied_delta** / **ref_delta** (R_norm denominator).
@@ -566,7 +566,8 @@ def audit(
     """
     Physics admissibility from logged **R_eff** (field ``rms``) and scales.
 
-    **R_norm** uses ``R_eff / scale_k`` where each entry's ``rms`` is **R_eff** = RMS_δ(r)·Q^0.5 from
+    **R_norm** uses ``R_eff / scale_k`` where each entry's ``rms`` is **R_eff** = RMS_δ(r)·Q^p
+    (``p`` = :data:`R_EFF_Q_POWER`) from
     :func:`compute_residuals` (see :func:`_r_eff_scalar`). ``scale_k`` comes from each entry's ``scale`` when
     positive, else the first step's RMS fallback, else 1. **ResidualEngine** logs default
     ``scale_k ≈ 2×10⁻²`` for **laws/** and nondimensional **implied_delta** / **ref_delta** keys;
