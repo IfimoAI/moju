@@ -1,0 +1,3 @@
+# Large state dumps — keep local only; do not commit JSON or archives
+*.json
+*.json.zip
