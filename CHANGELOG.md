@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Law-linked `implied_delta` (balance form):** Auto constitutive rows from `moju.monitor.law_implied_diagnostics` for Fourier, Fick, wave, advection–diffusion (κ), Navier–Stokes / Stokes / Burgers (μ) now use **`implied_balance_fn`** and a **no-division** PDE balance with the model coefficient (e.g. \(T_t - \alpha_{\text{model}}\,T_{\text{laplacian}}\)), not ratio-style rearrangements. **`implied_delta` numeric values** for those keys change vs 1.0.x (zeros still align when the law balance holds). Turbulent viscous-acceleration law-linked rows are unchanged (**`pred − implied_fn`**). See `docs/law_implied_audits.md` and `moju.monitor.closure_registry.compute_implied_delta`.
 
+## [1.0.1] - 2026-05-13
+
+### Fixed
+
+- **`coord_snapshot` (meshgrid PATH A):** When merged state exposes flattened **ij-indexing** **(t, x)** collocation grids, **`_coord_snapshot_from_merged`** records **`x_grid`**, **`t_grid`**, and **`grid_shape`** so downstream consumers can reconstruct a **2-D** layout aligned with **`(n_t, n_x)`** fields (`moju.monitor.auditor`).
+- **Constitutive divergence / dissonance (Plotly):** **`visualize`** paths **`_prepare_spatial_divergence`**, **`prepare_constitutive_model_implied_vs_x_embed`**, **`_closure_coords_for_reduce`**, and **`_coord_vector_for_axis`** use those grids to **reshape** 1-D **`closure_debug`** tensors to **heatmap** form and apply the correct **last-**`**t`** slice for **dissonance** line profiles; heatmap axes resolve to **spatial** vs **time** coordinates where possible (`moju.monitor.visualize_constitutive`).
+- **Dissonance abscissa:** **`infer_divergence_abscissa`** prefers **`coord_snapshot`** **`*_grid`** vectors so the dissonance plot’s horizontal axis stays on **physical length** (**`[0, L]`** mapping via **`_x_abscissa_0_to_L`**) consistent with neighboring spatial heatmaps, instead of collapsing to sample index.
+
 ## [1.0.0] - 2026-05-07
 
 First **stable / production** release on PyPI (`Development Status :: 5 - Production/Stable` in `pyproject.toml`). This begins the **`moju` 1.x** line: **minor** and **patch** releases within **1.x** aim to stay backward-compatible unless documented otherwise — see **[VERSIONING.md](VERSIONING.md)**.
