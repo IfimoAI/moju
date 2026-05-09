@@ -1419,8 +1419,8 @@ class ResidualEngine:
       - **ref_delta** runs when ``state_ref`` is provided **and** :meth:`compute_residuals` is called
         with ``run_mode=\"eval\"`` (default ``run_mode=\"training\"`` ignores ``state_ref`` for
         ref_delta and for the ``data/`` pred−ref block). Unless the spec sets ``include_ref_delta=False``.
-      - **implied_delta** runs for **constitutive** specs when ``implied_value_key`` or ``implied_fn``
-        is set; omitted if implied is missing.
+      - **implied_delta** runs for **constitutive** specs when ``implied_value_key``, ``implied_fn``,
+        or ``implied_balance_fn`` is set; omitted if implied/balance is missing.
       - **ref_delta** / **implied_delta** residuals are nondimensional (see ``closure_registry``).
       - A spec with no applicable closure does nothing (optional omit log).
       - Law-linked implied rows (see ``moju.monitor.law_implied_diagnostics``) are prepended when
@@ -1537,9 +1537,12 @@ class ResidualEngine:
                         raise ValueError(f"{category}:{name} state_map missing args: {missing_args}")
                 ivk = spec.get("implied_value_key")
                 ifn = spec.get("implied_fn")
-                if ivk and ifn is not None:
+                ibf = spec.get("implied_balance_fn")
+                n_implied = (1 if ivk else 0) + (1 if ifn is not None else 0) + (1 if ibf is not None else 0)
+                if n_implied > 1:
                     raise ValueError(
-                        f"{category}:{name} use only one of implied_value_key and implied_fn, not both"
+                        f"{category}:{name} use only one of implied_value_key, implied_fn, "
+                        "and implied_balance_fn"
                     )
         _validate_specs(self.constitutive_audit, MODEL_FNS, "constitutive")
 
@@ -1879,7 +1882,11 @@ class ResidualEngine:
                 name = spec["name"]
                 output_key = spec.get("output_key")
                 state_map = spec.get("state_map") or {}
-                has_implied = bool(spec.get("implied_value_key")) or spec.get("implied_fn") is not None
+                has_implied = (
+                    bool(spec.get("implied_value_key"))
+                    or spec.get("implied_fn") is not None
+                    or spec.get("implied_balance_fn") is not None
+                )
                 missing = sorted(
                     {
                         str(v)
@@ -1958,6 +1965,7 @@ class ResidualEngine:
                         constants=self.constants,
                         implied_value_key=spec.get("implied_value_key"),
                         implied_fn=spec.get("implied_fn"),
+                        implied_balance_fn=spec.get("implied_balance_fn"),
                         output_key=output_key,
                         implied_delta_ref_key=spec.get("implied_delta_ref_key"),
                     )

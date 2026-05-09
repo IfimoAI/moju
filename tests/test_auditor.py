@@ -1637,6 +1637,45 @@ class TestImpliedDeltaClosure:
         )
         assert r is None
 
+    def test_compute_implied_delta_balance_fourier(self, rtol, atol):
+        fn, arg_names = MODEL_FNS["thermal_diffusivity"]
+        k, rho, cp = jnp.array(1.0), jnp.array(1.0), jnp.array(1.0)
+        alpha_m = fn(k, rho, cp)
+        T_lap = jnp.array(1.0)
+        T_t = alpha_m * T_lap
+        merged = {"k": k, "rho": rho, "cp": cp, "T_t": T_t, "T_xx": T_lap}
+
+        def balance(st, _c, pred):
+            tt = jnp.asarray(st["T_t"])
+            lap = jnp.asarray(st["T_xx"])
+            p = jnp.asarray(pred)
+            d = p * lap
+            return tt - d, tt, d
+
+        r = compute_implied_delta(
+            fn=fn,
+            arg_names=arg_names,
+            state_map={"k": "k", "rho": "rho", "cp": "cp"},
+            state_pred=merged,
+            constants={},
+            implied_balance_fn=balance,
+        )
+        assert r is not None
+        assert jnp.allclose(r, 0.0, rtol=rtol, atol=atol)
+
+    def test_compute_implied_delta_rejects_multiple_implied_modes(self):
+        fn, arg_names = MODEL_FNS["ideal_gas_rho"]
+        with pytest.raises(ValueError, match="at most one of implied"):
+            compute_implied_delta(
+                fn=fn,
+                arg_names=arg_names,
+                state_map={"P": "P", "R": "R", "T": "T"},
+                state_pred={"P": 1.0, "R": 1.0, "T": 1.0, "x": 1.0},
+                constants={},
+                implied_value_key="x",
+                implied_balance_fn=lambda s, c, p: (0.0, 0.0, 0.0),
+            )
+
     def test_engine_implied_delta_ideal_gas(self, rtol, atol):
         P, R = jnp.array(101325.0), jnp.array(287.0)
         T = jnp.array(290.0)

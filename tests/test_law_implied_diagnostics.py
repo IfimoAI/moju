@@ -42,7 +42,8 @@ def test_merge_fourier_prepends_thermal_diffusivity():
     assert len(c) == 1
     assert c[0]["name"] == "thermal_diffusivity"
     assert c[0]["residual_basename"] == "thermal_diffusivity/law_fourier_conduction"
-    assert c[0]["implied_fn"] is not None
+    assert c[0]["implied_balance_fn"] is not None
+    assert c[0].get("implied_fn") is None
     assert s == []
 
 
@@ -95,6 +96,43 @@ def test_fourier_implied_delta_near_zero_on_consistent_state():
     key = "thermal_diffusivity/law_fourier_conduction/implied_delta"
     assert key in r["constitutive"]
     assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-4
+
+
+def test_fourier_implied_balance_finite_when_laplacian_zero():
+    """Balance form avoids division by T_laplacian; residual stays finite when Laplacian vanishes."""
+    engine = ResidualEngine(
+        laws=[
+            {
+                "name": "fourier_conduction",
+                "state_map": {
+                    "T_t": "T_t",
+                    "T_laplacian": "T_xx",
+                    "fo": "Fo",
+                    "t": "t",
+                    "L": "L",
+                },
+                "fn": Laws.fourier_conduction,
+            }
+        ],
+        groups=[{"name": "fo", "output_key": "Fo", "state_map": {"alpha": "alpha", "t": "t", "L": "L"}}],
+        law_implied_audits=True,
+    )
+    alpha = jnp.array(1.0)
+    state = {
+        "T_t": jnp.array(0.3),
+        "T_xx": jnp.array(0.0),
+        "Fo": jnp.array(1.0),
+        "t": jnp.array(1.0),
+        "L": jnp.array(1.0),
+        "k": jnp.array(1.0),
+        "rho": jnp.array(1.0),
+        "cp": jnp.array(1.0),
+        "alpha": alpha,
+    }
+    r = engine.compute_residuals(state)
+    key = "thermal_diffusivity/law_fourier_conduction/implied_delta"
+    arr = r["constitutive"][key]
+    assert jnp.all(jnp.isfinite(arr))
 
 
 def test_ref_delta_gated_by_include_ref_delta():
@@ -238,7 +276,7 @@ def test_advection_diffusion_implied_kappa_near_zero():
     assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-6
 
 
-def test_ns_stokes_burgers_implied_mu_keys_present():
+def test_ns_stokes_burgers_implied_mu_balance_near_zero():
     checks = [
         ("momentum_navier_stokes", {"u_t": "u_t", "u": "u", "u_grad": "u_grad", "p_grad": "p_grad", "u_laplacian": "u_lap", "re": "re"},
          "dynamic_viscosity_from_re/law_momentum_navier_stokes/implied_delta"),
@@ -247,22 +285,26 @@ def test_ns_stokes_burgers_implied_mu_keys_present():
         ("burgers_equation", {"u_t": "u_t", "u": "u", "u_grad": "u_grad", "u_laplacian": "u_lap", "re": "re", "U": "U", "L": "L"},
          "dynamic_viscosity_from_re/law_burgers_equation/implied_delta"),
     ]
-    common = {
-        "u": jnp.array([2.0, 0.0]),
-        "u_grad": jnp.array([[0.0, 0.0], [0.0, 0.0]]),
-        "u_t": jnp.array([0.0, 0.0]),
-        "p_grad": jnp.array([2.0, 0.0]),
-        "u_lap": jnp.array([2.0, 0.0]),
-        "re": jnp.array(1.0),
-        "rho": jnp.array(1.0),
-        "L": jnp.array(1.0),
-        "U": jnp.array(1.0),
-        "mu": jnp.array(2.0),
-    }
     for law_name, sm, key in checks:
+        common = {
+            "u": jnp.array([2.0, 0.0]),
+            "u_grad": jnp.array([[0.0, 0.0], [0.0, 0.0]]),
+            "p_grad": jnp.array([2.0, 0.0]),
+            "u_lap": jnp.array([2.0, 0.0]),
+            "re": jnp.array(1.0),
+            "rho": jnp.array(1.0),
+            "L": jnp.array(1.0),
+            "U": jnp.array(1.0),
+            "mu": jnp.array(2.0),
+        }
+        if law_name == "burgers_equation":
+            common["u_t"] = jnp.array([2.0, 0.0])
+        else:
+            common["u_t"] = jnp.array([0.0, 0.0])
         engine = ResidualEngine(laws=[{"name": law_name, "state_map": sm}], law_implied_audits=True)
         r = engine.compute_residuals(dict(common))
         assert key in r["constitutive"]
+        assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-5
 
 
 def test_fourier_implied_works_with_user_fns_materializing_k_rho_alpha():

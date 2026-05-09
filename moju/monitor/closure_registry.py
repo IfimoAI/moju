@@ -3,7 +3,9 @@ Model/Group closure registry for moju.monitor.
 
 This module standardizes constitutive + scaling/similarity audits around:
   1) ref_delta: F(state_pred) - F(state_ref) (requires state_ref)
-  2) implied_delta: F(state_pred) - implied (implied_value_key in state/constants, or implied_fn)
+  2) implied_delta: F(state_pred) - implied (implied_value_key in state/constants, or implied_fn),
+     or a law-style **balance** residual via implied_balance_fn(state_pred, constants, pred)
+     with symmetric normalization scales (see :func:`compute_implied_delta`).
 
   **Nondimensional implied/ref discrepancies:** ``implied_delta`` and ``ref_delta`` are always
   dimensionless: default ``(pred - other) / (ε + |pred| + |other|)``. If a reference tensor is
@@ -115,23 +117,39 @@ def compute_implied_delta(
     constants: Dict[str, Any],
     implied_value_key: Optional[str] = None,
     implied_fn: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]] = None,
+    implied_balance_fn: Optional[
+        Callable[[Dict[str, Any], Dict[str, Any], Any], Optional[Tuple[Any, Any, Any]]]
+    ] = None,
     output_key: Optional[str] = None,
     implied_delta_ref_key: Optional[str] = None,
 ) -> Optional[jnp.ndarray]:
     """
-    Residual comparing catalog ``F(pred args)`` to ``implied`` (state key or ``implied_fn``).
+    Residual comparing catalog ``F(pred args)`` to ``implied`` (state key or ``implied_fn``),
+    or evaluating a governing-equation **balance** via ``implied_balance_fn``.
 
-    Always **nondimensional**: ``(F - implied) / (ε + |F| + |implied|)``, or divided by
-    ``(ε + |ref|)`` when ``implied_delta_ref_key`` or ``{output_key}_ref`` resolves in merged
-    state/constants.
+    **Subtract mode** (``implied_value_key`` or ``implied_fn``): nondimensional
+    ``(F - implied) / (ε + |F| + |implied|)``, or ``/ (ε + |ref|)`` when a ref tensor resolves.
 
-    Returns None if implied is not configured, if any model arg is missing, if implied is missing,
-    or if the result is not broadcastable.
+    **Balance mode** (``implied_balance_fn``): ``implied_balance_fn(state_pred, constants, pred)``
+    must return ``(raw, scale_a, scale_b)`` or ``None``. Nondimensional residual is
+    ``raw / (ε + |scale_a| + |scale_b|)``, or ``/ (ε + |ref|)`` when ref resolves.
+
+    Provide **at most one** of ``implied_value_key``, ``implied_fn``, and ``implied_balance_fn``.
+
+    Returns None if implied is not configured, if any model arg is missing, if implied/balance is
+    missing, or if the result is not broadcastable.
     """
-    if implied_value_key is None and implied_fn is None:
+    modes = (
+        (1 if implied_value_key is not None else 0)
+        + (1 if implied_fn is not None else 0)
+        + (1 if implied_balance_fn is not None else 0)
+    )
+    if modes == 0:
         return None
-    if implied_value_key is not None and implied_fn is not None:
-        raise ValueError("Provide at most one of implied_value_key and implied_fn")
+    if modes > 1:
+        raise ValueError(
+            "Provide at most one of implied_value_key, implied_fn, and implied_balance_fn"
+        )
 
     pred_args: List[jnp.ndarray] = []
     for an in arg_names:
@@ -144,6 +162,22 @@ def compute_implied_delta(
         pred_args.append(jnp.asarray(pv))
     pred = fn(*pred_args)
 
+    ref_tensor = None
+    if implied_delta_ref_key:
+        ref_tensor = _val(state_pred, constants, implied_delta_ref_key)
+    if ref_tensor is None and output_key is not None:
+        ref_tensor = _val(state_pred, constants, f"{output_key}_ref")
+
+    if implied_balance_fn is not None:
+        triple = implied_balance_fn(state_pred, constants, pred)
+        if triple is None:
+            return None
+        raw, scale_a, scale_b = triple
+        try:
+            return apply_closure_discrepancy_normalize(raw, scale_a, scale_b, ref=ref_tensor)
+        except (TypeError, ValueError):
+            return None
+
     if implied_value_key is not None:
         implied = _val(state_pred, constants, implied_value_key)
     else:
@@ -155,11 +189,6 @@ def compute_implied_delta(
         raw = jnp.asarray(pred - implied)
     except (TypeError, ValueError):
         return None
-    ref_tensor = None
-    if implied_delta_ref_key:
-        ref_tensor = _val(state_pred, constants, implied_delta_ref_key)
-    if ref_tensor is None and output_key is not None:
-        ref_tensor = _val(state_pred, constants, f"{output_key}_ref")
     try:
         return apply_closure_discrepancy_normalize(raw, pred, implied, ref=ref_tensor)
     except (TypeError, ValueError):

@@ -5,7 +5,7 @@ End-to-end monitor example: 1D heat diffusion with NN T(t,x).
 Shows:
   - Path A style state building (compute T, T_t, T_xx from the NN)
   - Laws.fourier_conduction residual + build_loss
-  - Law-linked implied audit: ``thermal_diffusivity`` vs α implied from T_t / T_laplacian (automatic)
+  - Law-linked implied audit: ``thermal_diffusivity`` balance T_t − α_model·T_laplacian (automatic)
   - Optional chain audits on ``fo`` / ``bi`` (spatial/temporal consistency)
   - Required keys introspection
   - audit() PDF export when moju[report] installed
@@ -138,7 +138,7 @@ def main():
             {"name": "fo", "state_map": {"alpha": "alpha", "t": "t", "L": "L"}, "output_key": "Fo", "fn": Groups.fo},
             {"name": "bi", "state_map": {"h": "h", "L": "L", "k_solid": "kappa"}, "output_key": "Bi", "fn": Groups.bi},
         ],
-        # thermal_diffusivity implied_delta is prepended from fourier_conduction (law_implied_audits=True).
+        # thermal_diffusivity implied_delta (balance form) is prepended from fourier_conduction (law_implied_audits=True).
     )
 
     print("Required state keys:", sorted(engine.required_state_keys()))

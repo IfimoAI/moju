@@ -1,14 +1,17 @@
 """
 Law-linked implied constitutive / scaling audits.
 
-For selected :class:`Laws.*` entries, Moju can auto-append ``constitutive_audit`` /
-``constitutive_audit`` rows whose ``implied_fn`` recomputes a quantity by rearranging the
-law using ``state_pred`` (and the law's ``state_map``). Residuals use the existing
-``implied_delta`` closure: ``F(catalog args) - implied``.
+For selected :class:`Laws.*` entries, Moju can auto-append ``constitutive_audit`` rows whose
+``implied_balance_fn`` evaluates a **governing-equation balance** using ``state_pred`` (and the
+law's ``state_map``) and the catalog model prediction ``pred = F(...)``. Residuals use
+``implied_delta`` with symmetric normalization of the balance ``raw`` against the magnitudes of
+the two sides (see :func:`moju.monitor.closure_registry.compute_implied_delta`).
 
-We avoid pairing **both** a group and a constitutive closure that are algebraically
-equivalent given fixed scales (e.g. Fourier: only ``thermal_diffusivity``, not a
-separate ``fo`` implied row).
+Some rows (e.g. turbulent viscous acceleration) still use ``implied_fn`` and **subtract** mode:
+``pred - implied``.
+
+We avoid pairing **both** a group and a constitutive closure that are algebraically equivalent
+given fixed scales (e.g. Fourier: only ``thermal_diffusivity``, not a separate ``fo`` implied row).
 
 See README "Law-linked implied audits" and :func:`merge_law_implied_audit_specs`.
 """
@@ -18,6 +21,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import jax.numpy as jnp
+
 from moju.piratio.laws import Laws
 
 # ---------------------------------------------------------------------------
@@ -47,12 +51,6 @@ def _state_or_const(state: Dict[str, Any], constants: Dict[str, Any], key: str) 
     return v
 
 
-def _safe_ratio(num: Any, den: Any, *, eps: float = 1e-20) -> jnp.ndarray:
-    num = jnp.asarray(num, dtype=jnp.result_type(jnp.asarray(num), jnp.float32))
-    den = jnp.asarray(den, dtype=jnp.result_type(jnp.asarray(den), jnp.float32))
-    return jnp.where(jnp.abs(den) > eps, num / den, jnp.nan)
-
-
 def _vec_norm_last(x: Any) -> jnp.ndarray:
     a = jnp.asarray(x)
     if a.ndim == 0:
@@ -60,108 +58,100 @@ def _vec_norm_last(x: Any) -> jnp.ndarray:
     return jnp.sqrt(jnp.sum(a**2, axis=-1))
 
 
+def _re_from_mu(
+    u: Any,
+    rho: Any,
+    L: Any,
+    mu_pred: Any,
+    *,
+    eps: float = 1e-30,
+) -> jnp.ndarray:
+    u_char = _vec_norm_last(jnp.asarray(u))
+    return (jnp.asarray(rho) * u_char * jnp.asarray(L)) / (jnp.asarray(mu_pred) + eps)
+
+
 # ---------------------------------------------------------------------------
-# Implied quantity makers: (law_state_map) -> implied_fn(state, constants)
+# Balance implied: (law_state_map) -> implied_balance_fn(state, constants, pred) -> (raw, a, b)
 # ---------------------------------------------------------------------------
 
 
-def implied_alpha_fourier_conduction(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """α_implied = T_t / T_laplacian from :func:`Laws.fourier_conduction` rearrangement."""
+def balance_implied_fourier_conduction(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """``T_t - pred * T_laplacian`` vs :func:`Laws.fourier_conduction` with model ``alpha``."""
 
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+    def implied_balance_fn(
+        state: Dict[str, Any],
+        constants: Dict[str, Any],
+        pred: Any,
+    ) -> Optional[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
         T_t = _val(state, constants, law_sm, "T_t")
         T_lap = _val(state, constants, law_sm, "T_laplacian")
         if T_t is None or T_lap is None:
             return None
-        return _safe_ratio(T_t, T_lap)
+        tt = jnp.asarray(T_t)
+        lap = jnp.asarray(T_lap)
+        a_pred = jnp.asarray(pred)
+        diffusive = a_pred * lap
+        raw = tt - diffusive
+        return raw, tt, diffusive
 
-    return implied_fn
-
-
-def implied_fo_mass_fick_diffusion(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Fo_m implied = φ_t * t / (φ_laplacian * L²) from Fick's law."""
-
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
-        pt = _val(state, constants, law_sm, "phi_t")
-        pl = _val(state, constants, law_sm, "phi_laplacian")
-        t = _val(state, constants, law_sm, "t")
-        L = _val(state, constants, law_sm, "L")
-        if pt is None or pl is None or t is None or L is None:
-            return None
-        return _safe_ratio(pt * t, pl * (L**2))
-
-    return implied_fn
+    return implied_balance_fn
 
 
-def implied_D_fick_diffusion(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """D_implied = phi_t / phi_laplacian from :func:`Laws.fick_diffusion` rearrangement."""
+def balance_implied_fick_diffusion(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """``phi_t - pred * phi_laplacian`` vs :func:`Laws.fick_diffusion`."""
 
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+    def implied_balance_fn(
+        state: Dict[str, Any],
+        constants: Dict[str, Any],
+        pred: Any,
+    ) -> Optional[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
         pt = _val(state, constants, law_sm, "phi_t")
         pl = _val(state, constants, law_sm, "phi_laplacian")
         if pt is None or pl is None:
             return None
-        return _safe_ratio(pt, pl)
+        pt_a = jnp.asarray(pt)
+        pl_a = jnp.asarray(pl)
+        d_pred = jnp.asarray(pred)
+        diffusive = d_pred * pl_a
+        raw = pt_a - diffusive
+        return raw, pt_a, diffusive
 
-    return implied_fn
-
-
-def implied_st_wave_wave_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """St_wave_implied = ω L / c with c² = φ_tt / φ_laplacian (wave equation rearrangement)."""
-
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
-        ptt = _val(state, constants, law_sm, "phi_tt")
-        pl = _val(state, constants, law_sm, "phi_laplacian")
-        omega = _val(state, constants, law_sm, "omega")
-        L = _val(state, constants, law_sm, "L")
-        if ptt is None or pl is None or omega is None or L is None:
-            return None
-        c_sq = _safe_ratio(ptt, pl)
-        c = jnp.sqrt(jnp.maximum(c_sq, 0.0))
-        return jnp.asarray(omega) * jnp.asarray(L) / (c + 1e-30)
-
-    return implied_fn
+    return implied_balance_fn
 
 
-def implied_c_wave_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """c_implied = sqrt(phi_tt / phi_laplacian) from :func:`Laws.wave_equation`."""
+def balance_implied_wave_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """``phi_tt - pred**2 * phi_laplacian`` vs :func:`Laws.wave_equation`."""
 
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+    def implied_balance_fn(
+        state: Dict[str, Any],
+        constants: Dict[str, Any],
+        pred: Any,
+    ) -> Optional[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
         ptt = _val(state, constants, law_sm, "phi_tt")
         pl = _val(state, constants, law_sm, "phi_laplacian")
         if ptt is None or pl is None:
             return None
-        c_sq = _safe_ratio(ptt, pl)
-        return jnp.sqrt(jnp.maximum(c_sq, 0.0))
+        ptt_a = jnp.asarray(ptt)
+        pl_a = jnp.asarray(pl)
+        c = jnp.asarray(pred)
+        diffusive = (c**2) * pl_a
+        raw = ptt_a - diffusive
+        return raw, ptt_a, diffusive
 
-    return implied_fn
-
-
-def implied_pe_advection_diffusion(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Pe_implied ≈ |∇²φ| / |φ_t + u·∇φ| from scalar transport rearrangement."""
-
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
-        phi_t = _val(state, constants, law_sm, "phi_t")
-        u = _val(state, constants, law_sm, "u")
-        g = _val(state, constants, law_sm, "phi_grad")
-        lap = _val(state, constants, law_sm, "phi_laplacian")
-        if phi_t is None or u is None or g is None or lap is None:
-            return None
-        u = jnp.asarray(u)
-        g = jnp.asarray(g)
-        if u.shape[-1] != g.shape[-1]:
-            return None
-        adv = jnp.sum(g * u, axis=-1)
-        rhs = jnp.asarray(phi_t) + adv
-        return _vec_norm_last(lap) / (_vec_norm_last(rhs) + 1e-30)
-
-    return implied_fn
+    return implied_balance_fn
 
 
-def implied_kappa_advection_diffusion(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """kappa_implied = U*L*(phi_t + u·grad(phi))/phi_laplacian (effective diffusivity)."""
+def balance_implied_kappa_advection_diffusion(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """
+    ``phi_t + u·∇phi - (pred/(|u|L)) phi_laplacian`` vs :func:`Laws.advection_diffusion`
+    with ``pred = kappa`` and ``Pe = |u| L / kappa``.
+    """
 
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+    def implied_balance_fn(
+        state: Dict[str, Any],
+        constants: Dict[str, Any],
+        pred: Any,
+    ) -> Optional[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
         phi_t = _val(state, constants, law_sm, "phi_t")
         u = _val(state, constants, law_sm, "u")
         g = _val(state, constants, law_sm, "phi_grad")
@@ -176,128 +166,106 @@ def implied_kappa_advection_diffusion(law_sm: Dict[str, str]) -> Callable[..., A
         adv = jnp.sum(g * u, axis=-1)
         rhs = jnp.asarray(phi_t) + adv
         U = _vec_norm_last(u)
-        return jnp.asarray(U) * jnp.asarray(L) * _safe_ratio(rhs, lap)
+        denom = jnp.asarray(U) * jnp.asarray(L)
+        kappa = jnp.asarray(pred)
+        diffusive = (kappa / (denom + 1e-30)) * jnp.asarray(lap)
+        raw = rhs - diffusive
+        return raw, rhs, diffusive
 
-    return implied_fn
+    return implied_balance_fn
 
 
-def implied_re_momentum_navier_stokes(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Re_implied ≈ ‖∇²u‖ / ‖u_t + u·∇u + ∇p‖ (diagnostic when the NS residual is small)."""
+def balance_implied_mu_momentum_navier_stokes(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """Vector balance :func:`Laws.momentum_navier_stokes` with ``re`` from model ``mu``."""
 
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+    def implied_balance_fn(
+        state: Dict[str, Any],
+        constants: Dict[str, Any],
+        pred: Any,
+    ) -> Optional[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
         u_t = _val(state, constants, law_sm, "u_t")
         u = _val(state, constants, law_sm, "u")
         u_grad = _val(state, constants, law_sm, "u_grad")
         p_grad = _val(state, constants, law_sm, "p_grad")
         u_lap = _val(state, constants, law_sm, "u_laplacian")
+        rho = _state_or_const(state, constants, "rho")
+        L = _state_or_const(state, constants, "L")
         if u_t is None or u is None or u_grad is None or p_grad is None or u_lap is None:
             return None
+        if rho is None or L is None:
+            return None
+        re_m = _re_from_mu(u, rho, L, pred)
+        raw = Laws.momentum_navier_stokes(u_t, u, u_grad, p_grad, u_lap, re_m)
         u = jnp.asarray(u)
         adv = jnp.einsum("...ij,...j->...i", jnp.asarray(u_grad), u)
-        rhs = jnp.asarray(u_t) + adv + jnp.asarray(p_grad)
-        return _vec_norm_last(u_lap) / (_vec_norm_last(rhs) + 1e-30)
+        inertial = jnp.asarray(u_t) + adv + jnp.asarray(p_grad)
+        viscous = (1.0 / re_m)[..., jnp.newaxis] * jnp.asarray(u_lap)
+        return raw, inertial, viscous
 
-    return implied_fn
-
-
-def implied_mu_from_re_balance(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """
-    μ_implied = ρ u_char L / Re_implied with u_char = ‖u‖, using the same Re balance as
-    :func:`implied_re_momentum_navier_stokes`. Compare to ``mu`` in state (e.g. from Sutherland).
-    """
-
-    re_fn = implied_re_momentum_navier_stokes(law_sm)
-
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
-        re_i = re_fn(state, constants)
-        if re_i is None:
-            return None
-        u = _val(state, constants, law_sm, "u")
-        rho = state.get("rho")
-        if rho is None:
-            rho = constants.get("rho")
-        L = state.get("L")
-        if L is None:
-            L = constants.get("L")
-        if u is None or rho is None or L is None:
-            return None
-        u = jnp.asarray(u)
-        u_char = _vec_norm_last(u)
-        rho = jnp.asarray(rho)
-        L = jnp.asarray(L)
-        return rho * u_char * L / (jnp.asarray(re_i) + 1e-30)
-
-    return implied_fn
+    return implied_balance_fn
 
 
-def implied_mu_from_re_fn(
-    law_sm: Dict[str, str],
-    re_fn: Callable[[Dict[str, Any], Dict[str, Any]], Optional[jnp.ndarray]],
-) -> Callable[..., Any]:
-    """mu_implied = rho * |u| * L / Re_implied from a supplied implied-Re function."""
+def balance_implied_mu_stokes_flow(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """Vector balance :func:`Laws.stokes_flow` with ``re`` from model ``mu``."""
 
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
-        re_i = re_fn(state, constants)
-        if re_i is None:
-            return None
+    def implied_balance_fn(
+        state: Dict[str, Any],
+        constants: Dict[str, Any],
+        pred: Any,
+    ) -> Optional[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
+        p_grad = _val(state, constants, law_sm, "p_grad")
+        u_lap = _val(state, constants, law_sm, "u_laplacian")
         u = _val(state, constants, law_sm, "u")
         if u is None:
             u = _state_or_const(state, constants, "u")
-        rho = _state_or_const(state, constants, "rho")
-        L = _state_or_const(state, constants, "L")
-        if u is None or rho is None or L is None:
-            return None
-        u_char = _vec_norm_last(u)
-        return jnp.asarray(rho) * jnp.asarray(u_char) * jnp.asarray(L) / (jnp.asarray(re_i) + 1e-30)
-
-    return implied_fn
-
-
-def implied_mu_momentum_navier_stokes(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    return implied_mu_from_re_fn(law_sm, implied_re_momentum_navier_stokes(law_sm))
-
-
-def implied_re_stokes_flow(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Re_implied ≈ ‖∇²u‖ / ‖∇p‖ for Stokes."""
-
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
-        p_grad = _val(state, constants, law_sm, "p_grad")
-        u_lap = _val(state, constants, law_sm, "u_laplacian")
+        rho = _val(state, constants, law_sm, "rho")
+        if rho is None:
+            rho = _state_or_const(state, constants, "rho")
+        L = _val(state, constants, law_sm, "L")
+        if L is None:
+            L = _state_or_const(state, constants, "L")
         if p_grad is None or u_lap is None:
             return None
-        return _vec_norm_last(u_lap) / (_vec_norm_last(p_grad) + 1e-30)
+        if u is None or rho is None or L is None:
+            return None
+        re_m = _re_from_mu(u, rho, L, pred)
+        raw = Laws.stokes_flow(p_grad, u_lap, re_m)
+        pg = jnp.asarray(p_grad)
+        viscous = (1.0 / re_m)[..., jnp.newaxis] * jnp.asarray(u_lap)
+        return raw, pg, viscous
 
-    return implied_fn
+    return implied_balance_fn
 
 
-def implied_mu_stokes_flow(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    return implied_mu_from_re_fn(law_sm, implied_re_stokes_flow(law_sm))
+def balance_implied_mu_burgers_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """Vector balance :func:`Laws.burgers_equation` with ``re`` from model ``mu``."""
 
-
-def implied_re_burgers_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Re_implied ≈ (U L) ‖∇²u‖ / ‖u_t + (u·∇)u‖."""
-
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+    def implied_balance_fn(
+        state: Dict[str, Any],
+        constants: Dict[str, Any],
+        pred: Any,
+    ) -> Optional[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
         u_t = _val(state, constants, law_sm, "u_t")
         u = _val(state, constants, law_sm, "u")
         u_grad = _val(state, constants, law_sm, "u_grad")
         u_lap = _val(state, constants, law_sm, "u_laplacian")
         U = _val(state, constants, law_sm, "U")
-        L = _val(state, constants, law_sm, "L")
-        if u_t is None or u is None or u_grad is None or u_lap is None or U is None or L is None:
+        Llaw = _val(state, constants, law_sm, "L")
+        rho = _state_or_const(state, constants, "rho")
+        L = _state_or_const(state, constants, "L")
+        if u_t is None or u is None or u_grad is None or u_lap is None:
             return None
-        u = jnp.asarray(u)
+        if U is None or Llaw is None or rho is None or L is None:
+            return None
+        re_m = _re_from_mu(u, rho, L, pred)
+        raw = Laws.burgers_equation(u_t, u, u_grad, u_lap, re_m, U, Llaw)
         adv = jnp.einsum("...ij,...j->...i", jnp.asarray(u_grad), u)
-        rhs = jnp.asarray(u_t) + adv
-        return (jnp.asarray(U) * jnp.asarray(L)) * (
-            _vec_norm_last(u_lap) / (_vec_norm_last(rhs) + 1e-30)
-        )
+        inertial = jnp.asarray(u_t) + adv
+        nu = (jnp.asarray(U) * jnp.asarray(Llaw)) / re_m
+        viscous = nu[..., jnp.newaxis] * jnp.asarray(u_lap)
+        return raw, inertial, viscous
 
-    return implied_fn
-
-
-def implied_mu_burgers_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    return implied_mu_from_re_fn(law_sm, implied_re_burgers_equation(law_sm))
+    return implied_balance_fn
 
 
 def implied_viscous_acceleration_incompressible(law_sm: Dict[str, str]) -> Callable[..., Any]:
@@ -334,7 +302,6 @@ def implied_viscous_acceleration_compressible(law_sm: Dict[str, str]) -> Callabl
     return implied_fn
 
 
-
 # ---------------------------------------------------------------------------
 # Registry: law_name -> list of audit spec dict fragments (merged into engine lists)
 # ---------------------------------------------------------------------------
@@ -349,7 +316,7 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "thermal_diffusivity",
             "output_key": "alpha",
             "state_map": {"k": "k", "rho": "rho", "cp": "cp"},
-            "implied_maker": implied_alpha_fourier_conduction,
+            "implied_balance_maker": balance_implied_fourier_conduction,
             "residual_basename": "thermal_diffusivity/law_fourier_conduction",
             "include_ref_delta": True,
         },
@@ -360,7 +327,7 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "mass_diffusivity",
             "output_key": "D",
             "state_map": {"fo_mass": "fo_mass", "t": "t", "L": "L"},
-            "implied_maker": implied_D_fick_diffusion,
+            "implied_balance_maker": balance_implied_fick_diffusion,
             "residual_basename": "mass_diffusivity/law_fick_diffusion",
             "include_ref_delta": True,
         },
@@ -371,7 +338,7 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "wave_speed_from_st",
             "output_key": "c",
             "state_map": {"omega": "omega", "L": "L", "st_wave": "st_wave"},
-            "implied_maker": implied_c_wave_equation,
+            "implied_balance_maker": balance_implied_wave_equation,
             "residual_basename": "wave_speed_from_st/law_wave_equation",
             "include_ref_delta": True,
         },
@@ -382,7 +349,7 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "scalar_diffusivity_from_pe",
             "output_key": "kappa",
             "state_map": {"u": "u", "L": "L", "pe": "pe"},
-            "implied_maker": implied_kappa_advection_diffusion,
+            "implied_balance_maker": balance_implied_kappa_advection_diffusion,
             "residual_basename": "scalar_diffusivity_from_pe/law_advection_diffusion",
             "include_ref_delta": True,
         },
@@ -393,7 +360,7 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "dynamic_viscosity_from_re",
             "output_key": "mu",
             "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
-            "implied_maker": implied_mu_momentum_navier_stokes,
+            "implied_balance_maker": balance_implied_mu_momentum_navier_stokes,
             "residual_basename": "dynamic_viscosity_from_re/law_momentum_navier_stokes",
             "include_ref_delta": True,
         },
@@ -404,7 +371,7 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "dynamic_viscosity_from_re",
             "output_key": "mu",
             "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
-            "implied_maker": implied_mu_stokes_flow,
+            "implied_balance_maker": balance_implied_mu_stokes_flow,
             "residual_basename": "dynamic_viscosity_from_re/law_stokes_flow",
             "include_ref_delta": True,
         },
@@ -415,7 +382,7 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "name": "dynamic_viscosity_from_re",
             "output_key": "mu",
             "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
-            "implied_maker": implied_mu_burgers_equation,
+            "implied_balance_maker": balance_implied_mu_burgers_equation,
             "residual_basename": "dynamic_viscosity_from_re/law_burgers_equation",
             "include_ref_delta": True,
         },
@@ -545,6 +512,7 @@ def list_laws_with_implied_diagnostics() -> Tuple[str, ...]:
     """Law registry names that contribute auto implied audits."""
     return tuple(sorted(_LAW_IMPLIED_ROWS.keys()))
 
+
 def law_implied_unsupported_reasons() -> Dict[str, str]:
     """
     Best-effort coverage map for laws without auto implied rows.
@@ -638,9 +606,9 @@ def merge_law_implied_audit_specs(
     """
     Build extra ``constitutive_audit`` dict rows for :class:`ResidualEngine` from the selected laws.
 
-    Rows include ``implied_fn`` (not JSON-serializable) and ``residual_basename`` for
-    unique log keys. When ``enabled`` is False, returns ``([], [])`` (second list is always
-    empty; kept for call-site compatibility).
+    Rows include ``implied_fn`` or ``implied_balance_fn`` (not JSON-serializable) and
+    ``residual_basename`` for unique log keys. When ``enabled`` is False, returns ``([], [])``
+    (second list is always empty; kept for call-site compatibility).
     """
     if not enabled:
         return [], []
@@ -658,15 +626,27 @@ def merge_law_implied_audit_specs(
             if basename in seen_basenames:
                 continue
             seen_basenames.add(basename)
-            implied_maker = row["implied_maker"]
-            d = {
+            implied_balance_maker = row.get("implied_balance_maker")
+            implied_maker = row.get("implied_maker")
+            if implied_balance_maker is not None and implied_maker is not None:
+                raise ValueError(
+                    f"law_implied row for {law_name!r} has both implied_balance_maker and implied_maker"
+                )
+            if implied_balance_maker is None and implied_maker is None:
+                raise ValueError(
+                    f"law_implied row for {law_name!r} missing implied_balance_maker and implied_maker"
+                )
+            d: Dict[str, Any] = {
                 "name": row["name"],
                 "output_key": row["output_key"],
                 "state_map": dict(row["state_map"]),
-                "implied_fn": implied_maker(law_sm),
                 "residual_basename": basename,
                 "include_ref_delta": bool(row.get("include_ref_delta", True)),
             }
+            if implied_balance_maker is not None:
+                d["implied_balance_fn"] = implied_balance_maker(law_sm)
+            else:
+                d["implied_fn"] = implied_maker(law_sm)
             if row["category"] != "constitutive":
                 raise ValueError(
                     f"law_implied row for {law_name!r} has category {row['category']!r}; "

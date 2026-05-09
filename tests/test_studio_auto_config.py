@@ -80,7 +80,7 @@ def test_fourier_law_linked_implied_no_chain_fields():
     ca = [s for s in d["constitutive_audit"] if s.get("name") == "thermal_diffusivity"]
     assert len(ca) == 1
     assert "law_fourier_conduction" in ca[0].get("residual_basename", "")
-    assert ca[0].get("implied_fn") is not None
+    assert ca[0].get("implied_balance_fn") is not None
     assert "predicted_spatial" not in ca[0]
 
 
@@ -94,5 +94,9 @@ def test_studio_includes_law_linked_implied_for_supported_laws():
             pred_keys=set(),
             constant_keys=set(),
         )
-        implied_rows = [s for s in d.get("constitutive_audit", []) if s.get("implied_fn") is not None]
+        implied_rows = [
+            s
+            for s in d.get("constitutive_audit", [])
+            if s.get("implied_fn") is not None or s.get("implied_balance_fn") is not None
+        ]
         assert implied_rows, f"Studio missing implied row for {law_name}"

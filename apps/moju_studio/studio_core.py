@@ -200,7 +200,7 @@ def generate_python_snippet(cfg: MonitorConfig, *, path_b: bool) -> str:
         "from moju.monitor.config import AuditSpec",
         "import jax.numpy as jnp",
         "",
-        "# Build config (expand AuditSpecs as needed; implied_fn not serializable).",
+        "# Build config (expand AuditSpecs as needed; implied_fn / implied_balance_fn not serializable).",
         f"cfg = MonitorConfig.from_dict({json.dumps(d, indent=2, default=str)})",
         "engine = ResidualEngine(config=cfg)",
         "",

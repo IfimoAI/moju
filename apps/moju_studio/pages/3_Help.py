@@ -45,7 +45,7 @@ This app uses several Streamlit patterns (requires **streamlit >= 1.33** in `moj
 
 ### Limitations
 
-- `implied_fn` and custom Python closures are not exposed in the GUI (by design).
+- `implied_fn`, `implied_balance_fn`, and custom Python closures are not exposed in the GUI (by design).
 - Streamlit Cloud + JAX may need extra setup; local or VM is recommended.
 """
 )

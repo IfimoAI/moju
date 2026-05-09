@@ -104,7 +104,7 @@ class MonitorConfig:
     laws: List[Dict[str, Any]] = field(default_factory=list)
     groups: List[Dict[str, Any]] = field(default_factory=list)
     # When True (default), prepend auto implied_delta rows from :mod:`moju.monitor.law_implied_diagnostics`
-    # for each selected law (e.g. Fourier -> thermal_diffusivity vs α implied from T_t, T_laplacian).
+    # for each selected law (e.g. Fourier -> thermal_diffusivity balance T_t − α_model·T_laplacian).
     law_implied_audits: bool = True
     constitutive_audit: List[AuditSpec] = field(default_factory=list)
     constitutive_custom: List[Dict[str, Any]] = field(default_factory=list)
