@@ -14,6 +14,10 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 import jax
 import jax.numpy as jnp
 
+MIN_POINTS_FD_ORDER_4 = 5
+"""Minimum points per axis for 4th-order stencils; smaller axes fall back to 2nd order."""
+
+
 @dataclass(frozen=True)
 class PathBGridConfig:
     """
@@ -24,11 +28,15 @@ class PathBGridConfig:
       and differenced with 1D axes; general curvilinear mesh coordinates are not supported for FD.
     - **separable**: ``x`` length ``nx``, ``y`` length ``ny``, ``z`` length ``nz``; field shape
       ``(nx,)``, ``(nx, ny)``, or ``(nx, ny, nz)``. Passed as 1D spacing vectors to ``jnp.gradient``.
+    - **fd_order**: ``4`` (default) uses explicit 4th-order stencils on **uniform** structured grids
+      (interior and boundary bands). Non-uniform spacing or non-separable meshgrid paths fall back
+      to 2nd-order ``jnp.gradient`` with an optional warning. ``2`` preserves legacy behavior.
     """
 
     layout: Literal["meshgrid", "separable"] = "meshgrid"
     spatial_dimension: Union[Literal[1, 2, 3], Literal["auto"]] = "auto"
     steady: bool = True
+    fd_order: Literal[2, 4] = 4
     key_x: str = "x"
     key_y: str = "y"
     key_z: str = "z"
@@ -118,6 +126,167 @@ def _grad_1d_nonuniform(values: jnp.ndarray, coord: jnp.ndarray) -> jnp.ndarray:
     if h is not None:
         return jnp.asarray(jnp.gradient(values, h))
     return jnp.asarray(jnp.gradient(values, coord))
+
+
+def _diff1_uniform_4th_1d(u: jnp.ndarray, h: Any) -> jnp.ndarray:
+    """First derivative on a uniform 1D grid; 4th-order interior and boundary bands."""
+    u = jnp.asarray(u)
+    h = jnp.asarray(h, dtype=u.dtype)
+    n = int(u.shape[0])
+    if n < MIN_POINTS_FD_ORDER_4:
+        return jnp.asarray(jnp.gradient(u, h))
+    inv12h = 1.0 / (12.0 * h)
+    out = jnp.empty_like(u)
+    out = out.at[0].set(
+        (-25.0 * u[0] + 48.0 * u[1] - 36.0 * u[2] + 16.0 * u[3] - 3.0 * u[4]) * inv12h
+    )
+    out = out.at[1].set(
+        (-3.0 * u[0] - 10.0 * u[1] + 18.0 * u[2] - 6.0 * u[3] + u[4]) * inv12h
+    )
+    out = out.at[n - 2].set(
+        (
+            -u[n - 5]
+            + 6.0 * u[n - 4]
+            - 18.0 * u[n - 3]
+            + 10.0 * u[n - 2]
+            + 3.0 * u[n - 1]
+        )
+        * inv12h
+    )
+    out = out.at[n - 1].set(
+        (
+            25.0 * u[n - 1]
+            - 48.0 * u[n - 2]
+            + 36.0 * u[n - 3]
+            - 16.0 * u[n - 4]
+            + 3.0 * u[n - 5]
+        )
+        * inv12h
+    )
+    im2 = u[0:-4]
+    im1 = u[1:-3]
+    ip1 = u[3:-1]
+    ip2 = u[4:]
+    interior = (im2 - 8.0 * im1 + 8.0 * ip1 - ip2) * inv12h
+    out = out.at[2 : n - 2].set(interior)
+    return out
+
+
+def _diff2_uniform_4th_1d(u: jnp.ndarray, h: Any) -> jnp.ndarray:
+    """Second derivative on a uniform 1D grid; 4th-order interior and boundary bands."""
+    u = jnp.asarray(u)
+    h = jnp.asarray(h, dtype=u.dtype)
+    n = int(u.shape[0])
+    if n < MIN_POINTS_FD_ORDER_4:
+        g = jnp.asarray(jnp.gradient(u, h))
+        return jnp.asarray(jnp.gradient(g, h))
+    inv12h2 = 1.0 / (12.0 * h * h)
+    out = jnp.empty_like(u)
+    out = out.at[0].set(
+        (35.0 * u[0] - 104.0 * u[1] + 114.0 * u[2] - 56.0 * u[3] + 11.0 * u[4]) * inv12h2
+    )
+    out = out.at[1].set(
+        (11.0 * u[0] - 20.0 * u[1] + 6.0 * u[2] + 4.0 * u[3] - u[4]) * inv12h2
+    )
+    out = out.at[n - 2].set(
+        (
+            -u[n - 5]
+            + 4.0 * u[n - 4]
+            + 6.0 * u[n - 3]
+            - 20.0 * u[n - 2]
+            + 11.0 * u[n - 1]
+        )
+        * inv12h2
+    )
+    out = out.at[n - 1].set(
+        (
+            11.0 * u[n - 5]
+            - 56.0 * u[n - 4]
+            + 114.0 * u[n - 3]
+            - 104.0 * u[n - 2]
+            + 35.0 * u[n - 1]
+        )
+        * inv12h2
+    )
+    im2 = u[0:-4]
+    im1 = u[1:-3]
+    ui = u[2:-2]
+    ip1 = u[3:-1]
+    ip2 = u[4:]
+    interior = (-im2 + 16.0 * im1 - 30.0 * ui + 16.0 * ip1 - ip2) * inv12h2
+    out = out.at[2 : n - 2].set(interior)
+    return out
+
+
+def _diff1_along_axis_nd(K: jnp.ndarray, axis: int, h: float) -> jnp.ndarray:
+    """First partial derivative along ``axis`` with uniform spacing ``h``."""
+    K = jnp.asarray(K)
+    ax = int(axis) % int(K.ndim)
+    moved = jnp.moveaxis(K, ax, -1)
+    n = int(moved.shape[-1])
+    flat = jnp.reshape(moved, (-1, n))
+
+    def row_d1(row: jnp.ndarray) -> jnp.ndarray:
+        return _diff1_uniform_4th_1d(row, h)
+
+    out_flat = jax.vmap(row_d1)(flat)
+    out = jnp.reshape(out_flat, moved.shape)
+    return jnp.moveaxis(out, -1, ax)
+
+
+def _diff2_along_axis_nd(K: jnp.ndarray, axis: int, h: float) -> jnp.ndarray:
+    """Second partial derivative along ``axis`` with uniform spacing ``h``."""
+    K = jnp.asarray(K)
+    ax = int(axis) % int(K.ndim)
+    moved = jnp.moveaxis(K, ax, -1)
+    n = int(moved.shape[-1])
+    flat = jnp.reshape(moved, (-1, n))
+
+    def row_d2(row: jnp.ndarray) -> jnp.ndarray:
+        return _diff2_uniform_4th_1d(row, h)
+
+    out_flat = jax.vmap(row_d2)(flat)
+    out = jnp.reshape(out_flat, moved.shape)
+    return jnp.moveaxis(out, -1, ax)
+
+
+def _uniform_spacing_per_axis(
+    coord_list: Sequence[jnp.ndarray],
+    spatial_shape: Tuple[int, ...],
+    warnings: List[str],
+    *,
+    context: str,
+) -> Optional[List[float]]:
+    """Return ``h`` per axis if all coords are uniform and lengths match ``spatial_shape``."""
+    if len(coord_list) != len(spatial_shape):
+        return None
+    hs: List[float] = []
+    for i, c in enumerate(coord_list):
+        c1 = jnp.reshape(jnp.asarray(c), (-1,))
+        if int(c1.shape[0]) != int(spatial_shape[i]):
+            return None
+        h = _uniform_1d_spacing(c1)
+        if h is None:
+            warnings.append(
+                f"{context}: fd_order=4 requires uniform spacing on axis {i}; "
+                "falling back to 2nd-order jnp.gradient for this operation"
+            )
+            return None
+        hs.append(h)
+    return hs
+
+
+def _spatial_gradients_uniform_4th(
+    K: jnp.ndarray, hs: Sequence[float]
+) -> Tuple[jnp.ndarray, ...]:
+    return tuple(_diff1_along_axis_nd(K, ax, float(hs[ax])) for ax in range(len(hs)))
+
+
+def _laplacian_uniform_4th_nd(K: jnp.ndarray, hs: Sequence[float]) -> jnp.ndarray:
+    acc = jnp.zeros_like(K)
+    for ax, h in enumerate(hs):
+        acc = acc + _diff2_along_axis_nd(K, ax, float(h))
+    return acc
 
 
 def _separable_1d_coords(
@@ -409,6 +578,15 @@ def _fill_spatial_derivative_steady(
         except ValueError as e:
             warnings.append(str(e))
             return None
+        if cfg.fd_order == 4:
+            hs = _uniform_spacing_per_axis(
+                coords, tuple(int(s) for s in K.shape), warnings, context="separable"
+            )
+            if hs is not None and all(
+                int(K.shape[i]) >= MIN_POINTS_FD_ORDER_4 for i in range(dim)
+            ):
+                grads = _spatial_gradients_uniform_4th(K, hs)
+                return grads[axis_index]
         try:
             grads = _jnp_gradient_multi(K, coords)
         except Exception as e:  # noqa: BLE001
@@ -422,10 +600,28 @@ def _fill_spatial_derivative_steady(
         if aligned is None:
             return None
         K1, c1, orig_shape = aligned
+        if cfg.fd_order == 4:
+            h = _uniform_1d_spacing(c1)
+            if h is not None and int(K1.shape[0]) >= MIN_POINTS_FD_ORDER_4:
+                out = _diff1_uniform_4th_1d(K1, h)
+                return jnp.reshape(out, orig_shape)
+            if h is None:
+                warnings.append(
+                    "meshgrid 1D: fd_order=4 requires uniform x spacing; using 2nd-order gradient"
+                )
         out = _grad_1d_nonuniform(K1, c1)
         return jnp.reshape(out, orig_shape)
     rect1d = _rectilinear_meshgrid_1d_axes(K, x, y, z, dim)
     if rect1d is not None:
+        if cfg.fd_order == 4:
+            hs = _uniform_spacing_per_axis(
+                rect1d, tuple(int(s) for s in K.shape), warnings, context="rectilinear meshgrid"
+            )
+            if hs is not None and all(
+                int(K.shape[i]) >= MIN_POINTS_FD_ORDER_4 for i in range(dim)
+            ):
+                grads = _spatial_gradients_uniform_4th(K, hs)
+                return grads[axis_index]
         try:
             grads = _jnp_gradient_multi(K, rect1d)
         except Exception as e:  # noqa: BLE001
@@ -435,6 +631,15 @@ def _fill_spatial_derivative_steady(
 
     sep_axes = _meshgrid_separable_axis_coords(K, x, y, z, dim)
     if sep_axes is not None:
+        if cfg.fd_order == 4:
+            hs = _uniform_spacing_per_axis(
+                sep_axes, tuple(int(s) for s in K.shape), warnings, context="meshgrid separable axes"
+            )
+            if hs is not None and all(
+                int(K.shape[i]) >= MIN_POINTS_FD_ORDER_4 for i in range(dim)
+            ):
+                grads = _spatial_gradients_uniform_4th(K, hs)
+                return grads[axis_index]
         try:
             grads = _jnp_gradient_multi(K, sep_axes)
         except Exception as e:  # noqa: BLE001
@@ -449,6 +654,10 @@ def _fill_spatial_derivative_steady(
                 warnings.append(f"meshgrid: need {ax} same shape as field")
                 return None
             coords_m.append(c)
+    if cfg.fd_order == 4:
+        warnings.append(
+            "fd_order=4: full curvilinear meshgrid coordinates; using 2nd-order jnp.gradient"
+        )
     try:
         grads = jnp.gradient(K, *coords_m)
     except Exception as e:  # noqa: BLE001
@@ -478,8 +687,14 @@ def _fill_temporal_derivative(
     K2 = jnp.reshape(K, (nt, tail))
 
     ht = _uniform_1d_spacing(t)
+    if cfg.fd_order == 4 and ht is None:
+        warnings.append(
+            "fd_order=4: non-uniform t spacing; using 2nd-order jnp.gradient for d/dt"
+        )
 
     def col_grad(col: jnp.ndarray) -> jnp.ndarray:
+        if cfg.fd_order == 4 and ht is not None and nt >= MIN_POINTS_FD_ORDER_4:
+            return _diff1_uniform_4th_1d(col, ht)
         if ht is not None:
             return jnp.asarray(jnp.gradient(col, ht))
         return jnp.asarray(jnp.gradient(col, t))
@@ -528,6 +743,7 @@ def fill_path_b_derivatives(
 
 
 __all__ = [
+    "MIN_POINTS_FD_ORDER_4",
     "PathBGridConfig",
     "fill_path_b_derivatives",
 ]

@@ -83,15 +83,20 @@ def path_b_grid_from_options(
     layout: str = "meshgrid",
     spatial_dimension: Union[int, str] = "auto",
     steady: bool = True,
+    fd_order: int = 4,
     key_x: str = "x",
     key_y: str = "y",
     key_z: str = "z",
     key_t: str = "t",
 ) -> PathBGridConfig:
+    fo: Any = int(fd_order)
+    if fo not in (2, 4):
+        raise ValueError("fd_order must be 2 or 4")
     return PathBGridConfig(
         layout=layout,  # type: ignore[arg-type]
         spatial_dimension=spatial_dimension,  # type: ignore[arg-type]
         steady=bool(steady),
+        fd_order=fo,  # type: ignore[arg-type]
         key_x=key_x,
         key_y=key_y,
         key_z=key_z,
