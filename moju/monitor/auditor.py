@@ -1244,6 +1244,22 @@ def visualize(
     theme
         Must be ``\"light\"`` (default). Plotly monitor figures use a single light enterprise style;
         ``\"dark\"`` is not supported.
+
+    Returns
+    -------
+    Depends on ``backend``, ``dashboard_mode``, and ``visualize_layout``:
+
+    - ``backend=\"plotly\"``, ``dashboard_mode=\"single-figure\"``, ``visualize_layout=\"single\"``:
+      one Plotly :class:`plotly.graph_objects.Figure` (training or eval monitor layout).
+    - ``backend=\"plotly\"``, ``dashboard_mode=\"dash-tabs\"``: a ``dict`` with at least
+      ``{\"mode\": \"dash-tabs\", \"tabs\": {...}}`` mapping tab ids to figures (and optional
+      metadata). Keys under ``tabs`` always include ``kpi``, ``admissibility``, ``forensic_heatmaps``,
+      ``convergence``; when ``closure_debug`` is present, ``constitutive_divergence`` is included.
+    - ``visualize_layout=\"split\"``: a ``dict`` with ``\"monitor\"`` (figure or dash-tabs payload)
+      and ``\"worst_keys\"`` (a separate Plotly table figure). When ``dashboard_mode=\"dash-tabs\"``,
+      ``monitor`` is the dash-tabs dict and it also receives a top-level ``\"worst_keys\"`` entry
+      (same table figure).
+    - ``backend=\"none\"``: ``None``.
     """
     if backend == "none":
         return None

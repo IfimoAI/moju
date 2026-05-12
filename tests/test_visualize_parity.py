@@ -66,6 +66,18 @@ def test_visualize_dash_tabs_returns_payload() -> None:
     assert "constitutive_divergence" in payload["tabs"]
 
 
+def test_visualize_single_figure_raises_height_when_closure_debug() -> None:
+    """Single-figure monitor adds a constitutive-divergence row when closure_debug is present."""
+    pytest.importorskip("plotly")
+    from moju.monitor.auditor import visualize
+    from moju.monitor.visualize_plotly import MONITOR_SINGLE_FIGURE_HEIGHT
+
+    engine = _build_minimal_engine()
+    fig = visualize(engine.log, engine=engine, dashboard_mode="single-figure", mode="eval")
+    assert fig.layout.height is not None
+    assert int(fig.layout.height) >= MONITOR_SINGLE_FIGURE_HEIGHT + 199
+
+
 def test_visualize_split_returns_dict_with_worst_keys() -> None:
     pytest.importorskip("plotly")
     from moju.monitor.auditor import visualize

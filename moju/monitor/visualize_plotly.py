@@ -19,6 +19,8 @@ from moju.monitor.visualize_labels import (
     pretty_category_name,
     truncate_display_label,
 )
+from moju.monitor.visualize_constitutive import build_constitutive_divergence_card
+from moju.monitor.visualize_theme import MOJU_LIGHT, apply_theme, get_theme
 
 R_NORM_LOG_EPS = 1e-12
 # Spatial heatmap colorbar: matches plotted z (log10(|residual| + ε)) and hover `z` in display space.
@@ -105,22 +107,29 @@ def _wrap_category_tick_label_html(label: str, *, max_line_chars: int = 14, max_
     return "<br>".join(lines[:max_lines])
 
 
-_ENTERPRISE_THEME: Dict[str, str] = {
-    "plot_bg": "#ffffff",
-    "paper_bg": "#ffffff",
-    "font_stack": "Inter, ui-sans-serif, system-ui, sans-serif",
-    "font_color": "#0f172a",
-    "muted": "#64748b",
-    "tick_color": "#334155",
-    "title_color": "#0f172a",
-    "axis_line": "#64748b",
-    "grid_color": "#e2e8f0",
-    "zeroline_color": "#cbd5e1",
-    "line_primary": "#1d4ed8",
-    "bar_line": "#94a3b8",
-    "summary_border": "#334155",
-    "summary_bg": "rgba(241, 245, 249, 0.85)",
-}
+def _enterprise_theme_dict() -> Dict[str, str]:
+    """Light theme tokens aligned with :data:`MOJU_LIGHT` (single source of truth)."""
+    t = get_theme("light")
+    p = t.palette
+    return {
+        "plot_bg": p.plot_bg,
+        "paper_bg": p.paper_bg,
+        "font_stack": t.typography.font_family,
+        "font_color": p.font_color,
+        "muted": p.muted,
+        "tick_color": p.tick_color,
+        "title_color": p.title_color,
+        "axis_line": p.axis_line,
+        "grid_color": p.grid_color,
+        "zeroline_color": p.zeroline_color,
+        "line_primary": p.line_primary,
+        "bar_line": p.bar_line,
+        "summary_border": p.summary_border,
+        "summary_bg": p.summary_bg,
+    }
+
+
+_ENTERPRISE_THEME: Dict[str, str] = _enterprise_theme_dict()
 
 
 def _require_light_theme(theme: str) -> None:
@@ -817,14 +826,19 @@ def _monitor_flat_subplot_titles(*, n_rows: int, is_eval: bool, nr_panel_title: 
     Row-major titles for ``make_subplots(rows=n_rows, cols=8)`` so paper titles align with merged panels.
 
     Anchor columns follow ``specs``: combined bars / trend panels start at col 1 or 5 (0-based col index 0 or 4).
+    When ``n_rows`` exceeds the base layout (4 eval / 5 training), the extra row is constitutive divergence.
     """
     n = n_rows * 8
     st = [""] * n
+    base_eval_rows = 4
+    base_train_rows = 5
     if is_eval:
         st[16] = "Category Breakdown"
         st[20] = nr_panel_title
         st[24] = "Governing Residual"
         st[28] = "Constitutive Residual"
+        if n_rows > base_eval_rows:
+            st[base_eval_rows * 8] = "Constitutive divergence (pred / implied / Δ_N)"
     else:
         st[16] = "Overall Admissibility"
         st[20] = "Category Breakdown"
@@ -832,6 +846,8 @@ def _monitor_flat_subplot_titles(*, n_rows: int, is_eval: bool, nr_panel_title: 
         st[28] = "Constitutive Residuals"
         st[32] = "Governing Residual"
         st[36] = "Constitutive Residual"
+        if n_rows > base_train_rows:
+            st[base_train_rows * 8] = "Constitutive divergence (pred / implied / Δ_N)"
     return tuple(st)
 
 
@@ -891,66 +907,16 @@ def _add_monitor_panel_title_annotations(
 
 def build_worst_keys_table_figure(bundle: Dict[str, Any]) -> Any:
     """Standalone table: highest ``R_norm`` keys at the final log step (troubleshooting)."""
-    import plotly.graph_objects as go
+    from moju.monitor.visualize_components import build_worst_keys_table_card
 
-    T = _ENTERPRISE_THEME
     rows = list(bundle.get("worst_keys_rows") or [])
-    if not rows:
-        fig = go.Figure(
-            data=[
-                go.Table(
-                    header=dict(values=["Top residual keys (final step)"]),
-                    cells=dict(values=[["No finite R_norm rows for selected keys."]]),
-                )
-            ]
-        )
-        fig.update_layout(
-            template="plotly_white",
-            paper_bgcolor=T["paper_bg"],
-            margin=dict(l=24, r=24, t=40, b=24),
-            height=160,
-        )
-        return fig
-
-    def fmt(x: Any) -> str:
-        try:
-            xf = float(x)
-        except (TypeError, ValueError):
-            return "—"
-        return f"{xf:.4g}" if math.isfinite(xf) else "—"
-
-    displays = [str(r.get("display") or "") for r in rows]
-    r_effs = [fmt(r.get("r_eff")) for r in rows]
-    sks = [fmt(r.get("scale_k")) for r in rows]
-    rns = [fmt(r.get("r_norm")) for r in rows]
-    adms = [fmt(r.get("admissibility")) for r in rows]
-    cats = [str(r.get("category") or "") for r in rows]
-    fig = go.Figure(
-        data=[
-            go.Table(
-                columnwidth=[220, 72, 72, 72, 88, 80],
-                header=dict(
-                    values=["Residual key", "R_eff", "scale_k", "R_norm", "Admissibility", "Category"],
-                    fill_color="#e2e8f0",
-                    align="left",
-                    font=dict(family=T["font_stack"], size=12, color=T["font_color"]),
-                ),
-                cells=dict(
-                    values=[displays, r_effs, sks, rns, adms, cats],
-                    align="left",
-                    font=dict(family=T["font_stack"], size=11, color=T["font_color"]),
-                ),
-            )
-        ]
+    h = min(120 + 28 * len(rows), 720) if rows else None
+    return build_worst_keys_table_card(
+        bundle,
+        title="Worst residual keys (by R_norm, final log step)",
+        height=h,
+        limit=max(len(rows), 12) if rows else 12,
     )
-    fig.update_layout(
-        title=dict(text="Worst residual keys (by R_norm, final log step)", x=0.02, xanchor="left"),
-        template="plotly_white",
-        paper_bgcolor=T["paper_bg"],
-        margin=dict(l=24, r=24, t=56, b=24),
-        height=min(120 + 28 * len(rows), 720),
-    )
-    return fig
 
 
 def _build_eval_kpi_figure(bundle: Dict[str, Any]) -> Any:
@@ -1116,11 +1082,24 @@ def _build_plotly_monitor_figure_single(
     plot_bg = T["plot_bg"]
     font_color = T["font_color"]
     muted = T["muted"]
-    warn_color = "#F59E0B"
+    warn_color = MOJU_LIGHT.palette.adm_med
 
     is_eval = mode_eff == "eval"
     spatial_row = 4 if is_eval else 5
-    n_rows = 4 if is_eval else 5
+    has_cd = bool(isinstance(bundle.get("closure_debug"), dict) and bundle.get("closure_debug"))
+    base_n_rows = 4 if is_eval else 5
+    n_rows = base_n_rows + (1 if has_cd else 0)
+
+    _div_row_spec: List[Any] = [
+        {"type": "heatmap"},
+        {"type": "heatmap"},
+        {"type": "heatmap"},
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
 
     _split_xy_row: List[Any] = [
         {"type": "xy", "colspan": 4},
@@ -1164,6 +1143,9 @@ def _build_plotly_monitor_figure_single(
         # Slightly shorter chart rows fund larger vertical_spacing vs training—more gap from x labels
         # / x-axis titles to the subplot title row below (same figure height).
         row_heights = [0.002, 0.074, 0.262, 0.222]
+        if has_cd:
+            specs.append(_div_row_spec)
+            row_heights = [0.002, 0.06, 0.22, 0.18, 0.18]
     else:
         specs.append(_split_xy_row)
         specs.append(_split_xy_row)
@@ -1171,6 +1153,9 @@ def _build_plotly_monitor_figure_single(
         # KPI + chart row weights align with eval; extra chart row uses same weight as eval's lower row
         # so pixel heights match ``MONITOR_SINGLE_FIGURE_HEIGHT`` eval layout when figure height scales.
         row_heights = [0.002, 0.074, 0.262, 0.222, 0.222]
+        if has_cd:
+            specs.append(_div_row_spec)
+            row_heights = [0.002, 0.065, 0.21, 0.185, 0.18, 0.14]
     nr_panel_title = truncate_display_label(str(bundle.get("nr_title") or "Normalized Residuals"), 56)
     subplot_titles = _monitor_flat_subplot_titles(
         n_rows=n_rows, is_eval=is_eval, nr_panel_title=nr_panel_title
@@ -1642,6 +1627,34 @@ def _build_plotly_monitor_figure_single(
         fig.update_xaxes(visible=False, row=spatial_row, col=5)
         fig.update_yaxes(visible=False, row=spatial_row, col=5)
 
+    if has_cd:
+        div_fig = build_constitutive_divergence_card(bundle, mode="spatial", title=None)
+        cd_row = n_rows
+        traces = list(div_fig.data)
+        if len(traces) >= 3:
+            for j in range(3):
+                fig.add_trace(traces[j], row=cd_row, col=j + 1)
+        elif traces:
+            for j, tr in enumerate(traces):
+                if j < 3:
+                    fig.add_trace(tr, row=cd_row, col=j + 1)
+        else:
+            fig.add_trace(
+                go.Scatter(
+                    x=[0.0],
+                    y=[0.0],
+                    mode="text",
+                    text=["No constitutive divergence panel"],
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=cd_row,
+                col=2,
+            )
+        for col in (1, 2, 3):
+            fig.update_xaxes(automargin=True, row=cd_row, col=col)
+            fig.update_yaxes(automargin=True, row=cd_row, col=col)
+
     # Actionable summary
     summary_lines = []
     if math.isfinite(laws_last):
@@ -1693,7 +1706,8 @@ def _build_plotly_monitor_figure_single(
             pad=dict(t=2, b=0),
             font=dict(size=12, family=fs, color=font_color),
         ),
-        height=(MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING if not is_eval else MONITOR_SINGLE_FIGURE_HEIGHT),
+        height=(MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING if not is_eval else MONITOR_SINGLE_FIGURE_HEIGHT)
+        + (200 if has_cd else 0),
         showlegend=False,
         # Bottom margin: spatial x labels + full summary box (border) without clipping.
         margin=dict(l=90, r=90, t=margin_top, b=MONITOR_SINGLE_FIGURE_MARGIN_BOTTOM),
@@ -1747,6 +1761,11 @@ def _build_plotly_monitor_figure_single(
 
     align_heatmap_colorbars_to_subplot_domains(fig)
     _add_monitor_panel_title_annotations(fig, subplot_titles, font_color=font_color)
+    apply_theme(
+        fig,
+        MOJU_LIGHT,
+        margin=dict(l=90, r=90, t=margin_top, b=MONITOR_SINGLE_FIGURE_MARGIN_BOTTOM),
+    )
     return fig
 
 
