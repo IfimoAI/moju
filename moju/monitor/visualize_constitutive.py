@@ -59,10 +59,74 @@ from moju.monitor.visualize_labels import (
 
 _DIVERGENCE_EPS: float = 1e-30
 
+# User-facing divergence panel wording (distinct from closure_debug JSON keys ``pred`` / ``implied``).
+USER_CONSTIT_MODEL: str = "Model"
+USER_CONSTIT_IMPLIED: str = "Implied"
 
-# ---------------------------------------------------------------------------
-# Bundle / debug-dict helpers
-# ---------------------------------------------------------------------------
+
+def _user_constitutive_side_labels() -> Tuple[str, str]:
+    return USER_CONSTIT_MODEL, USER_CONSTIT_IMPLIED
+
+
+def divergence_y_quantity_label(debug_entry: Optional[Dict[str, Any]] = None) -> str:
+    """Y-axis wording for spatial line panels."""
+    ok = (debug_entry or {}).get("output_key")
+    if ok:
+        return f"Value ({ok})"
+    return "Value"
+
+
+def _spatial_position_axis_title(bundle_spatial: Any) -> str:
+    """Match monitor spatial labelling."""
+    sp = bundle_spatial if isinstance(bundle_spatial, dict) else None
+    if not sp or sp.get("kind") != "1d":
+        return "Position x"
+    ax = sp.get("position_axis") or "x"
+    return f"Position {ax}"
+
+
+def infer_divergence_abscissa(
+    bundle: Dict[str, Any],
+    n: int,
+    *,
+    hint_axis: Optional[str] = None,
+) -> Tuple[np.ndarray, str]:
+    """
+    Return ``(xs, x_title)`` aligned to length ``n`` for divergence line plots.
+
+    Priority: spatial 1-D ``bundle['spatial']['x']``; then ``coord_snapshot`` axes
+    (hint axis first among x/y/z/t, then defaults); fallback index with ``Sample index``.
+    """
+    if n <= 0:
+        return np.asarray([], dtype=float), "Sample index"
+    spatial_any = bundle.get("spatial") or {}
+    if isinstance(spatial_any, dict) and spatial_any.get("kind") == "1d":
+        x_sp = spatial_any.get("x")
+        if x_sp is not None:
+            arr = np.asarray(x_sp, dtype=float).ravel()
+            if arr.shape[0] == n:
+                return arr, _spatial_position_axis_title(spatial_any)
+    cs: Any = {}
+    log = bundle.get("log") or []
+    if log and isinstance(log[-1], dict):
+        cs = log[-1].get("coord_snapshot") or {}
+    if isinstance(cs, dict):
+        axes_order = ("x", "y", "z", "t")
+        hinted = hint_axis.strip().lower() if isinstance(hint_axis, str) and hint_axis.strip() else None
+        probe = []
+        if hinted and hinted in axes_order:
+            probe.append(hinted)
+        for ax in axes_order:
+            if ax not in probe:
+                probe.append(ax)
+        titles = {"x": "Position x", "y": "Position y", "z": "Position z", "t": "Time t"}
+        for ax in probe:
+            v = cs.get(ax)
+            arr = np.asarray(v, dtype=float).ravel() if v is not None else np.asarray([])
+            if arr.shape[0] == n:
+                return arr, titles.get(ax, f"Position {ax}")
+
+    return np.arange(n, dtype=float), "Sample index"
 
 
 def _closure_debug(bundle: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -117,6 +181,27 @@ def _auto_select_basename(bundle: Dict[str, Any], debug: Dict[str, Dict[str, Any
     return next(iter(debug.keys()), None)
 
 
+def primary_closure_debug_field_length(bundle: Dict[str, Any]) -> Optional[int]:
+    """Flattened sample count for selected ``closure_debug`` basename, if any."""
+    debug = _closure_debug(bundle)
+    if not debug:
+        return None
+    bn = _auto_select_basename(bundle, debug)
+    if bn is None or bn not in debug:
+        return None
+    entry = debug[bn]
+    if entry.get("mode") == "balance":
+        arr = _coerce_to_numpy(entry.get("scale_a"))
+    else:
+        arr = _coerce_to_numpy(entry.get("pred"))
+    arr = np.asarray(arr, dtype=float)
+    while arr.ndim > 2 and arr.shape[0] == 1:
+        arr = arr[0]
+    if arr.size == 0:
+        return None
+    return int(arr.size) if arr.ndim <= 2 else None
+
+
 def _coerce_to_numpy(x: Any) -> np.ndarray:
     try:
         return np.asarray(x, dtype=float)
@@ -130,22 +215,17 @@ def _sides_for_divergence(
     """
     Return ``(side_model, side_implied, label_model, label_implied)``.
 
-    - subtract mode: model = ``pred``, implied = ``implied``
-    - balance mode:  model = ``scale_a``, implied = ``scale_b``
+    User-facing axis labels **Model** / **Implied** (closure_debug retains ``pred`` / ``implied`` keys).
     """
+    lab_m, lab_i = _user_constitutive_side_labels()
     mode = debug_entry.get("mode")
     if mode == "balance":
         a = _coerce_to_numpy(debug_entry.get("scale_a"))
         b = _coerce_to_numpy(debug_entry.get("scale_b"))
-        return a, b, "Side A (governing balance LHS)", "Side B (closure RHS)"
+        return a, b, lab_m, lab_i
     a = _coerce_to_numpy(debug_entry.get("pred"))
     b = _coerce_to_numpy(debug_entry.get("implied"))
-    label_model = "Model F(pred)"
-    label_implied = "Implied"
-    if debug_entry.get("output_key"):
-        label_model = f"Model {debug_entry['output_key']}"
-        label_implied = f"Implied {debug_entry['output_key']}"
-    return a, b, label_model, label_implied
+    return a, b, lab_m, lab_i
 
 
 def _normalized_divergence(a: np.ndarray, b: np.ndarray, ref: Optional[np.ndarray] = None) -> np.ndarray:
@@ -217,10 +297,10 @@ def build_spatial_divergence_panel(
     if a_full.size == 0 or b_full.size == 0:
         return _empty_card(title or bn, "No spatial data for divergence", theme)
     if a_full.shape != b_full.shape:
-        return _empty_card(title or bn, "Model / implied shapes differ; cannot render side-by-side heatmaps", theme)
+        return _empty_card(title or bn, "Model and Implied shapes differ; cannot render side-by-side heatmaps", theme)
 
-    label_model = "Side A" if entry.get("mode") == "balance" else "Model F(pred)"
-    label_implied = "Side B" if entry.get("mode") == "balance" else "Implied"
+    label_model, label_implied = _user_constitutive_side_labels()
+    hint_ax = bundle.get("spatial_coord_hint")
 
     # Squeeze leading singletons (e.g. batch dim)
     a = a_full
@@ -228,22 +308,24 @@ def build_spatial_divergence_panel(
     while a.ndim > 2 and a.shape[0] == 1:
         a = a[0]
         b = b[0]
+    y_qty = divergence_y_quantity_label(entry)
     if a.ndim == 1:
         # Render as three 1-D line traces
         div = _normalized_divergence(a, b, ref=ref_arr.reshape(a.shape) if ref_arr is not None and ref_arr.size == a.size else None)
+        xs, x_title = infer_divergence_abscissa(bundle, int(a.shape[0]), hint_axis=str(hint_ax) if hint_ax else None)
         fig = make_subplots(
             rows=1,
             cols=3,
             shared_yaxes=False,
             subplot_titles=(label_model, label_implied, "Normalised divergence"),
         )
-        xs = np.arange(a.shape[0])
         fig.add_trace(go.Scatter(x=xs, y=a, mode="lines", line=dict(color=t.palette.line_primary), name=label_model), row=1, col=1)
         fig.add_trace(go.Scatter(x=xs, y=b, mode="lines", line=dict(color=t.palette.cat_constitutive), name=label_implied), row=1, col=2)
         fig.add_trace(go.Scatter(x=xs, y=div, mode="lines", line=dict(color=t.palette.adm_low), name="Δ"), row=1, col=3)
         for col in (1, 2, 3):
-            fig.update_xaxes(row=1, col=col, **themed_axis_style(theme, show_grid=False, zero_line=False))
-            fig.update_yaxes(row=1, col=col, **themed_axis_style(theme))
+            fig.update_xaxes(row=1, col=col, title_text=x_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
+            y_lab = "Normalised divergence" if col == 3 else y_qty
+            fig.update_yaxes(row=1, col=col, title_text=y_lab, **themed_axis_style(theme))
         fig.update_layout(showlegend=False)
         return apply_theme(fig, theme, title=title or f"{pretty_residual_key(bn)} (divergence)", height=height or t.layout.card_height)
 
@@ -302,19 +384,20 @@ def build_spatial_divergence_panel(
             z=div,
             x=cx,
             y=cy,
-            zmid=0.0,
+            colorscale=t.colorscales.divergence,
+            zmid=0,
             zmin=-abs_lim,
             zmax=abs_lim,
-            colorscale=t.colorscales.diverging,
-            colorbar=themed_colorbar(theme, title="(model − implied) / scale"),
+            colorbar=themed_colorbar(theme, title="(Model − Implied) / scale"),
             hovertemplate="x=%{x:.3g}<br>y=%{y:.3g}<br>Δ=%{z:.3g}<extra></extra>",
+            showscale=True,
         ),
         row=1,
         col=3,
     )
     for col in (1, 2, 3):
-        fig.update_xaxes(row=1, col=col, **themed_axis_style(theme, show_grid=False, zero_line=False))
-        fig.update_yaxes(row=1, col=col, **themed_axis_style(theme, show_grid=False, zero_line=False))
+        fig.update_xaxes(row=1, col=col, title_text="Position x", **themed_axis_style(theme, show_grid=False, zero_line=False))
+        fig.update_yaxes(row=1, col=col, title_text="Position y", **themed_axis_style(theme, show_grid=False, zero_line=False))
     return apply_theme(fig, theme, title=title or f"{pretty_residual_key(bn)} (divergence)", height=height or t.layout.card_height)
 
 
@@ -507,7 +590,7 @@ def build_distribution_divergence_panel(
         borderpad=6,
     )
     rng = max(abs_lim, 0.12)
-    fig.update_xaxes(title_text="(model − implied) / scale", range=[-rng, rng], **themed_axis_style(theme))
+    fig.update_xaxes(title_text="(Model − Implied) / scale", range=[-rng, rng], **themed_axis_style(theme))
     fig.update_yaxes(title_text="count", **themed_axis_style(theme))
     fig.update_layout(showlegend=False)
     return apply_theme(fig, theme, title=title or f"{pretty_residual_key(bn)} (distribution)", height=height or t.layout.card_height)
@@ -609,9 +692,9 @@ def build_hotspot_divergence_panel(
         )
         fig.update_layout(
             scene=dict(
-                xaxis=dict(title="x", title_font=t.section_title_font_dict(), tickfont=t.tick_font_dict()),
-                yaxis=dict(title="y", title_font=t.section_title_font_dict(), tickfont=t.tick_font_dict()),
-                zaxis=dict(title="z", title_font=t.section_title_font_dict(), tickfont=t.tick_font_dict()),
+                xaxis=dict(title="Position x", title_font=t.section_title_font_dict(), tickfont=t.tick_font_dict()),
+                yaxis=dict(title="Position y", title_font=t.section_title_font_dict(), tickfont=t.tick_font_dict()),
+                zaxis=dict(title="Position z", title_font=t.section_title_font_dict(), tickfont=t.tick_font_dict()),
                 aspectmode="data",
             ),
         )
@@ -635,13 +718,14 @@ def build_hotspot_divergence_panel(
                 showlegend=False,
             )
         )
-        fig.update_xaxes(title_text="x", **themed_axis_style(theme))
-        fig.update_yaxes(title_text="y", **themed_axis_style(theme))
+        fig.update_xaxes(title_text="Position x", **themed_axis_style(theme))
+        fig.update_yaxes(title_text="Position y", **themed_axis_style(theme))
     else:
-        idx = np.arange(af.size)
+        hint_ax = bundle.get("spatial_coord_hint")
+        bx, xt = infer_divergence_abscissa(bundle, af.size, hint_axis=str(hint_ax) if hint_ax else None)
         fig.add_trace(
             go.Bar(
-                x=idx,
+                x=bx,
                 y=abs_div,
                 marker=dict(color=div, cmin=-abs_lim, cmax=abs_lim, colorscale=t.colorscales.divergence, colorbar=themed_colorbar(theme, title="Δ_norm")),
                 customdata=customdata,
@@ -649,7 +733,7 @@ def build_hotspot_divergence_panel(
                 showlegend=False,
             )
         )
-        fig.update_xaxes(title_text="rank", **themed_axis_style(theme))
+        fig.update_xaxes(title_text=xt, **themed_axis_style(theme))
         fig.update_yaxes(title_text="|Δ_norm|", **themed_axis_style(theme))
     return apply_theme(fig, theme, title=title or f"{pretty_residual_key(bn)} (top-{top_k} hotspots)", height=height or t.layout.card_height)
 
@@ -797,11 +881,16 @@ def list_constitutive_basenames(bundle: Dict[str, Any]) -> List[str]:
 
 
 __all__ = [
+    "USER_CONSTIT_MODEL",
+    "USER_CONSTIT_IMPLIED",
     "build_constitutive_divergence_card",
     "build_constitutive_divergence_dashboard",
-    "build_spatial_divergence_panel",
-    "build_scatter_divergence_panel",
     "build_distribution_divergence_panel",
     "build_hotspot_divergence_panel",
+    "build_scatter_divergence_panel",
+    "build_spatial_divergence_panel",
+    "divergence_y_quantity_label",
+    "infer_divergence_abscissa",
     "list_constitutive_basenames",
+    "primary_closure_debug_field_length",
 ]

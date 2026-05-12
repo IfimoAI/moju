@@ -204,6 +204,8 @@ themed via **`moju.monitor.visualize_theme.apply_theme(fig, MOJU_LIGHT|MOJU_DARK
   constitutive basename.  Surfaced as a `constitutive_divergence` tab in the `dash-tabs`
   payload, as an optional **bottom row** on the default **single-figure** dashboard when
   `closure_debug` is populated, and as the *Constitutive divergence* tab in Studio's Audit page.
+  Plots emphasise **Model** / **Implied** in user-facing axes; passing ``visualize(..., show_state_overlay=True)``
+  alongside aligned ``state_pred`` layers predicted-state snapshots and may expose a ``state_snapshot`` tab under ``dash-tabs``.
 - **Engine sidecar** — every `ResidualEngine.compute_residuals(...)` (and the Torch twin
   `TorchResidualEngine`) now stashes raw `pred` / `implied` / `raw` / `scale_a` / `scale_b`
   per constitutive audit row under `residuals["closure_debug"][basename]`.  This is the

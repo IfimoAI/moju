@@ -19,7 +19,11 @@ from moju.monitor.visualize_labels import (
     pretty_category_name,
     truncate_display_label,
 )
-from moju.monitor.visualize_constitutive import build_constitutive_divergence_card
+from moju.monitor.visualize_constitutive import (
+    build_constitutive_divergence_card,
+    infer_divergence_abscissa,
+    primary_closure_debug_field_length,
+)
 from moju.monitor.visualize_theme import MOJU_LIGHT, apply_theme, get_theme
 
 R_NORM_LOG_EPS = 1e-12
@@ -44,6 +48,10 @@ MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING = int(
 # Summary box below subplots (``yref="paper"``, ``yanchor="top"``): higher y = closer to charts; margin_b reserves pixels so the border is not clipped (training + eval).
 MONITOR_SINGLE_FIGURE_MARGIN_BOTTOM = 268
 MONITOR_SUMMARY_ANNOTATION_Y_PAPER = -0.098
+
+MONITOR_CONSTITUTIVE_DIVERGENCE_EXTRA_PX = 200
+MONITOR_DIV_ROW_WEIGHT_MULT = 3.0
+MONITOR_STATE_OVERLAY_EXTRA_PX = 144
 
 # Heatmap colorbars: paper coordinates; positioned via align_heatmap_colorbars_to_subplot_domains.
 HEATMAP_COLORBAR_X_GAP_PAPER = 0.012
@@ -821,24 +829,29 @@ def _plotly_add_spatial_panel_to_subplot(
     fig.update_yaxes(visible=False, row=row, col=col)
 
 
-def _monitor_flat_subplot_titles(*, n_rows: int, is_eval: bool, nr_panel_title: str) -> Tuple[str, ...]:
+def _monitor_flat_subplot_titles(
+    *,
+    n_rows: int,
+    is_eval: bool,
+    nr_panel_title: str,
+    trailing_rows: Tuple[str, ...] = (),
+) -> Tuple[str, ...]:
     """
     Row-major titles for ``make_subplots(rows=n_rows, cols=8)`` so paper titles align with merged panels.
 
     Anchor columns follow ``specs``: combined bars / trend panels start at col 1 or 5 (0-based col index 0 or 4).
-    When ``n_rows`` exceeds the base layout (4 eval / 5 training), the extra row is constitutive divergence.
+    ``trailing_rows`` identifies optional rows appended after the base layout (eval: 4 / training: 5),
+    in order — e.g. ``(\"state\", \"constitutive_divergence\")``.
     """
-    n = n_rows * 8
-    st = [""] * n
+    st = [""] * (n_rows * 8)
     base_eval_rows = 4
     base_train_rows = 5
+    base_rows = base_eval_rows if is_eval else base_train_rows
     if is_eval:
         st[16] = "Category Breakdown"
         st[20] = nr_panel_title
         st[24] = "Governing Residual"
         st[28] = "Constitutive Residual"
-        if n_rows > base_eval_rows:
-            st[base_eval_rows * 8] = "Constitutive divergence (pred / implied / Δ_N)"
     else:
         st[16] = "Overall Admissibility"
         st[20] = "Category Breakdown"
@@ -846,8 +859,14 @@ def _monitor_flat_subplot_titles(*, n_rows: int, is_eval: bool, nr_panel_title: 
         st[28] = "Constitutive Residuals"
         st[32] = "Governing Residual"
         st[36] = "Constitutive Residual"
-        if n_rows > base_train_rows:
-            st[base_train_rows * 8] = "Constitutive divergence (pred / implied / Δ_N)"
+    tag_title = {
+        "state": "State snapshot (predicted)",
+        "constitutive_divergence": "Constitutive divergence (Model / Implied / normalized Δ)",
+    }
+    for i, tag in enumerate(trailing_rows):
+        row_1 = base_rows + 1 + i
+        ix = (row_1 - 1) * 8
+        st[ix] = tag_title.get(tag, "")
     return tuple(st)
 
 
@@ -1087,8 +1106,21 @@ def _build_plotly_monitor_figure_single(
     is_eval = mode_eff == "eval"
     spatial_row = 4 if is_eval else 5
     has_cd = bool(isinstance(bundle.get("closure_debug"), dict) and bundle.get("closure_debug"))
+    _snapshots_for_row = bundle.get("state_field_snapshots")
+    has_state_ov = isinstance(_snapshots_for_row, list) and len(_snapshots_for_row) > 0
+    trailing: List[str] = []
+    if has_state_ov:
+        trailing.append("state")
+    if has_cd:
+        trailing.append("constitutive_divergence")
+
     base_n_rows = 4 if is_eval else 5
-    n_rows = base_n_rows + (1 if has_cd else 0)
+    n_rows = base_n_rows + len(trailing)
+    state_row: Optional[int] = (base_n_rows + 1) if has_state_ov else None
+    cd_row: Optional[int] = (base_n_rows + len(trailing)) if has_cd else None
+
+    div_legacy_eval = 0.18
+    div_legacy_train = 0.14
 
     _div_row_spec: List[Any] = [
         {"type": "heatmap"},
@@ -1137,28 +1169,46 @@ def _build_plotly_monitor_figure_single(
         kpi_row_eval if is_eval else kpi_row_training,
     ]
     if is_eval:
-        # Row 3: Category Breakdown | combined residual bars; row 4: spatial fields only.
         specs.append(_split_xy_row)
         specs.append(_split_xy_row)
-        # Slightly shorter chart rows fund larger vertical_spacing vs training—more gap from x labels
-        # / x-axis titles to the subplot title row below (same figure height).
-        row_heights = [0.002, 0.074, 0.262, 0.222]
-        if has_cd:
+        if has_cd or has_state_ov:
+            row_heights = [0.002, 0.06, 0.22, 0.18]
+            if has_state_ov:
+                row_heights.append(div_legacy_eval)
+            if has_cd:
+                row_heights.append(div_legacy_eval)
+            if has_cd:
+                row_heights[-1] *= MONITOR_DIV_ROW_WEIGHT_MULT
+            s_tot = sum(row_heights)
+            row_heights = [h / s_tot for h in row_heights]
+        else:
+            row_heights = [0.002, 0.074, 0.262, 0.222]
+        for _ in trailing:
             specs.append(_div_row_spec)
-            row_heights = [0.002, 0.06, 0.22, 0.18, 0.18]
     else:
         specs.append(_split_xy_row)
         specs.append(_split_xy_row)
         specs.append(_split_xy_row)
-        # KPI + chart row weights align with eval; extra chart row uses same weight as eval's lower row
-        # so pixel heights match ``MONITOR_SINGLE_FIGURE_HEIGHT`` eval layout when figure height scales.
-        row_heights = [0.002, 0.074, 0.262, 0.222, 0.222]
-        if has_cd:
+        if has_cd or has_state_ov:
+            row_heights = [0.002, 0.065, 0.21, 0.185, 0.18]
+            if has_state_ov:
+                row_heights.append(div_legacy_train)
+            if has_cd:
+                row_heights.append(div_legacy_train)
+            if has_cd:
+                row_heights[-1] *= MONITOR_DIV_ROW_WEIGHT_MULT
+            s_tot = sum(row_heights)
+            row_heights = [h / s_tot for h in row_heights]
+        else:
+            row_heights = [0.002, 0.074, 0.262, 0.222, 0.222]
+        for _ in trailing:
             specs.append(_div_row_spec)
-            row_heights = [0.002, 0.065, 0.21, 0.185, 0.18, 0.14]
     nr_panel_title = truncate_display_label(str(bundle.get("nr_title") or "Normalized Residuals"), 56)
     subplot_titles = _monitor_flat_subplot_titles(
-        n_rows=n_rows, is_eval=is_eval, nr_panel_title=nr_panel_title
+        n_rows=n_rows,
+        is_eval=is_eval,
+        nr_panel_title=nr_panel_title,
+        trailing_rows=tuple(trailing),
     )
     fig = make_subplots(
         rows=n_rows,
@@ -1627,9 +1677,73 @@ def _build_plotly_monitor_figure_single(
         fig.update_xaxes(visible=False, row=spatial_row, col=5)
         fig.update_yaxes(visible=False, row=spatial_row, col=5)
 
-    if has_cd:
+    if has_state_ov and state_row is not None:
+        ss_rows = bundle.get("state_field_snapshots") or []
+        sp_for_axis = spatial if isinstance(spatial, dict) else None
+        x_lab_card = _pos_axis_title_card(sp_for_axis)
+        for jcol in range(3):
+            col = jcol + 1
+            if jcol < len(ss_rows):
+                snap = ss_rows[jcol]
+                if snap.get("kind") == "1d":
+                    fig.add_trace(
+                        go.Scatter(
+                            x=np.asarray(snap["x"], dtype=float),
+                            y=np.asarray(snap["z"], dtype=float),
+                            mode="lines",
+                            line=dict(width=2, color=MOJU_LIGHT.palette.line_primary),
+                            name=str(snap.get("name", "")),
+                            showlegend=False,
+                        ),
+                        row=state_row,
+                        col=col,
+                    )
+                    fig.update_xaxes(title_text=x_lab_card, row=state_row, col=col, automargin=True)
+                    fig.update_yaxes(title_text=str(snap.get("name", "value")), row=state_row, col=col, automargin=True)
+                elif snap.get("kind") == "2d":
+                    fig.add_trace(
+                        go.Heatmap(
+                            z=np.asarray(snap["z"], dtype=float),
+                            x=np.asarray(snap["x"], dtype=float),
+                            y=np.asarray(snap["y"], dtype=float),
+                            colorscale=hm_cs,
+                            name=str(snap.get("name", "")),
+                            showscale=(col == 3),
+                        ),
+                        row=state_row,
+                        col=col,
+                    )
+                    fig.update_xaxes(title_text="Position x", row=state_row, col=col, automargin=True)
+                    fig.update_yaxes(title_text="Position y", row=state_row, col=col, automargin=True)
+                else:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[float(mid)],
+                            y=[0.0],
+                            mode="text",
+                            text=["Unsupported snapshot"],
+                            showlegend=False,
+                            hoverinfo="skip",
+                        ),
+                        row=state_row,
+                        col=col,
+                    )
+            else:
+                fig.add_trace(
+                    go.Scatter(
+                        x=[float(mid)],
+                        y=[0.0],
+                        mode="text",
+                        text=["—"],
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ),
+                    row=state_row,
+                    col=col,
+                )
+
+    if has_cd and cd_row is not None:
         div_fig = build_constitutive_divergence_card(bundle, mode="spatial", title=None)
-        cd_row = n_rows
         traces = list(div_fig.data)
         if len(traces) >= 3:
             for j in range(3):
@@ -1654,6 +1768,26 @@ def _build_plotly_monitor_figure_single(
         for col in (1, 2, 3):
             fig.update_xaxes(automargin=True, row=cd_row, col=col)
             fig.update_yaxes(automargin=True, row=cd_row, col=col)
+        tl0 = traces[0] if traces else None
+        tty = getattr(tl0, "type", None) if tl0 is not None else None
+        if tty == "scatter":
+            nlen_fb = primary_closure_debug_field_length(bundle)
+            xv0 = getattr(tl0, "x", None)
+            nx = len(xv0) if xv0 is not None else 0
+            try:
+                nlen_i = int(nlen_fb) if nlen_fb is not None and int(nlen_fb) > 0 else int(nx)
+            except (TypeError, ValueError):
+                nlen_i = int(nx)
+            hin = bundle.get("spatial_coord_hint")
+            _, xtit = infer_divergence_abscissa(
+                bundle, nlen_i, hint_axis=str(hin) if hin else None
+            )
+            for col in (1, 2, 3):
+                fig.update_xaxes(title_text=xtit, row=cd_row, col=col, automargin=True)
+        elif tty == "heatmap":
+            for col in (1, 2, 3):
+                fig.update_xaxes(title_text="Position x", row=cd_row, col=col, automargin=True)
+                fig.update_yaxes(title_text="Position y", row=cd_row, col=col, automargin=True)
 
     # Actionable summary
     summary_lines = []
@@ -1697,6 +1831,19 @@ def _build_plotly_monitor_figure_single(
     else:
         layout_title_html = overall_subtitle_html
         margin_top = 54 if overall_subtitle_html.strip() else 72
+    div_legacy_px = div_legacy_eval if is_eval else div_legacy_train
+    layout_base_h = MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING if not is_eval else MONITOR_SINGLE_FIGURE_HEIGHT
+    extra_px = 0
+    if has_cd:
+        extra_px += int(
+            round(
+                MONITOR_CONSTITUTIVE_DIVERGENCE_EXTRA_PX
+                * (1.0 + div_legacy_px * (MONITOR_DIV_ROW_WEIGHT_MULT - 1.0))
+            )
+        )
+    if has_state_ov:
+        extra_px += MONITOR_STATE_OVERLAY_EXTRA_PX
+    layout_h = layout_base_h + extra_px
     fig.update_layout(
         title=dict(
             text=layout_title_html,
@@ -1706,8 +1853,7 @@ def _build_plotly_monitor_figure_single(
             pad=dict(t=2, b=0),
             font=dict(size=12, family=fs, color=font_color),
         ),
-        height=(MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING if not is_eval else MONITOR_SINGLE_FIGURE_HEIGHT)
-        + (200 if has_cd else 0),
+        height=layout_h,
         showlegend=False,
         # Bottom margin: spatial x labels + full summary box (border) without clipping.
         margin=dict(l=90, r=90, t=margin_top, b=MONITOR_SINGLE_FIGURE_MARGIN_BOTTOM),
@@ -1908,6 +2054,71 @@ def _build_forensic_heatmap_figure(
     return fig
 
 
+def _build_state_snapshot_tab_figure(bundle: Dict[str, Any]) -> Any:
+    """One-row figure mirroring embedded state overlay columns (dash-tabs only)."""
+    import numpy as np
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    T = _ENTERPRISE_THEME
+    snaps = list(bundle.get("state_field_snapshots") or [])
+    titles: List[str] = [str(s.get("name", "—")) for s in snaps[:3]]
+    while len(titles) < 3:
+        titles.append("—")
+    fig = make_subplots(rows=1, cols=3, subplot_titles=(titles[0], titles[1], titles[2]))
+    hm_cs = DEFAULT_SPATIAL_HEATMAP_COLORSCALE
+    for jcol in range(3):
+        col = jcol + 1
+        if jcol >= len(snaps):
+            fig.add_trace(
+                go.Scatter(x=[0.0], y=[0.0], mode="text", text=["—"], showlegend=False, hoverinfo="skip"),
+                row=1,
+                col=col,
+            )
+            continue
+        snap = snaps[jcol]
+        if snap.get("kind") == "1d":
+            fig.add_trace(
+                go.Scatter(
+                    x=np.asarray(snap["x"], dtype=float),
+                    y=np.asarray(snap["z"], dtype=float),
+                    mode="lines",
+                    line=dict(width=2, color=MOJU_LIGHT.palette.line_primary),
+                    showlegend=False,
+                ),
+                row=1,
+                col=col,
+            )
+        elif snap.get("kind") == "2d":
+            fig.add_trace(
+                go.Heatmap(
+                    z=np.asarray(snap["z"], dtype=float),
+                    x=np.asarray(snap["x"], dtype=float),
+                    y=np.asarray(snap["y"], dtype=float),
+                    colorscale=hm_cs,
+                    showscale=(col == 3),
+                ),
+                row=1,
+                col=col,
+            )
+        else:
+            fig.add_trace(
+                go.Scatter(x=[0.0], y=[0.0], mode="text", text=["Unsupported"], showlegend=False, hoverinfo="skip"),
+                row=1,
+                col=col,
+            )
+    fig.update_layout(
+        title=dict(text="State snapshot (predicted)", x=0.5, xanchor="center"),
+        template="plotly_white",
+        paper_bgcolor=T["paper_bg"],
+        plot_bgcolor=T["plot_bg"],
+        font=dict(family=T["font_stack"], color=T["font_color"]),
+        height=340,
+        margin=dict(t=72, l=72, r=72, b=64),
+    )
+    return fig
+
+
 def build_plotly_monitor_dash_payload(
     bundle: Dict[str, Any],
     *,
@@ -1957,6 +2168,8 @@ def build_plotly_monitor_dash_payload(
     except Exception:  # noqa: BLE001
         # Constitutive divergence is additive; never block the rest of the dashboard.
         pass
+    if isinstance(bundle.get("state_field_snapshots"), list) and bundle.get("state_field_snapshots"):
+        tabs["state_snapshot"] = _build_state_snapshot_tab_figure(bundle)
     return {
         "mode": "dash-tabs",
         "tabs": tabs,

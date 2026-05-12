@@ -70,12 +70,23 @@ def test_visualize_single_figure_raises_height_when_closure_debug() -> None:
     """Single-figure monitor adds a constitutive-divergence row when closure_debug is present."""
     pytest.importorskip("plotly")
     from moju.monitor.auditor import visualize
-    from moju.monitor.visualize_plotly import MONITOR_SINGLE_FIGURE_HEIGHT
+    from moju.monitor.visualize_plotly import (
+        MONITOR_CONSTITUTIVE_DIVERGENCE_EXTRA_PX,
+        MONITOR_DIV_ROW_WEIGHT_MULT,
+        MONITOR_SINGLE_FIGURE_HEIGHT,
+    )
 
     engine = _build_minimal_engine()
     fig = visualize(engine.log, engine=engine, dashboard_mode="single-figure", mode="eval")
     assert fig.layout.height is not None
-    assert int(fig.layout.height) >= MONITOR_SINGLE_FIGURE_HEIGHT + 199
+    div_frac = 0.18
+    expected_min = MONITOR_SINGLE_FIGURE_HEIGHT + int(
+        round(
+            MONITOR_CONSTITUTIVE_DIVERGENCE_EXTRA_PX
+            * (1.0 + div_frac * (MONITOR_DIV_ROW_WEIGHT_MULT - 1.0))
+        )
+    )
+    assert int(fig.layout.height) >= expected_min
 
 
 def test_visualize_split_returns_dict_with_worst_keys() -> None:

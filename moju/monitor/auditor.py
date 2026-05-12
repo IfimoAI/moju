@@ -862,6 +862,8 @@ def _build_visualize_bundle(
     worst_keys_top_n: int = 12,
     closure_debug: Optional[Dict[str, Dict[str, Any]]] = None,
     residuals: Optional[Dict[str, Any]] = None,
+    spatial_coord_hint: Optional[str] = None,
+    state_field_snapshots: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Shared arrays and metadata for :func:`visualize` (Plotly).
@@ -968,7 +970,88 @@ def _build_visualize_bundle(
         "monitor_run_mode": log[-1].get("run_mode"),
         "closure_debug": dict(closure_debug) if closure_debug else None,
         "residuals": residuals,
+        "spatial_coord_hint": spatial_coord_hint,
+        "state_field_snapshots": list(state_field_snapshots) if state_field_snapshots else None,
     }
+
+
+def _extract_state_field_snapshots(
+    state_pred: Optional[Mapping[str, Any]],
+    spatial: Optional[Dict[str, Any]],
+    *,
+    limit: int = 3,
+) -> List[Dict[str, Any]]:
+    """
+    Up to ``limit`` plottable slices from ``state_pred`` aligned to the parsed law spatial bundle.
+
+    Skips coordinate keys ``x`` / ``y`` / ``z`` / ``t``. Supports ``spatial`` panels with
+    ``kind`` ``1d`` (line) or ``2d`` (heatmap); other shapes yield an empty list.
+    """
+    if not state_pred or limit <= 0:
+        return []
+    import numpy as np
+
+    skip = frozenset({"x", "y", "z", "t"})
+    candidates = sorted(k for k in state_pred.keys() if str(k) not in skip)
+
+    def _arr(val: Any) -> Optional[np.ndarray]:
+        try:
+            return np.asarray(jnp.asarray(val), dtype=float)
+        except (TypeError, ValueError):
+            return None
+
+    out: List[Dict[str, Any]] = []
+    if not isinstance(spatial, dict):
+        return out
+    kind = spatial.get("kind")
+    if kind == "1d":
+        xv = spatial.get("x")
+        if xv is None:
+            return out
+        xs = np.asarray(xv, dtype=float).ravel()
+        nx = int(xs.size)
+        if nx == 0:
+            return out
+        for k in candidates:
+            arr = _arr(state_pred.get(k))
+            if arr is None:
+                continue
+            a = arr.ravel() if arr.ndim <= 1 else None
+            if a is None or a.shape[0] != nx:
+                continue
+            out.append({"name": str(k), "kind": "1d", "x": xs.copy(), "z": np.asarray(a, dtype=float)})
+            if len(out) >= limit:
+                break
+        return out
+    if kind == "2d":
+        xa_raw = spatial.get("x")
+        ya_raw = spatial.get("y")
+        if xa_raw is None or ya_raw is None:
+            return out
+        xv = np.asarray(xa_raw, dtype=float).ravel()
+        yv = np.asarray(ya_raw, dtype=float).ravel()
+        ny_ok, nx_ok = int(yv.size), int(xv.size)
+        if ny_ok == 0 or nx_ok == 0:
+            return out
+        for k in candidates:
+            arr = _arr(state_pred.get(k))
+            if arr is None or arr.ndim != 2:
+                continue
+            if arr.shape != (ny_ok, nx_ok):
+                continue
+            out.append(
+                {
+                    "name": str(k),
+                    "kind": "2d",
+                    "x": xv.copy(),
+                    "y": yv.copy(),
+                    "z": np.asarray(arr, dtype=float),
+                }
+            )
+            if len(out) >= limit:
+                break
+        return out
+    return out
 
 
 def _maybe_build_spatial_panels(
@@ -1035,6 +1118,7 @@ def build_monitor_visualize_bundle(
     spatial_normalize: bool = False,
     engine: Optional[Any] = None,
     worst_keys_top_n: int = 12,
+    show_state_overlay: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
     Build the internal visualization bundle (same as :func:`visualize` uses for Plotly).
@@ -1048,6 +1132,9 @@ def build_monitor_visualize_bundle(
     ``engine``: when ``residuals`` is omitted, use :attr:`ResidualEngine.last_residuals` if given.
 
     ``mode``: same as :func:`visualize` — ``training`` or ``eval``; ``test`` is a silent alias for ``eval``.
+
+    ``show_state_overlay``: when ``True``, optional predicted-state overlays are placed in the
+    bundle for Plotly (same semantics as :func:`visualize`).
     """
     eff_residuals = residuals
     if eff_residuals is None and engine is not None:
@@ -1074,6 +1161,11 @@ def build_monitor_visualize_bundle(
         work_log = work_log[-1:]
     spatial_parsed = _parse_spatial_law_panel(law_panel)
     spatial_rnorm_parsed = _parse_spatial_rnorm_panel(rnorm_panel)
+    state_snaps: Optional[List[Dict[str, Any]]] = None
+    if bool(show_state_overlay) and state_pred is not None:
+        state_snaps = _extract_state_field_snapshots(state_pred, spatial_parsed)
+        if not state_snaps:
+            state_snaps = None
     return _build_visualize_bundle(
         work_log,
         keys,
@@ -1086,6 +1178,8 @@ def build_monitor_visualize_bundle(
         worst_keys_top_n=worst_keys_top_n,
         closure_debug=closure_debug_sidecar,
         residuals=eff_residuals,
+        spatial_coord_hint=str(spatial_coord_key),
+        state_field_snapshots=state_snaps,
     )
 
 
@@ -1117,6 +1211,7 @@ def visualize(
     visualize_layout: str = "single",
     worst_keys_top_n: int = 12,
     density: str = "comfortable",
+    show_state_overlay: bool = False,
 ) -> Any:
     """
     Monitor dashboard from ``ResidualEngine`` log entries (``rms``, ``scale``).
@@ -1212,6 +1307,9 @@ def visualize(
     spatial_normalize
         If True, auto-built spatial panels use :math:`|r|/s_k` (R_norm-style). Default False
         uses absolute residual :math:`|r|` vs position.
+    show_state_overlay
+        When ``True``, try to add an optional **predicted-state** overlay row aligned to law
+        spatial axes (requires ``state_pred`` and compatible field layouts). Default ``False``.
     engine
         Optional :class:`ResidualEngine` whose :attr:`~ResidualEngine.last_residuals` is used
         when ``residuals`` is omitted, so ``visualize(engine.log, engine=engine)`` can build
@@ -1254,7 +1352,9 @@ def visualize(
     - ``backend=\"plotly\"``, ``dashboard_mode=\"dash-tabs\"``: a ``dict`` with at least
       ``{\"mode\": \"dash-tabs\", \"tabs\": {...}}`` mapping tab ids to figures (and optional
       metadata). Keys under ``tabs`` always include ``kpi``, ``admissibility``, ``forensic_heatmaps``,
-      ``convergence``; when ``closure_debug`` is present, ``constitutive_divergence`` is included.
+      ``convergence``; when ``closure_debug`` is present, ``constitutive_divergence`` is included;
+      when non-empty predicted-state snapshots were built from ``show_state_overlay`` and ``state_pred``,
+      ``state_snapshot`` is included too.
     - ``visualize_layout=\"split\"``: a ``dict`` with ``\"monitor\"`` (figure or dash-tabs payload)
       and ``\"worst_keys\"`` (a separate Plotly table figure). When ``dashboard_mode=\"dash-tabs\"``,
       ``monitor`` is the dash-tabs dict and it also receives a top-level ``\"worst_keys\"`` entry
@@ -1311,6 +1411,11 @@ def visualize(
 
     spatial_parsed = _parse_spatial_law_panel(law_panel)
     spatial_rnorm_parsed = _parse_spatial_rnorm_panel(rnorm_panel)
+    state_vis_snaps: Optional[List[Dict[str, Any]]] = None
+    if bool(show_state_overlay) and state_pred is not None:
+        state_vis_snaps = _extract_state_field_snapshots(state_pred, spatial_parsed)
+        if not state_vis_snaps:
+            state_vis_snaps = None
     bundle = _build_visualize_bundle(
         work_log,
         keys,
@@ -1323,6 +1428,8 @@ def visualize(
         worst_keys_top_n=worst_keys_top_n,
         closure_debug=closure_debug_sidecar,
         residuals=eff_residuals,
+        spatial_coord_hint=str(spatial_coord_key),
+        state_field_snapshots=state_vis_snaps,
     )
     if bundle is None:
         return None
