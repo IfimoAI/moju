@@ -35,6 +35,12 @@ from moju.monitor.law_implied_diagnostics import (
     merge_fragment_law_implied_audit_specs,
     merge_law_implied_audit_specs,
 )
+from moju.monitor.model_derived_registry import (
+    MODEL_DERIVED_REGISTRY,
+    ModelDerivedBridge,
+    collect_group_input_state_keys,
+    enrich_derived_state_from_constitutive_audits,
+)
 from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
 from moju.monitor.closure_registry import apply_closure_discrepancy_normalize
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
@@ -65,6 +71,10 @@ __all__ = [
     "list_laws_with_implied_diagnostics",
     "merge_law_implied_audit_specs",
     "merge_fragment_law_implied_audit_specs",
+    "MODEL_DERIVED_REGISTRY",
+    "ModelDerivedBridge",
+    "collect_group_input_state_keys",
+    "enrich_derived_state_from_constitutive_audits",
     "apply_closure_discrepancy_normalize",
     "pretty_residual_key",
     "pretty_category_name",

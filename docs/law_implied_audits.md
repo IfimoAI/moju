@@ -43,6 +43,16 @@ These implied residual keys are included in normal category/overall admissibilit
 
 Rows are merged in **`merge_law_implied_audit_specs(laws_spec, enabled=...)`**. Inspect coverage with **`list_laws_with_implied_diagnostics()`** and intentional best-effort gaps with **`law_implied_unsupported_reasons()`**.
 
+## Auto materialization (`derived_state_chain`)
+
+Law-linked rows only define **which** constitutive audits exist and how **`implied_balance_fn`** compares the law to **`pred = Models.*(…)`**. Dimensionless **groups** may still need the same quantity as a **state key** (e.g. **`alpha`** for **`Groups.fo`**).
+
+When a constitutive audit’s **`name`** is registered in **`moju.monitor.model_derived_registry.MODEL_DERIVED_REGISTRY`** and its **`output_key`** appears in some **`groups`** **`state_map` value**, :class:`ResidualEngine` **appends** a matching JSON DSL step to **`derived_state_chain`** at engine construction (same rules as Moju Studio’s **`enrich_fragment_from_model_audits`**). Supported catalog bridges today: **`thermal_diffusivity`** (\(\alpha = k/(\rho c_p)\)), **`mass_diffusivity`** (\(D = \mathrm{Fo}_{\text{mass}}\,L^2/t\)), **`wave_speed_from_st`** (\(c = \omega L/\mathrm{St}\)).
+
+**`user_fns`:** Before **`apply_derived_state_chain`**, the engine runs **`user_fns`** for any **reference keys** used in those expressions (e.g. materialize **`k`** from **`T`** via **`user_fns['k']`**) so nonlinear conductivities work without duplicating **`alpha`** in the NPZ.
+
+**`pred` for implied audits** remains **only** the catalog **`Models.*`** evaluation on the audit’s **`state_map`**; auto materialization does not substitute a different **`pred`**.
+
 ## Residual keys and `ref_delta`
 
 Each auto row sets **`residual_basename`** so keys stay unique when multiple laws or manual audits use the same `Models.*` / `Groups.*` name:

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 """
-Thin interop helpers for using moju JAX laws from PyTorch.
+Low-level JAX → PyTorch interop helper.
 
-moju is JAX-first. These utilities are optional glue so that users who
-already live in the PyTorch ecosystem (or torch-based frameworks such as
-physicsNemo) can call JAX-residual functions from ``moju.piratio.Laws``
-without rewriting them in Torch.
+This module exposes :func:`wrap_law_torch`, the single primitive that
+bridges an arbitrary JAX-based law / model / group function into PyTorch's
+autograd ecosystem.  It is intentionally kept minimal.
+
+For the full PyTorch-first interface — including :class:`TorchResidualEngine`,
+nondimensionalisation, R_eff loss, derived-state chain, group inference,
+Path-B FD fill, and constitutive audits — install ``moju[torch]`` and use::
+
+    from moju.torch import TorchResidualEngine
+
+:func:`wrap_law_torch` is re-exported from :mod:`moju.torch` for convenience.
 
 Usage
 -----
@@ -17,14 +24,15 @@ Usage
     mass_incompressible_torch = wrap_law_torch(Laws.mass_incompressible)
 
     # In PyTorch code:
-    u_grad = torch.randn(32, 2, 2, device=\"cuda\", dtype=torch.float32)
+    u_grad = torch.randn(32, 2, 2, device=\"cpu\", dtype=torch.float32)
     residual = mass_incompressible_torch(u_grad)  # torch.Tensor
     loss = (residual ** 2).mean()
     loss.backward()
 
-This module deliberately keeps the surface area tiny: we export a single
-\"blessed\" helper instead of introducing separate *_torch variants for
-every law. Users can wrap whichever residuals they need.
+Note: ``jax2torch`` is most stable on CPU.  Tensors on other devices are
+automatically moved to CPU before calling the JAX function and moved back to
+the original device on return.  For full GPU support, prefer the native
+torch reimplementations in :mod:`moju.torch`.
 """
 
 from typing import Callable

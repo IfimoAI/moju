@@ -307,6 +307,190 @@ def test_ns_stokes_burgers_implied_mu_balance_near_zero():
         assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-5
 
 
+def test_hookes_implied_stress_near_zero_on_consistent_1d():
+    """1-D Hooke's: E=2, nu=0, strain=[0.5] -> stress_model=[1.0] == stress_pinn -> delta≈0."""
+    E = jnp.array(2.0)
+    nu = jnp.array(0.0)
+    strain = jnp.array([0.5])
+    stress = jnp.array([1.0])           # consistent with E*strain
+    stiffness = jnp.array([[2.0]])      # law arg: C = [[E]] for 1D
+
+    engine = ResidualEngine(
+        laws=[
+            {
+                "name": "hookes_law_residual",
+                "state_map": {
+                    "stress": "stress",
+                    "strain": "strain",
+                    "stiffness_tensor": "C",
+                },
+            }
+        ],
+        law_implied_audits=True,
+    )
+    state = {"stress": stress, "strain": strain, "C": stiffness, "E": E, "nu": nu}
+    r = engine.compute_residuals(state)
+    key = "isotropic_linear_stress/law_hookes_law_residual/implied_delta"
+    assert key in r["constitutive"], f"key missing; constitutive keys: {list(r.get('constitutive', {}).keys())}"
+    assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-5
+
+
+def test_hookes_implied_stress_nonzero_on_inconsistent_state():
+    """Deliberately wrong E gives non-zero implied_delta."""
+    strain = jnp.array([0.5])
+    stress = jnp.array([1.0])
+    stiffness = jnp.array([[2.0]])
+    E_wrong = jnp.array(10.0)          # inconsistent with stress=1, strain=0.5
+    nu = jnp.array(0.0)
+
+    engine = ResidualEngine(
+        laws=[
+            {
+                "name": "hookes_law_residual",
+                "state_map": {"stress": "stress", "strain": "strain", "stiffness_tensor": "C"},
+            }
+        ],
+        law_implied_audits=True,
+    )
+    state = {"stress": stress, "strain": strain, "C": stiffness, "E": E_wrong, "nu": nu}
+    r = engine.compute_residuals(state)
+    key = "isotropic_linear_stress/law_hookes_law_residual/implied_delta"
+    assert key in r["constitutive"]
+    assert float(jnp.max(jnp.abs(r["constitutive"][key]))) > 0.1
+
+
+def test_hookes_implied_row_present_in_registry():
+    """merge_law_implied_audit_specs includes isotropic_linear_stress for hookes_law_residual."""
+    c, _ = merge_law_implied_audit_specs(
+        [{"name": "hookes_law_residual", "state_map": {"stress": "stress", "strain": "strain", "stiffness_tensor": "C"}}],
+        enabled=True,
+    )
+    assert any(r["name"] == "isotropic_linear_stress" for r in c)
+    assert any(r.get("implied_fn") is not None for r in c)
+
+
+def test_mass_compressible_ideal_gas_implied_near_zero():
+    """ideal_gas_rho audit: rho_pinn consistent with P/(R*T) gives delta≈0."""
+    P = jnp.array(101325.0)
+    R = jnp.array(287.0)
+    T = jnp.array(300.0)
+    rho = P / (R * T)
+
+    # mass_compressible needs: rho, rho_t, u, rho_grad, u_grad
+    engine = ResidualEngine(
+        laws=[
+            {
+                "name": "mass_compressible",
+                "state_map": {
+                    "rho": "rho",
+                    "rho_t": "rho_t",
+                    "u": "u",
+                    "rho_grad": "rho_grad",
+                    "u_grad": "u_grad",
+                },
+            }
+        ],
+        law_implied_audits=True,
+    )
+    state = {
+        "rho": rho,
+        "rho_t": jnp.array(0.0),
+        "u": jnp.array([1.0]),
+        "rho_grad": jnp.array([0.0]),
+        "u_grad": jnp.array([[0.0]]),
+        # model inputs for ideal_gas_rho
+        "P": P,
+        "R": R,
+        "T": T,
+    }
+    r = engine.compute_residuals(state)
+    key = "ideal_gas_rho/law_mass_compressible/implied_delta"
+    assert key in r["constitutive"], f"key missing; keys: {list(r.get('constitutive', {}).keys())}"
+    assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-5
+
+
+def test_mass_compressible_boussinesq_implied_near_zero():
+    """boussinesq_rho audit: rho_pinn = rho0*(1-beta*dT) gives delta≈0."""
+    rho0 = jnp.array(1000.0)
+    beta = jnp.array(2e-4)
+    dT = jnp.array(10.0)
+    rho = rho0 * (1.0 - beta * dT)
+
+    engine = ResidualEngine(
+        laws=[
+            {
+                "name": "mass_compressible",
+                "state_map": {
+                    "rho": "rho",
+                    "rho_t": "rho_t",
+                    "u": "u",
+                    "rho_grad": "rho_grad",
+                    "u_grad": "u_grad",
+                },
+            }
+        ],
+        law_implied_audits=True,
+    )
+    state = {
+        "rho": rho,
+        "rho_t": jnp.array(0.0),
+        "u": jnp.array([0.0]),
+        "rho_grad": jnp.array([0.0]),
+        "u_grad": jnp.array([[0.0]]),
+        # model inputs for boussinesq_rho
+        "rho0": rho0,
+        "beta": beta,
+        "dT": dT,
+    }
+    r = engine.compute_residuals(state)
+    key = "boussinesq_rho/law_mass_compressible/implied_delta"
+    assert key in r["constitutive"], f"key missing; keys: {list(r.get('constitutive', {}).keys())}"
+    assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-5
+
+
+def test_mass_compressible_implied_skipped_when_eos_keys_absent():
+    """If P, R, T (and rho0, beta, dT) are absent, both EOS rows return None and are omitted."""
+    engine = ResidualEngine(
+        laws=[
+            {
+                "name": "mass_compressible",
+                "state_map": {
+                    "rho": "rho",
+                    "rho_t": "rho_t",
+                    "u": "u",
+                    "rho_grad": "rho_grad",
+                    "u_grad": "u_grad",
+                },
+            }
+        ],
+        law_implied_audits=True,
+    )
+    state = {
+        "rho": jnp.array(1.0),
+        "rho_t": jnp.array(0.0),
+        "u": jnp.array([0.0]),
+        "rho_grad": jnp.array([0.0]),
+        "u_grad": jnp.array([[0.0]]),
+        # EOS keys intentionally absent
+    }
+    r = engine.compute_residuals(state)
+    constitutive = r.get("constitutive", {})
+    assert "ideal_gas_rho/law_mass_compressible/implied_delta" not in constitutive
+    assert "boussinesq_rho/law_mass_compressible/implied_delta" not in constitutive
+
+
+def test_mass_compressible_rows_in_registry():
+    """merge_law_implied_audit_specs returns two rows for mass_compressible."""
+    c, _ = merge_law_implied_audit_specs(
+        [{"name": "mass_compressible", "state_map": {"rho": "rho", "rho_t": "rho_t", "u": "u", "rho_grad": "rho_grad", "u_grad": "u_grad"}}],
+        enabled=True,
+    )
+    names = [r["name"] for r in c]
+    assert "ideal_gas_rho" in names
+    assert "boussinesq_rho" in names
+    assert all(r.get("implied_fn") is not None for r in c)
+
+
 def test_fourier_implied_works_with_user_fns_materializing_k_rho_alpha():
     """
     Users can avoid precomputing constitutive inputs by supplying callables keyed by output state.

@@ -127,6 +127,94 @@ class TestModelsKnownValues:
         assert jnp.allclose(nu, 3.0 / 1e-12, rtol=rtol, atol=atol)
 
 
+class TestIsotropicLinearStress:
+    """Known-value tests for Models.isotropic_linear_stress (Voigt d=1,3,6)."""
+
+    def test_1d_axial_stress(self, rtol, atol):
+        """d=1: σ = E·ε."""
+        E = jnp.array(2.0)
+        nu = jnp.array(0.0)
+        strain = jnp.array([0.5])
+        stress = Models.isotropic_linear_stress(E=E, nu=nu, strain=strain)
+        assert stress.shape == (1,)
+        assert jnp.allclose(stress, jnp.array([1.0]), rtol=rtol, atol=atol)
+
+    def test_1d_batch_stress(self, rtol, atol):
+        """d=1 with leading batch dimension."""
+        E = jnp.array(3.0)
+        nu = jnp.array(0.0)
+        strain = jnp.array([[1.0], [2.0], [3.0]])  # (3, 1)
+        stress = Models.isotropic_linear_stress(E=E, nu=nu, strain=strain)
+        assert stress.shape == (3, 1)
+        expected = 3.0 * strain
+        assert jnp.allclose(stress, expected, rtol=rtol, atol=atol)
+
+    def test_2d_plane_stress_nu_zero(self, rtol, atol):
+        """d=3 plane stress with nu=0: C = E*I_block (diagonal)."""
+        E = jnp.array(2.0)
+        nu = jnp.array(0.0)
+        # C = 2 * [[1,0,0],[0,1,0],[0,0,0.5]]
+        strain = jnp.array([1.0, 2.0, 4.0])
+        stress = Models.isotropic_linear_stress(E=E, nu=nu, strain=strain)
+        expected = jnp.array([2.0, 4.0, 4.0])  # [2*1, 2*2, 2*0.5*4]
+        assert stress.shape == (3,)
+        assert jnp.allclose(stress, expected, rtol=rtol, atol=atol)
+
+    def test_2d_plane_stress_analytic(self, rtol, atol):
+        """d=3 plane stress: σ_xx = E/(1-ν²)*(ε_xx + ν*ε_yy)."""
+        E = 1.0
+        nu = 0.3
+        ex, ey, exy = 0.001, -0.0003, 0.0
+        fac = E / (1.0 - nu ** 2)
+        sx_exp = fac * (ex + nu * ey)
+        sy_exp = fac * (nu * ex + ey)
+        sxy_exp = fac * ((1.0 - nu) / 2.0) * exy
+        stress = Models.isotropic_linear_stress(
+            E=jnp.array(E), nu=jnp.array(nu), strain=jnp.array([ex, ey, exy])
+        )
+        assert jnp.allclose(stress[0], sx_exp, rtol=rtol, atol=1e-7)
+        assert jnp.allclose(stress[1], sy_exp, rtol=rtol, atol=1e-7)
+        assert jnp.allclose(stress[2], sxy_exp, rtol=rtol, atol=atol)
+
+    def test_3d_voigt_nu_zero(self, rtol, atol):
+        """d=6 with nu=0: λ=0, C = diag(2G, 2G, 2G, G, G, G) with G=E/2."""
+        E = jnp.array(2.0)
+        nu = jnp.array(0.0)
+        # G = E/(2*(1+0)) = 1.0, lam = 0
+        # C = diag(2,2,2,1,1,1)
+        strain = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        stress = Models.isotropic_linear_stress(E=E, nu=nu, strain=strain)
+        expected = jnp.array([2.0, 4.0, 6.0, 4.0, 5.0, 6.0])
+        assert stress.shape == (6,)
+        assert jnp.allclose(stress, expected, rtol=rtol, atol=atol)
+
+    def test_3d_voigt_symmetric_stiffness(self, rtol, atol):
+        """d=6 isotropic: stress = lam*(eps_kk)*I + 2G*eps (Voigt notation)."""
+        E = 200e9
+        nu = 0.3
+        lam = E * nu / ((1 + nu) * (1 - 2 * nu))
+        G = E / (2 * (1 + nu))
+        eps = jnp.array([1e-3, -3e-4, 0.0, 0.0, 0.0, 0.0])
+        # Analytic: σ_xx = λ(ε_xx+ε_yy+ε_zz) + 2G*ε_xx
+        eps_kk = float(eps[0]) + float(eps[1]) + float(eps[2])
+        sx_exp = lam * eps_kk + 2 * G * float(eps[0])
+        sy_exp = lam * eps_kk + 2 * G * float(eps[1])
+        sz_exp = lam * eps_kk + 2 * G * float(eps[2])
+        stress = Models.isotropic_linear_stress(E=jnp.array(E), nu=jnp.array(nu), strain=eps)
+        assert jnp.allclose(stress[0], sx_exp, rtol=1e-4, atol=1.0)
+        assert jnp.allclose(stress[1], sy_exp, rtol=1e-4, atol=1.0)
+        assert jnp.allclose(stress[2], sz_exp, rtol=1e-4, atol=1.0)
+        assert jnp.allclose(stress[3], 0.0, atol=1.0)
+
+    def test_invalid_voigt_dim_raises(self):
+        """d not in {1,3,6} raises ValueError."""
+        import pytest
+        with pytest.raises(ValueError, match="unsupported Voigt dimension"):
+            Models.isotropic_linear_stress(
+                E=jnp.array(1.0), nu=jnp.array(0.0), strain=jnp.array([1.0, 2.0])
+            )
+
+
 class TestTurbulentViscousAcceleration:
     def test_k_omega_matches_nu_times_laplacian(self, rtol, atol):
         u_lap = jnp.array([[1.0, 0.0], [0.0, 1.0]])

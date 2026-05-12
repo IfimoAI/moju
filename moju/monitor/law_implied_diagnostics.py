@@ -268,6 +268,41 @@ def balance_implied_mu_burgers_equation(law_sm: Dict[str, str]) -> Callable[...,
     return implied_balance_fn
 
 
+def implied_stress_hookes(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """
+    Subtract-mode implied for :func:`Laws.hookes_law_residual`.
+
+    Returns the PINN-predicted stress vector so the engine can compute
+    ``raw = Models.isotropic_linear_stress(E, nu, strain) − stress_pinn``.
+    """
+
+    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+        stress = _val(state, constants, law_sm, "stress")
+        if stress is None:
+            return None
+        return jnp.asarray(stress)
+
+    return implied_fn
+
+
+def implied_rho_mass_compressible(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """
+    Subtract-mode implied for :func:`Laws.mass_compressible`.
+
+    Returns the PINN-predicted density so the engine can compute
+    ``raw = Models.ideal_gas_rho(P, R, T) − rho_pinn``
+    (or the Boussinesq variant).
+    """
+
+    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+        rho = _val(state, constants, law_sm, "rho")
+        if rho is None:
+            return None
+        return jnp.asarray(rho)
+
+    return implied_fn
+
+
 def implied_viscous_acceleration_incompressible(law_sm: Dict[str, str]) -> Callable[..., Any]:
     """Implied Newtonian viscous acceleration u_t + (u·∇)u + ∇p from the momentum balance."""
 
@@ -435,6 +470,37 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "include_ref_delta": True,
         },
     ],
+    "hookes_law_residual": [
+        {
+            "category": "constitutive",
+            "name": "isotropic_linear_stress",
+            "output_key": "stress_model",
+            "state_map": {"E": "E", "nu": "nu", "strain": "strain"},
+            "implied_maker": implied_stress_hookes,
+            "residual_basename": "isotropic_linear_stress/law_hookes_law_residual",
+            "include_ref_delta": True,
+        },
+    ],
+    "mass_compressible": [
+        {
+            "category": "constitutive",
+            "name": "ideal_gas_rho",
+            "output_key": "rho_model",
+            "state_map": {"P": "P", "R": "R", "T": "T"},
+            "implied_maker": implied_rho_mass_compressible,
+            "residual_basename": "ideal_gas_rho/law_mass_compressible",
+            "include_ref_delta": True,
+        },
+        {
+            "category": "constitutive",
+            "name": "boussinesq_rho",
+            "output_key": "rho_model",
+            "state_map": {"rho0": "rho0", "beta": "beta", "dT": "dT"},
+            "implied_maker": implied_rho_mass_compressible,
+            "residual_basename": "boussinesq_rho/law_mass_compressible",
+            "include_ref_delta": True,
+        },
+    ],
     "momentum_compressible_newtonian_laplacian": [
         {
             "category": "constitutive",
@@ -493,18 +559,41 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
 # stable constitutive/scaling rearrangement is not encoded in the monitor registry.
 _LAW_IMPLIED_UNSUPPORTED_REASONS: Dict[str, str] = {
     "laplace_equation": "no explicit constitutive/scaling term to rearrange",
-    "poisson_equation": "requires source-term closure choice not represented by one catalog model",
-    "helmholtz_equation": "depends on forcing/wavenumber framing rather than one implied closure target",
-    "schrodinger_steady": "complex-valued amplitude/phase closure not encoded as one implied scalar",
+    "poisson_equation": (
+        "source is a direct law argument, not a separate material property; "
+        "f_implied = -eps*phi_laplacian is just the law rearranged"
+    ),
+    "helmholtz_equation": (
+        "kL is a domain parameter, not derived from a catalog closure; "
+        "ratio -phi_laplacian/phi is undefined at wave nodes (phi=0)"
+    ),
+    "schrodinger_steady": (
+        "division by psi is undefined at wavefunction nodes; "
+        "no general catalog model for spatially-varying potential V"
+    ),
     "laplace_beltrami": "metric/geometry operators require chart-specific closure treatment",
     "mass_incompressible": "constraint law (divergence-free) has no direct constitutive target",
-    "mass_compressible": "continuity balance has no single implied constitutive quantity",
-    "euler_momentum": "inviscid law has no viscosity constitutive closure target",
-    "darcy_flow": "permeability/drag closure requires porous-medium model context",
-    "brinkman_extension": "mixed porous/viscous closure needs medium-specific constitutive choices",
-    "viscous_dissipation": "dissipation source does not map to one implied constitutive/scaling scalar",
-    "hookes_law_residual": "elastic constitutive inversion is material-model specific",
-    "faraday_law": "curl-based electromagnetic closure requires domain-specific constitutive target choice",
+    "euler_momentum": (
+        "law is rho-normalized (p* = p/(rho_ref U^2)); rho is not an argument; "
+        "inversion yields rho*=1 everywhere by construction; "
+        "EOS density check belongs to mass_compressible when solving compressible Euler"
+    ),
+    "darcy_flow": (
+        "division by |grad_p|^2 is unstable where pressure gradient vanishes; "
+        "da*L^2/mu is already fully determined from law inputs"
+    ),
+    "brinkman_extension": (
+        "mu_eff definition is debated in literature (mu, mu/sqrt(eps), etc.); "
+        "recovery requires per-component division of a vector equation"
+    ),
+    "viscous_dissipation": (
+        "ratio Phi/Phi_calc violates no-division policy; "
+        "law IS the source term and has no separate conservation residual form"
+    ),
+    "faraday_law": (
+        "conductivity belongs to Ohm's law (J=sigma*E), not Faraday's law; "
+        "sigma is not recoverable from E_curl and B_t alone"
+    ),
 }
 
 

@@ -37,6 +37,7 @@ from moju.monitor.closure_registry import (
     compute_ref_delta,
 )
 from moju.monitor.derived_state_chain import all_ref_keys_from_chain, keys_produced_by_chain
+from moju.monitor.model_derived_registry import enrich_derived_state_from_constitutive_audits
 from moju.monitor.law_implied_diagnostics import (
     merge_fragment_law_implied_audit_specs,
     merge_law_implied_audit_specs,
@@ -1491,6 +1492,11 @@ class ResidualEngine:
         self.constitutive_audit = mc + rc
         self.constitutive_custom = list(constitutive_custom or [])
         self.derived_state_chain = list(derived_state_chain or [])
+        self.derived_state_chain = enrich_derived_state_from_constitutive_audits(
+            self.constitutive_audit,
+            self.groups_spec,
+            self.derived_state_chain,
+        )
         self.state_builder = state_builder
         self.user_fns = dict(user_fns or {})
         self.enable_omit_messages = bool(enable_omit_messages)
@@ -1647,16 +1653,6 @@ class ResidualEngine:
             )
 
         state_for_groups = dict(state_pred)
-        if self.derived_state_chain:
-            from moju.monitor.derived_state_chain import apply_derived_state_chain
-
-            state_for_groups, _dwarn = apply_derived_state_chain(
-                state_for_groups,
-                self.constants,
-                self.derived_state_chain,
-            )
-            for w in _dwarn:
-                _maybe_log_infer(f"derived_state: {w}")
 
         def _materialize_user_keys(
             state: Dict[str, Any],
@@ -1751,6 +1747,37 @@ class ResidualEngine:
                     f"user_fns({stage}) unresolved outputs in best_effort_partial mode: {blocked}"
                 )
 
+        if self.derived_state_chain and self.user_fns:
+            _rk = all_ref_keys_from_chain(self.derived_state_chain)
+            _materialize_user_keys(state_for_groups, needed_keys=_rk, stage="pre_derived")
+
+        if self.derived_state_chain:
+            from moju.monitor.derived_state_chain import apply_derived_state_chain
+
+            state_for_groups, _dwarn = apply_derived_state_chain(
+                state_for_groups,
+                self.constants,
+                self.derived_state_chain,
+            )
+            for w in _dwarn:
+                _maybe_log_infer(f"derived_state: {w}")
+
+        def _state_ref_raw_after_derived(sr: Dict[str, Any]) -> Dict[str, Any]:
+            s0 = dict(sr)
+            if self.derived_state_chain:
+                from moju.monitor.derived_state_chain import apply_derived_state_chain
+
+                if self.user_fns:
+                    _rkr = all_ref_keys_from_chain(self.derived_state_chain)
+                    _materialize_user_keys(s0, needed_keys=_rkr, stage="pre_derived(ref)")
+                s0, wr = apply_derived_state_chain(s0, self.constants, self.derived_state_chain)
+                for x in wr:
+                    _maybe_log_infer(f"derived_state(ref): {x}")
+            return s0
+
+        def _merge_state_ref(sr: Dict[str, Any]) -> Dict[str, Any]:
+            return {**self._state_builder(_state_ref_raw_after_derived(sr)), **self.constants}
+
         # Materialize keys needed to run groups (inputs only).
         group_needed: Set[str] = set()
         for spec in self.groups_spec:
@@ -1772,19 +1799,6 @@ class ResidualEngine:
         else:
             state_pred_built = self._state_builder(state_for_groups)
         merged = {**self.constants, **state_pred_built}
-
-        def _state_ref_raw_after_derived(sr: Dict[str, Any]) -> Dict[str, Any]:
-            s0 = dict(sr)
-            if self.derived_state_chain:
-                from moju.monitor.derived_state_chain import apply_derived_state_chain
-
-                s0, wr = apply_derived_state_chain(s0, self.constants, self.derived_state_chain)
-                for x in wr:
-                    _maybe_log_infer(f"derived_state(ref): {x}")
-            return s0
-
-        def _merge_state_ref(sr: Dict[str, Any]) -> Dict[str, Any]:
-            return {**self._state_builder(_state_ref_raw_after_derived(sr)), **self.constants}
 
         if fill_law_fd and not auto_path_b_derivatives:
             raise ValueError(

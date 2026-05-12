@@ -24,7 +24,10 @@ def test_piratio_module_has_all():
     """piratio __all__ matches public API."""
     import moju.piratio as piratio
     assert hasattr(piratio, "__all__")
-    assert set(piratio.__all__) == {"Groups", "Models", "Laws", "Operators"}
+    assert set(piratio.__all__) == {
+        "Groups", "Models", "Laws", "Operators",
+        "NondimScales", "dimensional_to_nd", "nd_to_dimensional",
+    }
 
 
 def test_import_monitor_all():
@@ -38,8 +41,12 @@ def test_import_monitor_all():
         build_law_spec_identity,
         build_monitor_visualize_bundle,
         build_spatial_rnorm_panels_from_residuals,
+        collect_group_input_state_keys,
+        enrich_derived_state_from_constitutive_audits,
         implied_group_specs_for_laws,
         merge_implied_groups_first,
+        MODEL_DERIVED_REGISTRY,
+        ModelDerivedBridge,
         visualize,
         list_constitutive_models,
         list_scaling_closure_ids,
@@ -90,6 +97,10 @@ def test_monitor_module_has_all():
         "list_laws_with_implied_diagnostics",
         "merge_law_implied_audit_specs",
         "merge_fragment_law_implied_audit_specs",
+        "MODEL_DERIVED_REGISTRY",
+        "ModelDerivedBridge",
+        "collect_group_input_state_keys",
+        "enrich_derived_state_from_constitutive_audits",
         "pretty_residual_key",
         "pretty_category_name",
     }

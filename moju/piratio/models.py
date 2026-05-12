@@ -428,6 +428,68 @@ class Models:
 
     @staticmethod
     @jax.jit
+    def isotropic_linear_stress(E, nu, strain):
+        r"""
+        Isotropic linear-elastic stress via the Voigt-form stiffness :math:`\mathbf{C}(E,\nu)\cdot\boldsymbol{\varepsilon}`.
+
+        Dispatches on the last dimension ``d`` of ``strain``:
+
+        * ``d = 1``: 1-D axial — :math:`\sigma = E\,\varepsilon`.
+        * ``d = 3``: 2-D plane-stress Voigt components
+          :math:`[\sigma_{xx},\sigma_{yy},\sigma_{xy}]`;
+          :math:`\mathbf{C} = \frac{E}{1-\nu^2}\begin{bmatrix}1&\nu&0\\\nu&1&0\\0&0&\frac{1-\nu}{2}\end{bmatrix}`.
+        * ``d = 6``: 3-D isotropic Voigt components
+          :math:`[\sigma_{xx},\sigma_{yy},\sigma_{zz},\sigma_{xy},\sigma_{yz},\sigma_{xz}]`;
+          :math:`\lambda = \frac{E\nu}{(1+\nu)(1-2\nu)}`, :math:`G = \frac{E}{2(1+\nu)}`.
+
+        :param E: Young's modulus (dimensional [Pa] or nondimensional :math:`E^* = E/E_\mathrm{ref}`).
+        :param nu: Poisson ratio (dimensionless).
+        :param strain: Voigt strain vector. Shape (..., d), ``d`` ∈ {1, 3, 6}.
+        :return: Voigt stress vector. Shape (..., d).
+
+        Use case: Implied constitutive audit for :meth:`hookes_law_residual`; checks that predicted
+        stress and strain fields are consistent with isotropic material constants ``E`` and ``nu``.
+        """
+        eps = jnp.asarray(strain)
+        d = eps.shape[-1]
+        E_s = jnp.asarray(E, dtype=eps.dtype)
+        nu_s = jnp.asarray(nu, dtype=eps.dtype)
+        if d == 1:
+            # σ = E ε  (1-D axial)
+            return E_s * eps
+        elif d == 3:
+            # 2-D plane stress Voigt: [σ_xx, σ_yy, σ_xy]
+            fac = E_s / (1.0 - nu_s ** 2)
+            z = jnp.zeros_like(E_s)
+            o = jnp.ones_like(E_s)
+            sh = (1.0 - nu_s) / 2.0
+            C = jnp.stack([
+                jnp.stack([o,    nu_s, z ]),
+                jnp.stack([nu_s, o,    z ]),
+                jnp.stack([z,    z,    sh]),
+            ]) * fac  # shape (3, 3)
+        elif d == 6:
+            # 3-D isotropic Voigt: [σ_xx,σ_yy,σ_zz,σ_xy,σ_yz,σ_xz]
+            lam = E_s * nu_s / ((1.0 + nu_s) * (1.0 - 2.0 * nu_s))
+            G = E_s / (2.0 * (1.0 + nu_s))
+            l2g = lam + 2.0 * G
+            z = jnp.zeros_like(E_s)
+            C = jnp.stack([
+                jnp.stack([l2g, lam, lam, z, z, z]),
+                jnp.stack([lam, l2g, lam, z, z, z]),
+                jnp.stack([lam, lam, l2g, z, z, z]),
+                jnp.stack([z,   z,   z,   G, z, z]),
+                jnp.stack([z,   z,   z,   z, G, z]),
+                jnp.stack([z,   z,   z,   z, z, G]),
+            ])  # shape (6, 6)
+        else:
+            raise ValueError(
+                f"isotropic_linear_stress: unsupported Voigt dimension d={d}; expected 1, 3, or 6."
+            )
+        return jnp.einsum("ij,...j->...i", C, eps)
+
+    @staticmethod
+    @jax.jit
     def surface_tension_eotvos(gamma0, T, Tc):
         """
         Eötvös rule: surface tension vs temperature (up to critical point).
