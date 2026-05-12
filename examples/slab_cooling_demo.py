@@ -276,9 +276,14 @@ if __name__ == "__main__":
 
     fig = visualize(engine.log, engine=engine)
     if fig is not None:
-        if hasattr(fig, "write_html"):
-            fig.write_html("slab_cooling_diagnostics.html")
-            print("Saved slab_cooling_diagnostics.html")
-        else:
-            fig.savefig("slab_cooling_diagnostics.png", dpi=150, bbox_inches="tight")
-            print("Saved slab_cooling_diagnostics.png")
+        from moju.monitor.visualize_export import export_dashboard_html
+
+        export_dashboard_html(fig, "slab_cooling_diagnostics.html", title="Slab cooling diagnostics")
+        print("Saved slab_cooling_diagnostics.html")
+        try:
+            from moju.monitor.visualize_export import export_dashboard_png
+
+            written = export_dashboard_png(fig, "slab_cooling_diagnostics.png", scale=2.0)
+            print(f"Saved {len(written)} PNG file(s): {[str(p) for p in written]}")
+        except RuntimeError as ex:
+            print(f"PNG export skipped: {ex}")

@@ -1920,14 +1920,27 @@ def build_plotly_monitor_dash_payload(
     else:
         kpi = _build_kpi_figure(bundle.get("overall_adm") or [], baseline_score=baseline_score)
     forensic = _build_forensic_heatmap_figure(bundle, spatial_heatmap_colorscale=spatial_heatmap_colorscale)
+    # Optional constitutive divergence tab — only present when the engine produced
+    # a closure_debug sidecar for at least one constitutive audit row.
+    tabs: Dict[str, Any] = {
+        "kpi": kpi,
+        "admissibility": full,
+        "forensic_heatmaps": forensic,
+        "convergence": full,
+    }
+    try:
+        from moju.monitor.visualize_constitutive import (
+            build_constitutive_divergence_dashboard,
+            list_constitutive_basenames,
+        )
+        if list_constitutive_basenames(bundle):
+            tabs["constitutive_divergence"] = build_constitutive_divergence_dashboard(bundle)
+    except Exception:  # noqa: BLE001
+        # Constitutive divergence is additive; never block the rest of the dashboard.
+        pass
     return {
         "mode": "dash-tabs",
-        "tabs": {
-            "kpi": kpi,
-            "admissibility": full,
-            "forensic_heatmaps": forensic,
-            "convergence": full,
-        },
+        "tabs": tabs,
         "filter_contract": {"bar_customdata_field": "category", "threshold": 0.99},
         "toggles": {"mode": ["training", "eval"]},
         "export": {"html": True, "pdf": True, "export_buttons": bool(export_buttons)},

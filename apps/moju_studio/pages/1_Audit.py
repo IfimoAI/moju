@@ -570,8 +570,8 @@ def _plotly_dashboard_card(fig: Any, key: str) -> None:
 
 
 st.title("Audit workspace")
-tab_data, tab_cfg, tab_run, tab_dash, tab_space, tab_export = st.tabs(
-    ["Data", "Config", "Run", "Dashboard", "Spatial / time", "Export"]
+tab_data, tab_cfg, tab_run, tab_dash, tab_divergence, tab_space, tab_export = st.tabs(
+    ["Data", "Config", "Run", "Dashboard", "Constitutive divergence", "Spatial / time", "Export"]
 )
 
 with tab_data:
@@ -1266,6 +1266,67 @@ with tab_dash:
         )
 
     studio_redraw_plotly_fragment()
+
+with tab_divergence:
+    st.subheader("Where the model and the law-implied closure diverge")
+    st.caption(
+        "Built from the engine's `closure_debug` sidecar (raw `pred` / `implied` / balance terms). "
+        "Auto-selects the constitutive basename with the worst final-step R_norm; pick another from the dropdown to drill in."
+    )
+    res_div = st.session_state.get("last_residuals")
+    if not res_div or not isinstance(res_div, dict) or not res_div.get("closure_debug"):
+        st.info("No `closure_debug` sidecar yet — run an audit with at least one constitutive_audit row.")
+    else:
+        from moju.monitor.visualize_constitutive import (
+            build_constitutive_divergence_card,
+            build_constitutive_divergence_dashboard,
+            list_constitutive_basenames,
+        )
+
+        _div_log = st.session_state.get("viz_log") or []
+        _div_bundle = build_monitor_visualize_bundle(
+            _div_log,
+            keys=None,
+            r_ref=st.session_state.get("last_r_ref") or None,
+            max_legend_keys=int(st.session_state.get("last_max_leg", 16)),
+            mode="training",
+            residuals=res_div,
+            state_pred=st.session_state.get("state_pred"),
+            engine=st.session_state.get("last_engine"),
+        )
+        if not _div_bundle:
+            st.warning("Could not build visualization bundle.")
+        else:
+            _div_basenames = list_constitutive_basenames(_div_bundle)
+            if not _div_basenames:
+                st.info("No constitutive divergence data available.")
+            else:
+                _div_choice = st.selectbox(
+                    "Constitutive basename",
+                    options=_div_basenames,
+                    index=0,
+                    key="divergence_basename",
+                    help="Sorted by worst final-step R_norm first.",
+                )
+                _div_mode = st.radio(
+                    "View",
+                    options=["dashboard (2×2)", "spatial", "scatter", "distribution", "hotspot"],
+                    horizontal=True,
+                    key="divergence_mode",
+                )
+                try:
+                    if _div_mode.startswith("dashboard"):
+                        fig_div = build_constitutive_divergence_dashboard(
+                            _div_bundle, residual_basename=_div_choice
+                        )
+                    else:
+                        fig_div = build_constitutive_divergence_card(
+                            _div_bundle, residual_basename=_div_choice, mode=_div_mode
+                        )
+                    _plotly_dashboard_card(fig_div, "divergence_card")
+                except Exception as ex:  # noqa: BLE001
+                    st.warning(str(ex))
+
 
 with tab_space:
     st.caption("Sliders and plot updates are isolated in a **fragment** so the rest of the app may not rerun.")

@@ -183,6 +183,40 @@ Optional extras:
 - `pip install moju[report]` — PDF Physics Admissibility Report from `audit(..., export_dir=...)`.
 - `pip install moju[viz]` — **plotly** for **`visualize(engine.log, backend="plotly"|"none")`** (default **`plotly`**), with `mode="training"|"eval"` (legacy **`mode="test"`** is a silent alias for **`eval`**), optional **`spatial_law_panel`**, **`spatial_heatmap_colorscale`** (default **Viridis**), **`step_label`**, **`r_norm_scale="log"|"linear"`**, **`figure_title`**, **`dashboard_mode`**, **`theme="light"`**, **`baseline_score`**, **`show_branding`** (optional watermark; default off), **`visualize_layout="single"|"split"`** ( **`split`** adds a **`worst_keys`** table figure), **`worst_keys_top_n`**, **`density="comfortable"|"compact"`**, and **`ResidualEngine.clear_log()`** between runs. The single-figure output is a decision-oriented **Physics Admissibility Report**. **Training and eval:** two KPI cards (Governing / Constitutive), overall admissibility when defined, vs-step trend (training), category breakdown, residuals, spatial row, summary box (brief NN training guidance when a category lags). **`dashboard_mode="dash-tabs"`:** the **KPI** tab shows category indicators plus a **`run_mode`** note when relevant. Pass **`keys=[...]`** or **`r_ref=...`** to subset or rescale like `audit`. In **Jupyter or Colab**, **restart the kernel** after upgrading `moju` so `visualize` loads the matching `visualize_plotly` code.
 - `pip install moju[studio]` — Streamlit + Plotly for **Moju Studio** (`streamlit run apps/moju_studio/Home.py` from a source checkout; see `apps/moju_studio/README.md`).
+
+#### Audit dashboard — enterprise Plotly suite
+
+The dashboard, Studio pages, and one-off field plots share a single design system. All cards
+are built from the reusable component library in **`moju.monitor.visualize_components`** and
+themed via **`moju.monitor.visualize_theme.apply_theme(fig, MOJU_LIGHT|MOJU_DARK|custom)`**.
+
+- **Theme** — `MojuTheme` is a frozen dataclass (palette, typography, colorscales, layout).
+  Customise with `dataclasses.replace(MOJU_LIGHT, palette=replace(MOJU_LIGHT.palette, line_primary="#0066ff"))`.
+  Light is the default; dark mode is supported by `apply_theme(fig, "dark")`. Colorscales
+  default to Viridis / Cividis / RdBu_r; **Jet** is intentionally absent.
+- **Reusable cards** — `build_overall_admissibility_kpi`, `build_admissibility_timeline_card`,
+  `build_category_admissibility_bar_card`, `build_rnorm_timeline_card`,
+  `build_law_rnorm_final_bar_card`, `build_spatial_residual_heatmap_card`,
+  `build_field_explorer_card`, `build_worst_keys_table_card`.
+- **Constitutive divergence card** — `moju.monitor.visualize_constitutive` exposes the new
+  four-mode constitutive divergence card (spatial / scatter / distribution / hotspot) plus a
+  composite `build_constitutive_divergence_dashboard` that auto-picks the worst-performing
+  constitutive basename.  Surfaced as a `constitutive_divergence` tab in the `dash-tabs`
+  payload and as the *Constitutive divergence* tab in Studio's Audit page.
+- **Engine sidecar** — every `ResidualEngine.compute_residuals(...)` (and the Torch twin
+  `TorchResidualEngine`) now stashes raw `pred` / `implied` / `raw` / `scale_a` / `scale_b`
+  per constitutive audit row under `residuals["closure_debug"][basename]`.  This is the
+  fuel for the divergence card and is also useful for any custom diagnostics.  Use
+  `compute_implied_delta_with_debug(...)` directly to get the structured debug tuple.
+- **Export** — `moju.monitor.visualize_export` provides `export_dashboard_html` (single
+  file with tab navigation), `export_dashboard_png/svg` (requires `kaleido`), and
+  `export_dashboard_pdf` (decorates `moju.monitor.report.write_audit_pdf` with rendered
+  card images when `kaleido` is available).
+- **Cookbook** — `examples/cookbook_constitutive_divergence.py` walks through running a
+  Fourier-conduction balance audit end-to-end and exporting the divergence dashboard.
+
+The public **`visualize(log, ...)`** signature and return shape are preserved; internals
+are rebuilt on top of the component library.
 - `pip install moju[studio-science]` — optional **HDF5 / NetCDF** state uploads in Studio (`h5py`, `xarray`, `netCDF4`); `.npz` / `.npy` work with `studio` alone.
 
 | If you need… | Extra | Install |

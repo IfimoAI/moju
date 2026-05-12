@@ -46,6 +46,7 @@ from moju.torch._r_eff import r_eff_scalar_torch, build_loss_torch
 from moju.torch._path_b import fill_path_b_derivatives_torch
 from moju.torch._closure import (
     compute_implied_delta_torch,
+    compute_implied_delta_torch_with_debug,
     compute_ref_delta_torch,
     _to_tensor,
 )
@@ -352,6 +353,7 @@ class TorchResidualEngine:
 
         # 7. Constitutive audits — pass ALL model params as tensors
         constitutive_residuals: Dict[str, Any] = {}
+        closure_debug: Dict[str, Dict[str, Any]] = {}
         for aspec in self._audit_specs:
             mname = str(aspec["name"])
             if mname not in self._wrapped_models:
@@ -363,8 +365,8 @@ class TorchResidualEngine:
             # so the wrapped fn with its real signature receives all args
             all_model_params = self._model_all_params[mname]
 
-            # Implied delta
-            result = compute_implied_delta_torch(
+            # Implied delta (with debug sidecar for visualisation)
+            result, debug = compute_implied_delta_torch_with_debug(
                 fn_wrapped=fn_wrapped,
                 arg_names=all_model_params,
                 state_map=state_map,
@@ -378,6 +380,18 @@ class TorchResidualEngine:
             if result is not None:
                 r = _restore_device({"r": result}, orig_device)["r"]
                 constitutive_residuals[f"{basename}/implied_delta"] = r
+            if debug is not None:
+                law_name = None
+                if "/law_" in basename:
+                    try:
+                        law_name = basename.split("/law_", 1)[1]
+                    except Exception:  # noqa: BLE001
+                        law_name = None
+                debug["law_name"] = law_name
+                debug["category"] = "constitutive"
+                debug["model_name"] = mname
+                debug["state_map"] = dict(state_map)
+                closure_debug[basename] = debug
 
             # Ref delta (eval mode only)
             if run_mode == "eval" and state_ref is not None and aspec.get("include_ref_delta", True):
@@ -415,6 +429,8 @@ class TorchResidualEngine:
             out["constitutive"] = constitutive_residuals
         if data_residuals:
             out["data"] = data_residuals
+        if closure_debug:
+            out["closure_debug"] = closure_debug
         return out
 
     # ------------------------------------------------------------------

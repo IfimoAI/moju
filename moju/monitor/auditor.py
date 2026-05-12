@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import datetime
 import math
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Union
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Set, Union
 import inspect
 
 import jax
@@ -34,6 +34,7 @@ from moju.piratio.laws import Laws
 from moju.monitor.closure_registry import (
     MODEL_FNS,
     compute_implied_delta,
+    compute_implied_delta_with_debug,
     compute_ref_delta,
 )
 from moju.monitor.derived_state_chain import all_ref_keys_from_chain, keys_produced_by_chain
@@ -303,6 +304,10 @@ def _rms_per_key(
 def _flatten_residual_dict(residuals: Dict[str, Any]) -> Dict[str, jnp.ndarray]:
     flat: Dict[str, jnp.ndarray] = {}
     for category, content in residuals.items():
+        # Skip non-residual sidecars (e.g. closure_debug carries raw pred/implied tensors
+        # for the visualisation layer; they are not part of the audit residual flattening).
+        if category in _RESIDUAL_SIDECAR_KEYS:
+            continue
         if not isinstance(content, dict):
             if hasattr(content, "shape"):
                 flat[category] = jnp.asarray(content)
@@ -312,6 +317,11 @@ def _flatten_residual_dict(residuals: Dict[str, Any]) -> Dict[str, jnp.ndarray]:
         for name, arr in content.items():
             flat[f"{category}/{name}"] = jnp.asarray(arr)
     return flat
+
+
+# Keys under residuals[*] that are sidecars (raw tensors for visualisation, etc.),
+# excluded from flattening / RMS / admissibility logic.
+_RESIDUAL_SIDECAR_KEYS: FrozenSet[str] = frozenset({"closure_debug"})
 
 
 _SCALE_EPS = 1e-12
@@ -850,6 +860,8 @@ def _build_visualize_bundle(
     mode: str,
     spatial_normalize: bool = False,
     worst_keys_top_n: int = 12,
+    closure_debug: Optional[Dict[str, Dict[str, Any]]] = None,
+    residuals: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Shared arrays and metadata for :func:`visualize` (Plotly).
@@ -954,6 +966,8 @@ def _build_visualize_bundle(
             log, plot_keys, metrics, top_n=worst_keys_top_n
         ),
         "monitor_run_mode": log[-1].get("run_mode"),
+        "closure_debug": dict(closure_debug) if closure_debug else None,
+        "residuals": residuals,
     }
 
 
@@ -1038,6 +1052,11 @@ def build_monitor_visualize_bundle(
     eff_residuals = residuals
     if eff_residuals is None and engine is not None:
         eff_residuals = getattr(engine, "last_residuals", None)
+    closure_debug_sidecar: Optional[Dict[str, Dict[str, Any]]] = None
+    if isinstance(eff_residuals, dict):
+        cd = eff_residuals.get("closure_debug")
+        if isinstance(cd, dict) and cd:
+            closure_debug_sidecar = cd
     law_panel, rnorm_panel = _maybe_build_spatial_panels(
         log,
         spatial_law_panel,
@@ -1065,6 +1084,8 @@ def build_monitor_visualize_bundle(
         mode=mode,
         spatial_normalize=spatial_normalize,
         worst_keys_top_n=worst_keys_top_n,
+        closure_debug=closure_debug_sidecar,
+        residuals=eff_residuals,
     )
 
 
@@ -1250,6 +1271,11 @@ def visualize(
     eff_residuals = residuals
     if eff_residuals is None and engine is not None:
         eff_residuals = getattr(engine, "last_residuals", None)
+    closure_debug_sidecar: Optional[Dict[str, Dict[str, Any]]] = None
+    if isinstance(eff_residuals, dict):
+        cd = eff_residuals.get("closure_debug")
+        if isinstance(cd, dict) and cd:
+            closure_debug_sidecar = cd
 
     law_panel, rnorm_panel = _maybe_build_spatial_panels(
         log,
@@ -1279,6 +1305,8 @@ def visualize(
         mode=mode,
         spatial_normalize=spatial_normalize,
         worst_keys_top_n=worst_keys_top_n,
+        closure_debug=closure_debug_sidecar,
+        residuals=eff_residuals,
     )
     if bundle is None:
         return None
@@ -1890,6 +1918,7 @@ class ResidualEngine:
             *,
             registry: Dict[str, Any],
             category: str,
+            debug_collector: Optional[Dict[str, Dict[str, Any]]] = None,
         ) -> Dict[str, Any]:
             out: Dict[str, Any] = {}
             for spec in specs:
@@ -1971,7 +2000,7 @@ class ResidualEngine:
                         out[f"{base}/ref_delta"] = jnp.asarray(arr)
 
                 if has_implied:
-                    arr = compute_implied_delta(
+                    arr, debug = compute_implied_delta_with_debug(
                         fn=fn,
                         arg_names=arg_names,
                         state_map=state_map,
@@ -1985,11 +2014,30 @@ class ResidualEngine:
                     )
                     if arr is not None:
                         out[f"{base}/implied_delta"] = jnp.asarray(arr)
+                    if debug is not None and debug_collector is not None:
+                        # Parse law name from residual_basename ("<model>/law_<law>") when present
+                        law_name = None
+                        if isinstance(base, str) and "/law_" in base:
+                            try:
+                                law_name = base.split("/law_", 1)[1]
+                            except Exception:  # noqa: BLE001
+                                law_name = None
+                        debug["law_name"] = law_name
+                        debug["category"] = category
+                        debug["model_name"] = str(name)
+                        debug["state_map"] = dict(state_map)
+                        debug_collector[base] = debug
 
             return out
 
+        closure_debug: Dict[str, Dict[str, Any]] = {}
         if self.constitutive_audit or self.constitutive_custom:
-            c = _run_specs(self.constitutive_audit, registry=MODEL_FNS, category="constitutive")
+            c = _run_specs(
+                self.constitutive_audit,
+                registry=MODEL_FNS,
+                category="constitutive",
+                debug_collector=closure_debug,
+            )
             if self.constitutive_custom:
                 for spec in self.constitutive_custom:
                     cname = spec["name"]
@@ -1998,6 +2046,9 @@ class ResidualEngine:
                         c[f"custom/{cname}"] = jnp.asarray(arr)
             if c:
                 residuals["constitutive"] = c
+        if closure_debug:
+            # Sidecar (not part of the flattened/log residuals; surfaced for visualisation)
+            residuals["closure_debug"] = closure_debug
 
         if ref_for_audits is not None:
             state_ref_built = self._state_builder(_state_ref_raw_after_derived(ref_for_audits))

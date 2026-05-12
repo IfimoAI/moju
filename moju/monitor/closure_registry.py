@@ -108,6 +108,118 @@ def compute_ref_delta(
         return None
 
 
+def compute_implied_delta_with_debug(
+    *,
+    fn: Callable[..., Any],
+    arg_names: List[str],
+    state_map: Dict[str, str],
+    state_pred: Dict[str, Any],
+    constants: Dict[str, Any],
+    implied_value_key: Optional[str] = None,
+    implied_fn: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]] = None,
+    implied_balance_fn: Optional[
+        Callable[[Dict[str, Any], Dict[str, Any], Any], Optional[Tuple[Any, Any, Any]]]
+    ] = None,
+    output_key: Optional[str] = None,
+    implied_delta_ref_key: Optional[str] = None,
+) -> Tuple[Optional[jnp.ndarray], Optional[Dict[str, Any]]]:
+    """
+    Same as :func:`compute_implied_delta` but additionally returns a debug
+    sidecar dict so visualisations can inspect the raw quantities feeding the
+    normalised residual.
+
+    Returns ``(delta, debug)``.  ``debug`` is ``None`` when the row was
+    skipped; otherwise has the shape::
+
+        {
+            "pred":     F(pred_args),
+            "implied":  implied or None,   # subtract mode only
+            "raw":      pred - implied OR balance raw,
+            "scale_a":  scale_a or None,   # balance mode only
+            "scale_b":  scale_b or None,   # balance mode only
+            "ref":      ref_tensor or None,
+            "mode":     "subtract" | "balance",
+            "output_key": output_key,
+        }
+    """
+    modes = (
+        (1 if implied_value_key is not None else 0)
+        + (1 if implied_fn is not None else 0)
+        + (1 if implied_balance_fn is not None else 0)
+    )
+    if modes == 0:
+        return None, None
+    if modes > 1:
+        raise ValueError(
+            "Provide at most one of implied_value_key, implied_fn, and implied_balance_fn"
+        )
+
+    pred_args: List[jnp.ndarray] = []
+    for an in arg_names:
+        sk = state_map.get(an)
+        if sk is None:
+            return None, None
+        pv = _val(state_pred, constants, sk)
+        if pv is None:
+            return None, None
+        pred_args.append(jnp.asarray(pv))
+    pred = fn(*pred_args)
+
+    ref_tensor = None
+    if implied_delta_ref_key:
+        ref_tensor = _val(state_pred, constants, implied_delta_ref_key)
+    if ref_tensor is None and output_key is not None:
+        ref_tensor = _val(state_pred, constants, f"{output_key}_ref")
+
+    if implied_balance_fn is not None:
+        triple = implied_balance_fn(state_pred, constants, pred)
+        if triple is None:
+            return None, None
+        raw, scale_a, scale_b = triple
+        try:
+            delta = apply_closure_discrepancy_normalize(raw, scale_a, scale_b, ref=ref_tensor)
+        except (TypeError, ValueError):
+            return None, None
+        debug = {
+            "pred": jnp.asarray(pred),
+            "implied": None,
+            "raw": jnp.asarray(raw),
+            "scale_a": jnp.asarray(scale_a),
+            "scale_b": jnp.asarray(scale_b),
+            "ref": jnp.asarray(ref_tensor) if ref_tensor is not None else None,
+            "mode": "balance",
+            "output_key": output_key,
+        }
+        return delta, debug
+
+    if implied_value_key is not None:
+        implied = _val(state_pred, constants, implied_value_key)
+    else:
+        implied = implied_fn(state_pred, constants)  # type: ignore[misc]
+    if implied is None:
+        return None, None
+    implied = jnp.asarray(implied)
+    try:
+        raw = jnp.asarray(pred - implied)
+    except (TypeError, ValueError):
+        return None, None
+    try:
+        delta = apply_closure_discrepancy_normalize(raw, pred, implied, ref=ref_tensor)
+    except (TypeError, ValueError):
+        return None, None
+    debug = {
+        "pred": jnp.asarray(pred),
+        "implied": implied,
+        "raw": raw,
+        "scale_a": None,
+        "scale_b": None,
+        "ref": jnp.asarray(ref_tensor) if ref_tensor is not None else None,
+        "mode": "subtract",
+        "output_key": output_key,
+    }
+    return delta, debug
+
+
 def compute_implied_delta(
     *,
     fn: Callable[..., Any],
@@ -138,61 +250,24 @@ def compute_implied_delta(
 
     Returns None if implied is not configured, if any model arg is missing, if implied/balance is
     missing, or if the result is not broadcastable.
+
+    Note: this is a thin wrapper around :func:`compute_implied_delta_with_debug`
+    that discards the debug sidecar.  Use the ``_with_debug`` variant when
+    visualisations need raw ``pred`` / ``implied`` / balance terms.
     """
-    modes = (
-        (1 if implied_value_key is not None else 0)
-        + (1 if implied_fn is not None else 0)
-        + (1 if implied_balance_fn is not None else 0)
+    delta, _debug = compute_implied_delta_with_debug(
+        fn=fn,
+        arg_names=arg_names,
+        state_map=state_map,
+        state_pred=state_pred,
+        constants=constants,
+        implied_value_key=implied_value_key,
+        implied_fn=implied_fn,
+        implied_balance_fn=implied_balance_fn,
+        output_key=output_key,
+        implied_delta_ref_key=implied_delta_ref_key,
     )
-    if modes == 0:
-        return None
-    if modes > 1:
-        raise ValueError(
-            "Provide at most one of implied_value_key, implied_fn, and implied_balance_fn"
-        )
-
-    pred_args: List[jnp.ndarray] = []
-    for an in arg_names:
-        sk = state_map.get(an)
-        if sk is None:
-            return None
-        pv = _val(state_pred, constants, sk)
-        if pv is None:
-            return None
-        pred_args.append(jnp.asarray(pv))
-    pred = fn(*pred_args)
-
-    ref_tensor = None
-    if implied_delta_ref_key:
-        ref_tensor = _val(state_pred, constants, implied_delta_ref_key)
-    if ref_tensor is None and output_key is not None:
-        ref_tensor = _val(state_pred, constants, f"{output_key}_ref")
-
-    if implied_balance_fn is not None:
-        triple = implied_balance_fn(state_pred, constants, pred)
-        if triple is None:
-            return None
-        raw, scale_a, scale_b = triple
-        try:
-            return apply_closure_discrepancy_normalize(raw, scale_a, scale_b, ref=ref_tensor)
-        except (TypeError, ValueError):
-            return None
-
-    if implied_value_key is not None:
-        implied = _val(state_pred, constants, implied_value_key)
-    else:
-        implied = implied_fn(state_pred, constants)  # type: ignore[misc]
-    if implied is None:
-        return None
-    implied = jnp.asarray(implied)
-    try:
-        raw = jnp.asarray(pred - implied)
-    except (TypeError, ValueError):
-        return None
-    try:
-        return apply_closure_discrepancy_normalize(raw, pred, implied, ref=ref_tensor)
-    except (TypeError, ValueError):
-        return None
+    return delta
 
 
 # Registry: name -> (callable, arg_names)

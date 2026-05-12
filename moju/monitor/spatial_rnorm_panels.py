@@ -17,10 +17,15 @@ import numpy as np
 import jax.numpy as jnp
 
 
+_RESIDUAL_SIDECAR_KEYS = frozenset({"closure_debug"})
+
+
 def flatten_residuals(residuals: Dict[str, Any]) -> Dict[str, Any]:
-    """Mirror auditor flat keys for spatial plotting."""
+    """Mirror auditor flat keys for spatial plotting (skip sidecar entries)."""
     flat: Dict[str, Any] = {}
     for category, content in residuals.items():
+        if category in _RESIDUAL_SIDECAR_KEYS:
+            continue
         if isinstance(content, dict):
             for name, arr in content.items():
                 flat[f"{category}/{name}"] = arr
