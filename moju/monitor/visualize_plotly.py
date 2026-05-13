@@ -496,7 +496,9 @@ def _inset_heatmap_x_domain_for_colorbar(fig: Any, *, x0: float, x1: float, row:
             return
         except Exception:
             pass
-    fig.update_xaxes(domain=[x0, new_x1])
+    # Never call ``fig.update_xaxes(domain=...)`` without row/col — that resets **all** subplots and
+    # makes adjacent panels (e.g. law vs constitutive) overlap. Traces must set
+    # ``meta=dict(subplot_row=..., subplot_col=...)`` (see spatial builders + monitor embed).
 
 
 def align_heatmap_colorbars_to_subplot_domains(fig: Any) -> None:
@@ -1709,6 +1711,7 @@ def _build_plotly_monitor_figure_single(
                             colorscale=hm_cs,
                             name=str(snap.get("name", "")),
                             showscale=(col == 3),
+                            meta=dict(subplot_row=state_row, subplot_col=col),
                         ),
                         row=state_row,
                         col=col,
@@ -1747,6 +1750,9 @@ def _build_plotly_monitor_figure_single(
         traces = list(div_fig.data)
         if len(traces) >= 1:
             fig.add_trace(traces[0], row=cd_row, col=1)
+            lt = fig.data[-1]
+            if getattr(lt, "type", None) == "heatmap" and getattr(lt, "colorbar", None) is not None:
+                lt.update(meta=dict(subplot_row=cd_row, subplot_col=1))
         else:
             fig.add_trace(
                 go.Scatter(
