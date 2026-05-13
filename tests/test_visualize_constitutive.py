@@ -188,6 +188,11 @@ def test_prepare_mi_vs_x_embed_2d_balance() -> None:
     assert len(emb["traces"]) == 2
     t0, t1 = emb["traces"]
     assert t0.type == "scatter" and t1.type == "scatter"
+    from moju.monitor.visualize_theme import MOJU_LIGHT
+
+    assert t0.line.dash == "dash"
+    assert t0.line.color == MOJU_LIGHT.palette.adm_low
+    assert t1.line.color == MOJU_LIGHT.palette.cat_constitutive
     assert len(t0.x) == len(t0.y) == len(t1.y)
     xs = list(t0.x)
     assert xs == sorted(xs) or len(xs) <= 1
@@ -200,6 +205,11 @@ def test_prepare_mi_vs_x_embed_1d_subtract() -> None:
     emb = prepare_constitutive_model_implied_vs_x_embed(_subtract_bundle())
     assert emb is not None
     assert len(emb["traces"]) == 2
+    from moju.monitor.visualize_theme import MOJU_LIGHT
+
+    assert emb["traces"][0].line.dash == "dash"
+    assert emb["traces"][0].line.color == MOJU_LIGHT.palette.adm_low
+    assert emb["traces"][1].line.color == MOJU_LIGHT.palette.cat_constitutive
     n = 64
     assert len(emb["traces"][0].x) == n
 
