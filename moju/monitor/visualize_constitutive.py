@@ -407,6 +407,33 @@ def _x_abscissa_0_to_L(cx: np.ndarray, bundle: Dict[str, Any]) -> Tuple[np.ndarr
     return x_plot, float(L), "Position x"
 
 
+def _max_delta_label(
+    x_plot: np.ndarray,
+    a_1d: np.ndarray,
+    b_1d: np.ndarray,
+) -> str:
+    """Return a formatted string 'max X.X% \u0394 @ x=Y.YY' for the plotted slice.
+
+    Uses the same normalisation as the divergence formula: (|a-b|)/(|a|+\u03b5).
+    Returns an empty string if the arrays are empty or all-NaN.
+    """
+    a = np.asarray(a_1d, dtype=float).ravel()
+    b = np.asarray(b_1d, dtype=float).ravel()
+    xs = np.asarray(x_plot, dtype=float).ravel()
+    if a.size == 0:
+        return ""
+    delta_pct = np.abs(a - b) / (np.abs(a) + _DIVERGENCE_EPS) * 100.0
+    valid = np.isfinite(delta_pct)
+    if not np.any(valid):
+        return ""
+    idx = int(np.nanargmax(delta_pct))
+    max_pct = float(delta_pct[idx])
+    x_at = float(xs[idx]) if xs.size > idx else float("nan")
+    if np.isfinite(x_at):
+        return f"max {max_pct:.1f}% \u0394 @ x={x_at:.3g}"
+    return f"max {max_pct:.1f}% \u0394"
+
+
 def _build_dissonance_band_traces(
     x_plot: np.ndarray,
     a_1d: np.ndarray,
@@ -635,6 +662,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
                 showlegend=True,
             ),
         ]
+        max_delta_label = _max_delta_label(x_plot, a, b)
         subtitle = ", ".join(note_parts) if note_parts else ""
         return {
             "traces": tier_lines + band_traces + line_traces,
@@ -650,6 +678,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
             "is_transient_slice": is_transient_slice,
             "is_worst_slice": False,
             "y_range": y_range,
+            "max_delta_label": max_delta_label,
         }
 
     if a.ndim == 2 and b.ndim == 2:
@@ -707,6 +736,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
                 showlegend=True,
             ),
         ]
+        max_delta_label_2d = _max_delta_label(x_plot, la, lb)
         row_note = f"y* row index {y_ix}"
         if cy_val is not None and np.isfinite(cy_val):
             row_note = f"y* ≈ {cy_val:.4g} ({row_note})"
@@ -724,6 +754,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
             "is_transient_slice": is_transient_slice,
             "is_worst_slice": True,
             "y_range": y_range_2d,
+            "max_delta_label": max_delta_label_2d,
         }
 
     return None

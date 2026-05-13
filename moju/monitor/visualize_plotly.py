@@ -1973,6 +1973,29 @@ def _build_plotly_monitor_figure_single(
             )
             # Tier boundary annotations: pin labels at the right edge of the subplot
             _add_dissonance_tier_annotations(fig, dissonance_traces, row=cd_row, col=5)
+            # Max-delta summary: bottom-left, clear of inline legend (top-centre) and tier labels (right)
+            max_lbl = str(emb.get("max_delta_label") or "")
+            if max_lbl:
+                try:
+                    xref_d, yref_d = _plotly_xy_axis_ref_strings_for_subplot(fig, cd_row, 5)
+                    fig.add_annotation(
+                        x=0.02,
+                        y=0.04,
+                        xref=f"{xref_d} domain",
+                        yref=f"{yref_d} domain",
+                        text=max_lbl,
+                        showarrow=False,
+                        xanchor="left",
+                        yanchor="bottom",
+                        font=dict(
+                            size=9,
+                            color=_ENTERPRISE_THEME.get("muted", "#64748b"),
+                            family=_ENTERPRISE_THEME.get("font_stack", ""),
+                        ),
+                        bgcolor="rgba(255,255,255,0.0)",
+                    )
+                except Exception:
+                    pass
         else:
             fig.add_trace(
                 go.Scatter(

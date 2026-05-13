@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`DEFAULT_NONDIM_R_NORM_SCALE_K`** raised from `2×10⁻²` to `2×10⁻³`: the default `scale_k` denominator for `R_norm = R_eff / scale_k` is now ten times smaller, making R_norm and admissibility scores more sensitive to residual magnitude for laws and nondimensional constitutive keys. Users relying on numeric admissibility thresholds or `r_ref` overrides should review their tolerances.
+
 ### Breaking
 
 - **Law-linked `implied_delta` (balance form):** Auto constitutive rows from `moju.monitor.law_implied_diagnostics` for Fourier, Fick, wave, advection–diffusion (κ), Navier–Stokes / Stokes / Burgers (μ) now use **`implied_balance_fn`** and a **no-division** PDE balance with the model coefficient (e.g. \(T_t - \alpha_{\text{model}}\,T_{\text{laplacian}}\)), not ratio-style rearrangements. **`implied_delta` numeric values** for those keys change vs 1.0.x (zeros still align when the law balance holds). Turbulent viscous-acceleration law-linked rows are unchanged (**`pred − implied_fn`**). See `docs/law_implied_audits.md` and `moju.monitor.closure_registry.compute_implied_delta`.
@@ -37,7 +41,7 @@ First **stable / production** release on PyPI (`Development Status :: 5 - Produc
 
 - **Monitor `run_mode`:** `ResidualEngine.compute_residuals(..., run_mode="training"|"eval")` defaults to **`"training"`**. In training mode, **`state_ref` is ignored** for **`ref_delta`** and **`data/`** pred−ref. Use **`run_mode="eval"`** for those comparisons. Log entries record **`run_mode`**; **`audit()`** adds **`monitor_run_mode`**. **Overall admissibility** is **laws + constitutive** (geometric mean) for **training** steps; for **`run_mode="eval"`** it is the geometric mean of finite present category scores (**laws**, **constitutive**, **`data`**, and legacy **`scaling`** if old logs contain `scaling/...` keys). Legacy logs **without** **`run_mode`** use the geometric mean over all present categories.
 
-- **Logged `rms` / `build_loss`:** Per-key **`rms`** in `compute_residuals` logs is **R_eff** = √(mean(r²)+δ²)·**Q**^**p** with **δ²** = **`R_EFF_RMS_JITTER_SQ`** (not plain RMS(r); jitter smooths AD at **r = 0**). **Q** = RMS(m)/mean(m), **m_i** = √(r_i²+ε²); **Q = 1** when |r| is uniform across collocation points or for single-point tensors. **p** = **`R_EFF_Q_POWER`** (**2.0** in `moju.monitor.auditor`). **R_norm** = **R_eff**/scale_k and admissibility **1/(1+R_norm)** are unchanged in form. Default **`scale_k`** for **laws/** and nondimensional **implied_delta** / **ref_delta** is **`DEFAULT_NONDIM_R_NORM_SCALE_K = 2×10⁻²`**. Earlier 0.x defaults used **`2×10⁻³`** and a lower **Q** exponent; if you relied on exact **`rms`** or default scales, recompute across versions. Removed **`R_REF_*`** / **`uniform_r_ref_for_log_rms_keys`** from the public **`moju.monitor`** API; use **`audit(..., r_ref=...)`** if needed.
+- **Logged `rms` / `build_loss`:** Per-key **`rms`** in `compute_residuals` logs is **R_eff** = √(mean(r²)+δ²)·**Q**^**p** with **δ²** = **`R_EFF_RMS_JITTER_SQ`** (not plain RMS(r); jitter smooths AD at **r = 0**). **Q** = RMS(m)/mean(m), **m_i** = √(r_i²+ε²); **Q = 1** when |r| is uniform across collocation points or for single-point tensors. **p** = **`R_EFF_Q_POWER`** (**2.0** in `moju.monitor.auditor`). **R_norm** = **R_eff**/scale_k and admissibility **1/(1+R_norm)** are unchanged in form. Default **`scale_k`** for **laws/** and nondimensional **implied_delta** / **ref_delta** is **`DEFAULT_NONDIM_R_NORM_SCALE_K = 2×10⁻³`**. If you relied on exact **`rms`** or default scales across versions, recompute. Removed **`R_REF_*`** / **`uniform_r_ref_for_log_rms_keys`** from the public **`moju.monitor`** API; use **`audit(..., r_ref=...)`** if needed.
 
 ### Changed
 
