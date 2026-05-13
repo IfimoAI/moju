@@ -14,7 +14,7 @@ Moju helps you turn predicted state fields into governing-law residuals, physics
 - Turns governing-law residuals into a differentiable training loss with `build_loss`.
 - Audits predictions with per-key, per-category, and overall admissibility scores.
 - Infers law-linked constitutive checks where the governing equation implies a material property.
-- Visualizes training/eval diagnostics, spatial residuals, and constitutive divergence/dissonance.
+- Visualizes training/eval diagnostics, spatial residuals, and constitutive divergence and consistency.
 
 Moju is not a training framework or a solver. It is a physics supervision layer you can use with PINNs, CFD surrogates, neural operators, digital twins, or any workflow that can provide a `state_pred` dictionary.
 
@@ -86,7 +86,7 @@ What happens here:
 - `moju.piratio.Operators` - JAX autodiff helpers such as gradients, divergence, Laplacian, curl, and time derivatives.
 - `moju.monitor.ResidualEngine` - runs laws, groups, constitutive audits, optional data comparisons, and records audit logs.
 - `moju.monitor.audit` - converts logs into R_norm, admissibility scores, category summaries, and report data.
-- `moju.monitor.visualize` - Plotly dashboards for training/eval residuals, category scores, spatial fields, and constitutive diagnostics.
+- `moju.monitor.visualize` - Plotly dashboards for training/eval residuals, category scores, spatial fields, and constitutive diagnostics. The constitutive row shows a **Divergence** heatmap (normalised as `(model − implied) / (|model| + ε)`) alongside a **Constitutive Consistency** line plot with spatially varying ±1 % / ±5 % acceptability bands and tier boundary markers centred on the model prediction.
 
 ## Training vs Eval
 

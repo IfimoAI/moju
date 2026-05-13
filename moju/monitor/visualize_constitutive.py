@@ -113,7 +113,7 @@ def _constitutive_dissonance_title(*, is_transient: bool, is_worst_slice: bool) 
         details.append("max t")
     if is_worst_slice:
         details.append("worst slice")
-    return "Constitutive Dissonance" + (f" ({', '.join(details)})" if details else "")
+    return "Constitutive Consistency" + (f" ({', '.join(details)})" if details else "")
 
 
 def constitutive_divergence_title(term_label: str) -> str:
@@ -293,14 +293,14 @@ def _sides_for_divergence(
     return a, b, lab_m, lab_i
 
 
-def _normalized_divergence(a: np.ndarray, b: np.ndarray, ref: Optional[np.ndarray] = None) -> np.ndarray:
-    """Mirror :func:`apply_closure_discrepancy_normalize` for numpy arrays."""
-    raw = a - b
-    if ref is not None and ref.size:
-        denom = _DIVERGENCE_EPS + np.abs(ref)
-    else:
-        denom = _DIVERGENCE_EPS + np.abs(a) + np.abs(b)
-    return raw / denom
+def _normalized_divergence(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Normalised constitutive divergence: (a − b) / (|a| + ε).
+
+    ``a`` is the model/catalog side; the denominator is |a| so the result is a
+    fractional deviation relative to the local model magnitude.
+    ``ε = _DIVERGENCE_EPS`` guards against division by zero.
+    """
+    return (a - b) / (np.abs(a) + _DIVERGENCE_EPS)
 
 
 def _flatten(a: np.ndarray) -> np.ndarray:
@@ -494,6 +494,49 @@ def _build_dissonance_band_traces(
     return band_traces, y_range
 
 
+def _build_dissonance_tier_lines(
+    x_plot: np.ndarray,
+    a_1d: np.ndarray,
+    theme: Any,
+) -> List[Any]:
+    """Four faint dotted boundary curves at the ±1 % and ±5 % tier edges.
+
+    Rendered behind the band fills so they serve as visible tick-marks at
+    the acceptability/warning and warning/alarm boundaries.  Each trace
+    carries a hover label (``"+1% Δ"``, ``"−5% Δ"`` etc.) and has
+    ``showlegend=False`` so it does not pollute the inline legend.
+    """
+    import plotly.graph_objects as go
+
+    t = get_theme(theme)
+    a = np.asarray(a_1d, dtype=float).ravel()
+    xs = np.asarray(x_plot, dtype=float).ravel()
+
+    w1 = 0.01 * (np.abs(a) + _DIVERGENCE_EPS)
+    w5 = 0.05 * (np.abs(a) + _DIVERGENCE_EPS)
+
+    muted = t.palette.muted
+
+    def _boundary(y_vals: np.ndarray, label: str) -> Any:
+        return go.Scatter(
+            x=xs,
+            y=y_vals,
+            mode="lines",
+            line=dict(color=muted, dash="dot", width=1.0),
+            name="",          # blank name keeps it out of inline legend
+            showlegend=False,
+            hovertemplate=f"{label}<extra></extra>",
+            meta={"tier_label": label},
+        )
+
+    return [
+        _boundary(a - w5, "\u22125% \u0394"),
+        _boundary(a - w1, "\u22121% \u0394"),
+        _boundary(a + w1, "+1% \u0394"),
+        _boundary(a + w5, "+5% \u0394"),
+    ]
+
+
 def prepare_constitutive_model_implied_vs_x_embed(
     bundle: Dict[str, Any],
     residual_basename: Optional[str] = None,
@@ -520,8 +563,6 @@ def prepare_constitutive_model_implied_vs_x_embed(
     entry = debug[bn]
     a_full = _coerce_to_numpy(entry.get("scale_a") if entry.get("mode") == "balance" else entry.get("pred"))
     b_full = _coerce_to_numpy(entry.get("scale_b") if entry.get("mode") == "balance" else entry.get("implied"))
-    ref_full = entry.get("ref")
-    ref_arr = _coerce_to_numpy(ref_full) if ref_full is not None else None
     if a_full.size == 0 or b_full.size == 0:
         return None
     if a_full.shape != b_full.shape:
@@ -538,24 +579,17 @@ def prepare_constitutive_model_implied_vs_x_embed(
         nt, nx = int(gs[0]), int(gs[1])
         a_full = a_full.reshape(nt, nx)
         b_full = b_full.reshape(nt, nx)
-        if ref_arr is not None and ref_arr.size == nt * nx:
-            ref_arr = ref_arr.reshape(nt, nx)
 
     coords_pred = _closure_coords_for_reduce(bundle)
     try:
         a = np.asarray(_reduce_spatial_array(a_full, coords_pred, prefer_last_t=prefer_last_t), dtype=float)
         b = np.asarray(_reduce_spatial_array(b_full, coords_pred, prefer_last_t=prefer_last_t), dtype=float)
-        ref_red: Optional[np.ndarray] = None
-        if ref_arr is not None and ref_arr.size and ref_arr.shape == a_full.shape:
-            ref_red = np.asarray(_reduce_spatial_array(ref_arr, coords_pred, prefer_last_t=prefer_last_t), dtype=float)
     except (TypeError, ValueError):
         return None
 
     while a.ndim > 2 and a.shape[0] == 1:
         a = a[0]
         b = b[0]
-        if ref_red is not None and ref_red.ndim > 2 and ref_red.shape[0] == 1:
-            ref_red = ref_red[0]
 
     label_model, label_implied = _user_constitutive_side_labels()
     y_qty = divergence_y_quantity_label(entry)
@@ -577,6 +611,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
             x_title_use = "Sample index"
         x_plot, _L, x_ax_title = _x_abscissa_0_to_L(xs, bundle)
         band_traces, y_range = _build_dissonance_band_traces(x_plot, a, t)
+        tier_lines = _build_dissonance_tier_lines(x_plot, a, t)
         # Expand y_range to also cover the implied curve b
         y_range = [
             min(y_range[0], float(np.nanmin(b))),
@@ -602,7 +637,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
         ]
         subtitle = ", ".join(note_parts) if note_parts else ""
         return {
-            "traces": band_traces + line_traces,
+            "traces": tier_lines + band_traces + line_traces,
             "x_title": x_ax_title,
             "y_title": y_qty,
             "term_label": y_qty,
@@ -618,10 +653,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
         }
 
     if a.ndim == 2 and b.ndim == 2:
-        ref2: Optional[np.ndarray] = None
-        if ref_red is not None and ref_red.shape == a.shape:
-            ref2 = ref_red
-        div = _normalized_divergence(a, b, ref=ref2)
+        div = _normalized_divergence(a, b)
         y_ix = worst_div_mean_abs_row_index(div)
         la = np.asarray(a[y_ix], dtype=float).ravel()
         lb = np.asarray(b[y_ix], dtype=float).ravel()
@@ -651,6 +683,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
             if cyy.size > y_ix:
                 cy_val = float(cyy[y_ix])
         band_traces_2d, y_range_2d = _build_dissonance_band_traces(x_plot, la, t)
+        tier_lines_2d = _build_dissonance_tier_lines(x_plot, la, t)
         # Expand y_range to also cover the implied curve lb
         y_range_2d = [
             min(y_range_2d[0], float(np.nanmin(lb))),
@@ -678,7 +711,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
         if cy_val is not None and np.isfinite(cy_val):
             row_note = f"y* ≈ {cy_val:.4g} ({row_note})"
         return {
-            "traces": band_traces_2d + line_traces_2d,
+            "traces": tier_lines_2d + band_traces_2d + line_traces_2d,
             "x_title": x_ax_title,
             "y_title": y_qty,
             "term_label": y_qty,
@@ -808,8 +841,6 @@ def _prepare_spatial_divergence(
     entry = debug[bn]
     a_full = _coerce_to_numpy(entry.get("scale_a") if entry.get("mode") == "balance" else entry.get("pred"))
     b_full = _coerce_to_numpy(entry.get("scale_b") if entry.get("mode") == "balance" else entry.get("implied"))
-    ref_full = entry.get("ref")
-    ref_arr = _coerce_to_numpy(ref_full) if ref_full is not None else None
     if a_full.size == 0 or b_full.size == 0:
         return (bn, "No spatial data for divergence")
     if a_full.shape != b_full.shape:
@@ -837,13 +868,8 @@ def _prepare_spatial_divergence(
             nt, nx = int(gs[0]), int(gs[1])
             a = a.reshape(nt, nx)
             b = b.reshape(nt, nx)
-            if ref_arr is not None and ref_arr.size == nt * nx:
-                ref_arr = ref_arr.reshape(nt, nx)
-
     if a.ndim == 1:
-        div = _normalized_divergence(
-            a, b, ref=ref_arr.reshape(a.shape) if ref_arr is not None and ref_arr.size == a.size else None
-        )
+        div = _normalized_divergence(a, b)
         xs, x_title = infer_divergence_abscissa(bundle, int(a.shape[0]), hint_axis=str(hint_ax) if hint_ax else None)
         return _SpatialDivPrep(
             basename=bn,
@@ -866,11 +892,7 @@ def _prepare_spatial_divergence(
     if a.ndim != 2:
         return (bn, f"Cannot render divergence for ndim={a.ndim} arrays")
 
-    div = _normalized_divergence(
-        a,
-        b,
-        ref=ref_arr.reshape(a.shape) if ref_arr is not None and ref_arr.size == a.size else None,
-    )
+    div = _normalized_divergence(a, b)
     abs_lim = float(np.nanpercentile(np.abs(div), 95)) if div.size else 1.0
     if not np.isfinite(abs_lim) or abs_lim == 0.0:
         abs_lim = 1.0

@@ -32,7 +32,7 @@ The stored tensor is the standard subtract-mode nondimensional discrepancy:
 R^* = \frac{F - \tilde F}{\varepsilon + |F| + |\tilde F|}
 \]
 
-(or **`/ (ε + |ref|)`** when a ref tensor resolves). This means the closure debug sidecar contains:
+where **`a`** is the model/catalog term and **`ε = 1e-30`** guards against division by zero. This means the closure debug sidecar contains:
 
 - **`pred`**: the model constitutive term \(F\);
 - **`implied`**: the law-implied constitutive term \(\tilde F\);
@@ -44,6 +44,13 @@ There is **no** raw SI-difference mode. **`Models.*`** still uses your physical 
 
 This answers: *“Does the constitutive closure in the catalog agree with what the PDE fields imply locally?”* without requiring **`state_ref`**. It is **not** a claim that the closure matches experiment—only that it matches the **same predicted state** you pass to the law.
 These implied residual keys are included in normal category/overall admissibility scoring by default (same as other constitutive residual keys).
+
+### How `visualize()` renders constitutive results
+
+When `visualize()` is called after training or eval, the constitutive row of the monitor dashboard shows two sub-panels:
+
+- **Constitutive Divergence** (heatmap or line): the normalised delta `(pred − implied) / (|pred| + ε)` across all spatial collocation points. The colour scale is diverging and centred on zero; values near zero indicate the model is consistent with the law-implied term at that location.
+- **Constitutive Consistency** (line plot): the model (`pred`) and law-implied (`implied`) constitutive values as separate lines for the last time slice (transient data) or the worst-divergence row (2D data). Spatially varying acceptability bands centred on the model curve show ±1 % (green, acceptable), ±1–5 % (amber, warning), and ±5–6 % (red, alarm) tolerance zones based on the local model magnitude. Faint dotted tier boundary lines at the ±1 % and ±5 % edges carry hover labels (`+1% Δ`, `−5% Δ`, etc.).
 
 In the README's minimal 1D slab-cooling example, the user supplies a Path B `state_pred`
 with `T`, `T_t`, `T_laplacian`, coordinates, and material properties. Because those

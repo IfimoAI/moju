@@ -232,8 +232,8 @@ def test_spatial_normalized_accepts_scalar_model_with_field_implied() -> None:
     assert fig.data[0].type == "scatter"
     emb = prepare_constitutive_model_implied_vs_x_embed(bundle)
     assert emb is not None
-    # 5 band-fill traces + 2 named line traces (model + implied)
-    assert len(emb["traces"]) == 7
+    # 4 tier-boundary + 5 band-fill + 2 named line traces (model + implied)
+    assert len(emb["traces"]) == 11
     # y_range must be present and well-formed
     assert "y_range" in emb
     assert len(emb["y_range"]) == 2
@@ -278,8 +278,8 @@ def test_prepare_mi_vs_x_embed_2d_balance() -> None:
 
     emb = prepare_constitutive_model_implied_vs_x_embed(_balance_bundle())
     assert emb is not None
-    # 5 band-fill traces + 2 named line traces (model + implied)
-    assert len(emb["traces"]) == 7
+    # 4 tier-boundary + 5 band-fill + 2 named line traces (model + implied)
+    assert len(emb["traces"]) == 11
     assert "y_range" in emb
     assert emb["y_range"][0] < emb["y_range"][1]
     # last two traces are the model/implied line traces
@@ -292,7 +292,7 @@ def test_prepare_mi_vs_x_embed_2d_balance() -> None:
     assert t1.line.color == MOJU_LIGHT.palette.title_color
     assert emb["y_title"] == "Thermal Diffusivity"
     assert emb["term_label"] == "Thermal Diffusivity"
-    assert emb["title"] == "Constitutive Dissonance (worst slice)"
+    assert emb["title"] == "Constitutive Consistency (worst slice)"
     assert emb["x_title"] == "Position x"
     assert "(0 to L)" not in emb["x_title"]
     assert len(t0.x) == len(t0.y) == len(t1.y)
@@ -306,8 +306,8 @@ def test_prepare_mi_vs_x_embed_1d_subtract() -> None:
 
     emb = prepare_constitutive_model_implied_vs_x_embed(_subtract_bundle())
     assert emb is not None
-    # 5 band-fill traces + 2 named line traces (model + implied)
-    assert len(emb["traces"]) == 7
+    # 4 tier-boundary + 5 band-fill + 2 named line traces (model + implied)
+    assert len(emb["traces"]) == 11
     assert "y_range" in emb
     assert emb["y_range"][0] < emb["y_range"][1]
     from moju.monitor.visualize_theme import MOJU_LIGHT
@@ -317,7 +317,7 @@ def test_prepare_mi_vs_x_embed_1d_subtract() -> None:
     assert emb["traces"][-2].line.color == MOJU_LIGHT.palette.line_primary
     assert emb["traces"][-1].line.color == MOJU_LIGHT.palette.title_color
     assert emb["y_title"] == "Ideal Gas Rho"
-    assert emb["title"] == "Constitutive Dissonance"
+    assert emb["title"] == "Constitutive Consistency"
     assert emb["x_title"] == "Position x"
     assert "(0 to L)" not in emb["x_title"]
     n = 64
@@ -380,7 +380,7 @@ def test_prepare_mi_vs_x_prefers_last_time_slice() -> None:
     }
     emb = prepare_constitutive_model_implied_vs_x_embed(bundle, prefer_last_t=True)
     assert emb is not None
-    assert emb["title"] == "Constitutive Dissonance (max t, worst slice)"
+    assert emb["title"] == "Constitutive Consistency (max t, worst slice)"
     assert emb["subtitle"] == "max t, worst slice"
     # Last t slice has pred grid 999 → implied lines flat 1.4
     # traces[-1] is the implied line (band fills are prepended)
