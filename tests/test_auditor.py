@@ -1340,6 +1340,66 @@ class TestVisualize:
         assert z1[0] is not None and z1[1] is not None
         assert z0 != z1
 
+    def test_visualize_constitutive_dissonance_titles_term_and_slice_context(self):
+        pytest.importorskip("plotly")
+        import numpy as np
+
+        nx, ny = 4, 3
+        pred = np.stack([np.ones((ny, nx)), np.full((ny, nx), 3.0)], axis=0)
+        implied = np.stack([np.ones((ny, nx)), np.full((ny, nx), 2.0)], axis=0)
+        raw = pred - implied
+        log = [
+            {
+                "index": 0,
+                "rms": {
+                    "laws/a": 1.0,
+                    "constitutive/thermal_diffusivity/law_fourier_conduction/implied_delta": 0.5,
+                },
+                "scale": {},
+                "coord_snapshot": {
+                    "t": [0.0, 1.0],
+                    "x": list(np.linspace(0, 1, nx)),
+                    "y": list(np.linspace(0, 1, ny)),
+                },
+            }
+        ]
+        residuals = {
+            "closure_debug": {
+                "thermal_diffusivity/law_fourier_conduction": {
+                    "pred": pred,
+                    "implied": implied,
+                    "raw": raw,
+                    "scale_a": None,
+                    "scale_b": None,
+                    "ref": None,
+                    "mode": "subtract",
+                    "output_key": "alpha",
+                    "law_name": "fourier_conduction",
+                    "model_name": "thermal_diffusivity",
+                }
+            }
+        }
+        fig = visualize(
+            log,
+            backend="plotly",
+            mode="training",
+            dashboard_mode="single-figure",
+            residuals=residuals,
+        )
+        ann = {str(getattr(a, "text", "") or "") for a in (fig.layout.annotations or [])}
+        assert "Constitutive Divergence (Thermal Diffusivity)" in ann
+        assert "Constitutive Dissonance (max t, worst slice)" in ann
+        dissonance_subplot = fig.get_subplot(6, 5)
+        yaxis_title = str(getattr(getattr(dissonance_subplot.yaxis, "title", None), "text", "") or "")
+        assert yaxis_title == "Thermal Diffusivity"
+
+        legend = fig.layout.legend
+        assert float(legend.x) < 1.0 and float(legend.y) < 1.0
+        x0, x1 = dissonance_subplot.xaxis.domain
+        y0, y1 = dissonance_subplot.yaxis.domain
+        assert x0 < float(legend.x) < x1
+        assert y0 < float(legend.y) < y1
+
     def test_visualize_forensic_tab_heatmap_has_data_driven_zlim(self):
         pytest.importorskip("plotly")
         log = [

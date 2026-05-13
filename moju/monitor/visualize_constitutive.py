@@ -71,12 +71,64 @@ def _user_constitutive_side_labels() -> Tuple[str, str]:
     return USER_CONSTIT_MODEL, USER_CONSTIT_IMPLIED
 
 
+def _title_case_token(text: Any) -> str:
+    return str(text or "").replace("_", " ").strip().title()
+
+
+def constitutive_term_label(
+    debug_entry: Optional[Dict[str, Any]] = None,
+    residual_basename: Optional[str] = None,
+) -> str:
+    """User-facing constitutive term name for panel titles and value axes."""
+    entry = debug_entry or {}
+    for key in ("display_name", "display_label", "label"):
+        val = entry.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    name = entry.get("model_name")
+    if isinstance(name, str) and name.strip():
+        s = name.strip()
+    elif residual_basename:
+        s = str(residual_basename).split("/", 1)[0].strip()
+    else:
+        ok = entry.get("output_key")
+        s = str(ok).strip() if ok else ""
+    if not s:
+        return "Constitutive Term"
+    for suffix in ("_from_re", "_from_st", "_from_pe"):
+        if s.endswith(suffix):
+            s = s[: -len(suffix)]
+            break
+    return _title_case_token(s)
+
+
 def divergence_y_quantity_label(debug_entry: Optional[Dict[str, Any]] = None) -> str:
-    """Y-axis label for constitutive quantity (``output_key``) on spatial / dissonance panels."""
-    ok = (debug_entry or {}).get("output_key")
-    if ok:
-        return str(ok)
-    return "Value"
+    """Y-axis label for constitutive quantity on spatial / dissonance panels."""
+    return constitutive_term_label(debug_entry)
+
+
+def _constitutive_dissonance_title(*, is_transient: bool, is_worst_slice: bool) -> str:
+    details: List[str] = []
+    if is_transient:
+        details.append("max t")
+    if is_worst_slice:
+        details.append("worst slice")
+    return "Constitutive Dissonance" + (f" ({', '.join(details)})" if details else "")
+
+
+def constitutive_divergence_title(term_label: str) -> str:
+    return f"Constitutive Divergence ({term_label})"
+
+
+def constitutive_divergence_title_for_bundle(
+    bundle: Dict[str, Any],
+    residual_basename: Optional[str] = None,
+) -> str:
+    debug = _closure_debug(bundle)
+    bn = residual_basename or _auto_select_basename(bundle, debug)
+    entry = debug.get(bn or "", {}) if debug else {}
+    return constitutive_divergence_title(constitutive_term_label(entry, bn))
+
 
 
 def _spatial_position_axis_title(bundle_spatial: Any) -> str:
@@ -391,10 +443,12 @@ def prepare_constitutive_model_implied_vs_x_embed(
     y_qty = divergence_y_quantity_label(entry)
     hint_ax = bundle.get("spatial_coord_hint")
     note_parts: List[str] = []
+    is_transient_slice = False
     if prefer_last_t and coords_pred.get("t") is not None and a_full.ndim >= 2:
         nt = int(np.asarray(coords_pred["t"]).reshape(-1).shape[0])
         if a_full.shape[0] == nt:
-            note_parts.append("final t")
+            is_transient_slice = True
+            note_parts.append("max t")
 
     if a.ndim == 1 and b.ndim == 1:
         n = int(a.shape[0])
@@ -427,8 +481,15 @@ def prepare_constitutive_model_implied_vs_x_embed(
             "traces": traces,
             "x_title": x_ax_title,
             "y_title": y_qty,
+            "term_label": y_qty,
+            "title": _constitutive_dissonance_title(
+                is_transient=is_transient_slice,
+                is_worst_slice=False,
+            ),
             "subtitle": subtitle,
             "row_note": "1-D profile",
+            "is_transient_slice": is_transient_slice,
+            "is_worst_slice": False,
         }
 
     if a.ndim == 2 and b.ndim == 2:
@@ -456,7 +517,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
             if cxx.size != nx:
                 cxx = np.linspace(0.0, 1.0, nx, dtype=float)
         x_plot, _L, x_ax_title = _x_abscissa_0_to_L(cxx, bundle)
-        note_parts.append("worst |Δ| stripe")
+        note_parts.append("worst slice")
         subtitle = ", ".join(note_parts)
         cy_val = None
         cy_src = cds_raw.get("y") if cds_raw else coords.get("y")
@@ -489,8 +550,15 @@ def prepare_constitutive_model_implied_vs_x_embed(
             "traces": traces,
             "x_title": x_ax_title,
             "y_title": y_qty,
+            "term_label": y_qty,
+            "title": _constitutive_dissonance_title(
+                is_transient=is_transient_slice,
+                is_worst_slice=True,
+            ),
             "subtitle": subtitle,
             "row_note": row_note,
+            "is_transient_slice": is_transient_slice,
+            "is_worst_slice": True,
         }
 
     return None
@@ -515,6 +583,7 @@ class _SpatialDivPrep(NamedTuple):
     x_title: str
     y_title: str
     y_qty: str
+    term_label: str
     cx: Optional[np.ndarray]
     cy: Optional[np.ndarray]
     abs_lim: float
@@ -618,6 +687,7 @@ def _prepare_spatial_divergence(
         a = a[0]
         b = b[0]
     y_qty = divergence_y_quantity_label(entry)
+    term_label = constitutive_term_label(entry, bn)
 
     if a.ndim == 1:
         div = _normalized_divergence(
@@ -636,6 +706,7 @@ def _prepare_spatial_divergence(
             x_title=x_title,
             y_title="Normalised divergence",
             y_qty=y_qty,
+            term_label=term_label,
             cx=None,
             cy=None,
             abs_lim=1.0,
@@ -667,6 +738,7 @@ def _prepare_spatial_divergence(
         x_title=x_title,
         y_title=y_title,
         y_qty=y_qty,
+        term_label=term_label,
         cx=cx,
         cy=cy,
         abs_lim=abs_lim,
@@ -710,7 +782,12 @@ def build_spatial_normalized_divergence_figure(
         fig.update_xaxes(title_text=pre.x_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
         fig.update_yaxes(title_text="Normalised divergence", **themed_axis_style(theme))
         fig.update_layout(showlegend=False)
-        return apply_theme(fig, theme, title=title or f"{pretty_residual_key(pre.basename)} (divergence)", height=height or t.layout.card_height)
+        return apply_theme(
+            fig,
+            theme,
+            title=title or constitutive_divergence_title(pre.term_label),
+            height=height or t.layout.card_height,
+        )
 
     fig = go.Figure()
     fig.add_trace(
@@ -722,14 +799,19 @@ def build_spatial_normalized_divergence_figure(
             zmid=0,
             zmin=-pre.abs_lim,
             zmax=pre.abs_lim,
-            colorbar=themed_colorbar(theme, title="(Model − Implied) / scale"),
+            colorbar=themed_colorbar(theme, title="Normalized delta"),
             hovertemplate="x=%{x:.3g}<br>y=%{y:.3g}<br>Δ=%{z:.3g}<extra></extra>",
             showscale=True,
         )
     )
     fig.update_xaxes(title_text=pre.x_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
     fig.update_yaxes(title_text=pre.y_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
-    return apply_theme(fig, theme, title=title or f"{pretty_residual_key(pre.basename)} (divergence)", height=height or t.layout.card_height)
+    return apply_theme(
+        fig,
+        theme,
+        title=title or constitutive_divergence_title(pre.term_label),
+        height=height or t.layout.card_height,
+    )
 
 
 def build_spatial_divergence_panel(
@@ -800,7 +882,12 @@ def build_spatial_divergence_panel(
             y_lab = "Normalised divergence" if col == 3 else pre.y_qty
             fig.update_yaxes(row=1, col=col, title_text=y_lab, **themed_axis_style(theme))
         fig.update_layout(showlegend=False)
-        return apply_theme(fig, theme, title=title or f"{pretty_residual_key(bn)} (divergence)", height=height or t.layout.card_height)
+        return apply_theme(
+            fig,
+            theme,
+            title=title or constitutive_divergence_title(pre.term_label),
+            height=height or t.layout.card_height,
+        )
 
     fig = make_subplots(
         rows=1,
@@ -843,7 +930,7 @@ def build_spatial_divergence_panel(
             zmid=0,
             zmin=-pre.abs_lim,
             zmax=pre.abs_lim,
-            colorbar=themed_colorbar(theme, title="(Model − Implied) / scale"),
+            colorbar=themed_colorbar(theme, title="Normalized delta"),
             hovertemplate="x=%{x:.3g}<br>y=%{y:.3g}<br>Δ=%{z:.3g}<extra></extra>",
             showscale=True,
         ),
@@ -853,7 +940,12 @@ def build_spatial_divergence_panel(
     for col in (1, 2, 3):
         fig.update_xaxes(row=1, col=col, title_text=pre.x_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
         fig.update_yaxes(row=1, col=col, title_text=pre.y_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
-    return apply_theme(fig, theme, title=title or f"{pretty_residual_key(bn)} (divergence)", height=height or t.layout.card_height)
+    return apply_theme(
+        fig,
+        theme,
+        title=title or constitutive_divergence_title(pre.term_label),
+        height=height or t.layout.card_height,
+    )
 
 
 def build_scatter_divergence_panel(
@@ -1345,6 +1437,9 @@ __all__ = [
     "build_scatter_divergence_panel",
     "build_spatial_divergence_panel",
     "build_spatial_normalized_divergence_figure",
+    "constitutive_divergence_title",
+    "constitutive_divergence_title_for_bundle",
+    "constitutive_term_label",
     "divergence_y_quantity_label",
     "infer_divergence_abscissa",
     "list_constitutive_basenames",

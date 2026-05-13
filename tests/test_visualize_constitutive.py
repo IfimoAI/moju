@@ -244,6 +244,21 @@ def test_spatial_normalized_only_single_trace_1d() -> None:
     assert fig.data[0].type == "scatter"
 
 
+def test_spatial_normalized_heatmap_uses_user_term_title_and_colorbar() -> None:
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import build_spatial_normalized_divergence_figure
+
+    fig = build_spatial_normalized_divergence_figure(_balance_bundle())
+    assert str(fig.layout.title.text) == "Constitutive Divergence (Thermal Diffusivity)"
+    hm = fig.data[0]
+    assert hm.type == "heatmap"
+    cb = hm.to_plotly_json().get("colorbar") or {}
+    cb_title = cb.get("title")
+    if isinstance(cb_title, dict):
+        cb_title = cb_title.get("text") or ""
+    assert str(cb_title) == "Normalized delta"
+
+
 def test_spatial_three_panel_card_unchanged_trace_count() -> None:
     pytest.importorskip("plotly")
     from moju.monitor.visualize_constitutive import build_constitutive_divergence_card
@@ -266,7 +281,9 @@ def test_prepare_mi_vs_x_embed_2d_balance() -> None:
     assert t0.line.dash == "dash"
     assert t0.line.color == MOJU_LIGHT.palette.adm_low
     assert t1.line.color == MOJU_LIGHT.palette.cat_constitutive
-    assert emb["y_title"] == "alpha"
+    assert emb["y_title"] == "Thermal Diffusivity"
+    assert emb["term_label"] == "Thermal Diffusivity"
+    assert emb["title"] == "Constitutive Dissonance (worst slice)"
     assert len(t0.x) == len(t0.y) == len(t1.y)
     xs = list(t0.x)
     assert xs == sorted(xs) or len(xs) <= 1
@@ -284,7 +301,8 @@ def test_prepare_mi_vs_x_embed_1d_subtract() -> None:
     assert emb["traces"][0].line.dash == "dash"
     assert emb["traces"][0].line.color == MOJU_LIGHT.palette.adm_low
     assert emb["traces"][1].line.color == MOJU_LIGHT.palette.cat_constitutive
-    assert emb["y_title"] == "rho"
+    assert emb["y_title"] == "Ideal Gas Rho"
+    assert emb["title"] == "Constitutive Dissonance"
     n = 64
     assert len(emb["traces"][0].x) == n
 
@@ -345,6 +363,8 @@ def test_prepare_mi_vs_x_prefers_last_time_slice() -> None:
     }
     emb = prepare_constitutive_model_implied_vs_x_embed(bundle, prefer_last_t=True)
     assert emb is not None
+    assert emb["title"] == "Constitutive Dissonance (max t, worst slice)"
+    assert emb["subtitle"] == "max t, worst slice"
     # Last t slice has pred grid 999 → implied lines flat 1.4
     y1 = np.asarray(emb["traces"][1].y, dtype=float)
     assert np.allclose(y1, 1.4)

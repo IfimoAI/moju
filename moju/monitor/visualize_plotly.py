@@ -21,6 +21,7 @@ from moju.monitor.visualize_labels import (
 )
 from moju.monitor.visualize_constitutive import (
     build_spatial_normalized_divergence_figure,
+    constitutive_divergence_title_for_bundle,
     infer_divergence_abscissa,
     prepare_constitutive_model_implied_vs_x_embed,
     primary_closure_debug_field_length,
@@ -838,6 +839,8 @@ def _monitor_flat_subplot_titles(
     is_eval: bool,
     nr_panel_title: str,
     trailing_rows: Tuple[str, ...] = (),
+    constitutive_divergence_title: str = "Constitutive Divergence",
+    constitutive_dissonance_title: str = "Constitutive Dissonance",
 ) -> Tuple[str, ...]:
     """
     Row-major titles for ``make_subplots(rows=n_rows, cols=8)`` so paper titles align with merged panels.
@@ -864,14 +867,14 @@ def _monitor_flat_subplot_titles(
         st[36] = "Constitutive Residual"
     tag_title = {
         "state": "State snapshot (predicted)",
-        "constitutive_divergence": "Constitutive divergence (normalised Δ)",
+        "constitutive_divergence": constitutive_divergence_title,
     }
     for i, tag in enumerate(trailing_rows):
         row_1 = base_rows + 1 + i
         ix = (row_1 - 1) * 8
         if tag == "constitutive_divergence":
             st[ix] = tag_title["constitutive_divergence"]
-            st[ix + 4] = "Constitutive Dissonance"
+            st[ix + 4] = constitutive_dissonance_title
         else:
             st[ix] = tag_title.get(tag, "")
     return tuple(st)
@@ -901,15 +904,15 @@ def _legend_upper_right_paper_xy_for_subplot(fig: Any, row: int, col: int) -> Tu
     ``layout.legend`` (legacy Plotly does not support ``legend.xref`` / ``yref``).
     """
     xref, yref = _plotly_xy_axis_ref_strings_for_subplot(fig, row, col)
-    xa = getattr(fig.layout, f"{xref}axis", None)
-    ya = getattr(fig.layout, f"{yref}axis", None)
+    xa = getattr(fig.layout, "xaxis" if xref == "x" else f"xaxis{xref[1:]}", None)
+    ya = getattr(fig.layout, "yaxis" if yref == "y" else f"yaxis{yref[1:]}", None)
     if xa is None or ya is None:
         return 0.99, 0.99
     rdx = getattr(xa, "domain", None) or (0.0, 1.0)
     rdy = getattr(ya, "domain", None) or (0.0, 1.0)
     lx0, lx1 = float(rdx[0]), float(rdx[1])
     ly0, ly1 = float(rdy[0]), float(rdy[1])
-    return lx0 + 0.99 * (lx1 - lx0), ly0 + 0.99 * (ly1 - ly0)
+    return lx0 + 0.98 * (lx1 - lx0), ly0 + 0.98 * (ly1 - ly0)
 
 
 def _add_monitor_panel_title_annotations(
@@ -1231,12 +1234,27 @@ def _build_plotly_monitor_figure_single(
             row_heights = [0.002, 0.074, 0.262, 0.222, 0.222]
         for tag in trailing:
             specs.append(_split_xy_row if tag == "constitutive_divergence" else _div_row_spec)
+    prefer_last_t = bool(bundle.get("spatial_prefer_last_t", True))
+    cd_dissonance_embed: Optional[Dict[str, Any]] = None
+    cd_dissonance_title = "Constitutive Dissonance"
+    cd_divergence_title = "Constitutive Divergence"
+    if has_cd:
+        cd_dissonance_embed = prepare_constitutive_model_implied_vs_x_embed(
+            bundle,
+            prefer_last_t=prefer_last_t,
+        )
+        if cd_dissonance_embed:
+            cd_dissonance_title = str(cd_dissonance_embed.get("title") or cd_dissonance_title)
+        cd_divergence_title = constitutive_divergence_title_for_bundle(bundle)
+
     nr_panel_title = truncate_display_label(str(bundle.get("nr_title") or "Normalized Residuals"), 56)
     subplot_titles = _monitor_flat_subplot_titles(
         n_rows=n_rows,
         is_eval=is_eval,
         nr_panel_title=nr_panel_title,
         trailing_rows=tuple(trailing),
+        constitutive_divergence_title=cd_divergence_title,
+        constitutive_dissonance_title=cd_dissonance_title,
     )
     fig = make_subplots(
         rows=n_rows,
@@ -1825,8 +1843,7 @@ def _build_plotly_monitor_figure_single(
                 automargin=True,
             )
 
-        prefer_last_t = bool(bundle.get("spatial_prefer_last_t", True))
-        emb = prepare_constitutive_model_implied_vs_x_embed(bundle, prefer_last_t=prefer_last_t)
+        emb = cd_dissonance_embed
         if emb and emb.get("traces"):
             monitor_show_legend = True
             apply_cd_dissonance_legend = True
