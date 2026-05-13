@@ -840,7 +840,7 @@ def _monitor_flat_subplot_titles(
     nr_panel_title: str,
     trailing_rows: Tuple[str, ...] = (),
     constitutive_divergence_title: str = "Constitutive Divergence",
-    constitutive_dissonance_title: str = "Constitutive Dissonance",
+    constitutive_dissonance_title: str = "Constitutive Consistency",
 ) -> Tuple[str, ...]:
     """
     Row-major titles for ``make_subplots(rows=n_rows, cols=8)`` so paper titles align with merged panels.
@@ -970,6 +970,54 @@ def _add_dissonance_inline_legend(
             ),
             bgcolor="rgba(255,255,255,0.72)",
             borderpad=1,
+        )
+
+
+def _add_dissonance_tier_annotations(
+    fig: Any,
+    traces: List[Any],
+    *,
+    row: int,
+    col: int,
+) -> None:
+    """Add right-edge ±% Δ labels for tier boundary traces in the dissonance subplot.
+
+    Looks for traces whose ``name`` contains ``% Δ`` (the tier boundary lines
+    emitted by ``_build_dissonance_tier_lines``), reads the last y-value, and
+    places a small annotation at the right edge of the subplot using domain
+    coordinates so it does not affect the data axis range.
+    """
+    tier_traces = [
+        tr for tr in traces
+        if isinstance(getattr(tr, "meta", None), dict) and "tier_label" in tr.meta
+    ]
+    if not tier_traces:
+        return
+    try:
+        xref, yref = _plotly_xy_axis_ref_strings_for_subplot(fig, row, col)
+    except Exception:
+        return
+    muted_color = _ENTERPRISE_THEME.get("muted", "#64748b")
+    for tr in tier_traces:
+        y_data = getattr(tr, "y", None)
+        if y_data is None or len(y_data) == 0:
+            continue
+        y_val = float(y_data[-1])
+        label = str((getattr(tr, "meta", None) or {}).get("tier_label", "") or "")
+        fig.add_annotation(
+            x=1.01,
+            y=y_val,
+            xref=f"{xref} domain",
+            yref=yref,
+            text=label,
+            showarrow=False,
+            xanchor="left",
+            yanchor="middle",
+            font=dict(
+                size=9,
+                color=muted_color,
+                family=_ENTERPRISE_THEME.get("font_stack", ""),
+            ),
         )
 
 
@@ -1294,7 +1342,7 @@ def _build_plotly_monitor_figure_single(
             specs.append(_split_xy_row if tag == "constitutive_divergence" else _div_row_spec)
     prefer_last_t = bool(bundle.get("spatial_prefer_last_t", True))
     cd_dissonance_embed: Optional[Dict[str, Any]] = None
-    cd_dissonance_title = "Constitutive Dissonance"
+    cd_dissonance_title = "Constitutive Consistency"
     cd_divergence_title = "Constitutive Divergence"
     if has_cd:
         cd_dissonance_embed = prepare_constitutive_model_implied_vs_x_embed(
@@ -1923,6 +1971,8 @@ def _build_plotly_monitor_figure_single(
                 col=5,
                 automargin=True,
             )
+            # Tier boundary annotations: pin labels at the right edge of the subplot
+            _add_dissonance_tier_annotations(fig, dissonance_traces, row=cd_row, col=5)
         else:
             fig.add_trace(
                 go.Scatter(

@@ -30,7 +30,7 @@ Use inside optimization loops.
 
 Each log entry stores **`run_mode`**. **`audit()`** / **`_compute_log_step_metrics`** compute **overall admissibility** as the minimum of the present **laws** and **constitutive** category scores for **training** entries. Legacy entries **without** **`run_mode`** use the minimum finite score across all present categories (including **`data`** or legacy **`scaling/`** keys if present in old logs).
 
-**Plotly `visualize(..., mode="training")`** shows **two** KPI cards: Governing and Constitutive.
+**Plotly `visualize(..., mode="training")`** shows **two** KPI cards: Governing and Constitutive. When closure debug data is present, the dashboard also renders a constitutive row with a **Divergence** heatmap (normalised as `(model − implied) / (|model| + ε)`) and a **Constitutive Consistency** line plot with spatially varying ±1 % / ±5 % acceptability bands centred on the model prediction.
 
 ## Eval (`run_mode="eval"`)
 

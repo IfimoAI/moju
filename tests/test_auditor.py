@@ -1445,7 +1445,7 @@ class TestVisualize:
         )
         ann = {str(getattr(a, "text", "") or "") for a in (fig.layout.annotations or [])}
         assert "Constitutive Divergence (Thermal Diffusivity)" in ann
-        assert "Constitutive Dissonance (max t, worst slice)" in ann
+        assert "Constitutive Consistency (max t, worst slice)" in ann
         dissonance_subplot = fig.get_subplot(6, 5)
         xaxis_title = str(getattr(getattr(dissonance_subplot.xaxis, "title", None), "text", "") or "")
         assert xaxis_title == "Position x"
