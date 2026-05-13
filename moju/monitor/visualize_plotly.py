@@ -63,7 +63,7 @@ HEATMAP_COLORBAR_X_RIGHT_CAP = 0.995
 HEATMAP_COLORBAR_THICKNESS = 12
 HEATMAP_COLORBAR_XPAD = 8
 # Inset each heatmap subplot x-domain so the colorbar (paper-x anchored) sits beside the heatmap in-cell.
-HEATMAP_COLORBAR_DOMAIN_RESERVE_PAPER = 0.038
+HEATMAP_COLORBAR_DOMAIN_RESERVE_PAPER = 0.024
 HEATMAP_COLORBAR_X_DOMAIN_MIN_WIDTH = 0.12
 
 RESIDUAL_COLOR_LAWS = "#8B5CF6"  # royal purple
@@ -915,51 +915,62 @@ def _legend_upper_right_paper_xy_for_subplot(fig: Any, row: int, col: int) -> Tu
     return lx0 + 0.98 * (lx1 - lx0), ly0 + 0.98 * (ly1 - ly0)
 
 
-def _add_inline_trace_label(
+def _add_dissonance_inline_legend(
     fig: Any,
-    trace: Any,
+    traces: List[Any],
     *,
     row: int,
     col: int,
-    label: str,
-    yshift: int = 0,
 ) -> None:
-    """Annotate the final finite point of a line trace inside its subplot."""
-    try:
-        import numpy as np
-
-        xs = np.asarray(getattr(trace, "x", []), dtype=float)
-        ys = np.asarray(getattr(trace, "y", []), dtype=float)
-    except Exception:
+    """Draw a compact inline legend centered at the top of the dissonance subplot."""
+    items = [tr for tr in traces if str(getattr(tr, "name", "") or "").strip()]
+    if not items:
         return
-    if xs.size == 0 or ys.size == 0:
-        return
-    n = min(int(xs.size), int(ys.size))
-    finite = np.flatnonzero(np.isfinite(xs[:n]) & np.isfinite(ys[:n]))
-    if finite.size == 0:
-        return
-    ix = int(finite[-1])
     try:
         xref, yref = _plotly_xy_axis_ref_strings_for_subplot(fig, row, col)
     except Exception:
         return
-    line = getattr(trace, "line", None)
-    color = getattr(line, "color", None) if line is not None else None
-    fig.add_annotation(
-        x=float(xs[ix]),
-        y=float(ys[ix]),
-        xref=xref,
-        yref=yref,
-        text=str(label),
-        showarrow=False,
-        xanchor="right",
-        yanchor="middle",
-        xshift=-6,
-        yshift=int(yshift),
-        font=dict(size=11, color=color or _ENTERPRISE_THEME["font_color"], family=_ENTERPRISE_THEME["font_stack"]),
-        bgcolor="rgba(255,255,255,0.72)",
-        borderpad=1,
-    )
+    x_positions = [0.36, 0.58] if len(items) == 2 else [0.47]
+    y = 0.955
+    for tr, x_text in zip(items[:2], x_positions):
+        line = getattr(tr, "line", None)
+        color = getattr(line, "color", None) if line is not None else None
+        dash = getattr(line, "dash", None) if line is not None else None
+        width = getattr(line, "width", None) if line is not None else None
+        x0 = x_text - 0.09
+        x1 = x_text - 0.02
+        fig.add_shape(
+            type="line",
+            x0=x0,
+            x1=x1,
+            y0=y,
+            y1=y,
+            xref=f"{xref} domain",
+            yref=f"{yref} domain",
+            line=dict(
+                color=color or _ENTERPRISE_THEME["font_color"],
+                width=width or 2,
+                dash=dash or "solid",
+            ),
+        )
+        fig.add_annotation(
+            x=x_text,
+            y=y,
+            xref=f"{xref} domain",
+            yref=f"{yref} domain",
+            text=str(getattr(tr, "name", "") or ""),
+            showarrow=False,
+            xanchor="left",
+            yanchor="middle",
+            align="left",
+            font=dict(
+                size=11,
+                color=color or _ENTERPRISE_THEME["font_color"],
+                family=_ENTERPRISE_THEME["font_stack"],
+            ),
+            bgcolor="rgba(255,255,255,0.72)",
+            borderpad=1,
+        )
 
 
 def _add_monitor_panel_title_annotations(
@@ -1892,17 +1903,11 @@ def _build_plotly_monitor_figure_single(
 
         emb = cd_dissonance_embed
         if emb and emb.get("traces"):
-            for i, tr in enumerate(emb["traces"]):
+            dissonance_traces = list(emb["traces"])
+            for tr in dissonance_traces:
                 tr.showlegend = False
                 fig.add_trace(tr, row=cd_row, col=5)
-                _add_inline_trace_label(
-                    fig,
-                    tr,
-                    row=cd_row,
-                    col=5,
-                    label=str(getattr(tr, "name", "") or ""),
-                    yshift=10 if i == 0 else -10,
-                )
+            _add_dissonance_inline_legend(fig, dissonance_traces, row=cd_row, col=5)
             fig.update_xaxes(
                 title_text=str(emb.get("x_title") or "Position x"),
                 row=cd_row,

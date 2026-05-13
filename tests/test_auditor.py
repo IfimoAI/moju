@@ -1281,7 +1281,7 @@ class TestVisualize:
             dom = getattr(getattr(fig.layout, axis_name), "domain")
             domains.append((float(dom[0]), float(dom[1])))
         widths = [b - a for a, b in domains]
-        assert min(widths) > 0.38
+        assert min(widths) > 0.4
         assert abs(widths[0] - widths[1]) < 1e-9
 
     def test_visualize_training_summary_keeps_training_trend_line(self):
@@ -1295,6 +1295,9 @@ class TestVisualize:
         anns = [str(getattr(a, "text", "") or "") for a in (fig.layout.annotations or [])]
         summary = next((a for a in anns if a.startswith("Summary:")), "")
         assert "Training trend improving" in summary
+        primary = next(a for a in fig.layout.annotations if "Primary Issue:" in str(getattr(a, "text", "") or ""))
+        assert float(primary.y) > 1.0
+        assert getattr(primary, "yanchor", None) == "bottom"
 
     def test_visualize_single_figure_subplot_title_annotations_match_panels(self):
         """Explicit panel titles (merged grid + domain cells) plus spatial colorbar/hover wording."""
@@ -1379,6 +1382,15 @@ class TestVisualize:
             and int(t.meta.get("subplot_row", 0)) == 5
         ]
         assert len(hms) == 2
+        domains = []
+        for hm in hms:
+            xref = getattr(hm, "xaxis", "x")
+            axis_name = "xaxis" if xref == "x" else f"xaxis{xref[1:]}"
+            dom = getattr(getattr(fig.layout, axis_name), "domain")
+            domains.append((float(dom[0]), float(dom[1])))
+        widths = [b - a for a, b in domains]
+        assert min(widths) > 0.4
+        assert abs(widths[0] - widths[1]) < 1e-9
         z0 = (getattr(hms[0], "zmin", None), getattr(hms[0], "zmax", None))
         z1 = (getattr(hms[1], "zmin", None), getattr(hms[1], "zmax", None))
         assert z0[0] is not None and z0[1] is not None
@@ -1435,6 +1447,9 @@ class TestVisualize:
         assert "Constitutive Divergence (Thermal Diffusivity)" in ann
         assert "Constitutive Dissonance (max t, worst slice)" in ann
         dissonance_subplot = fig.get_subplot(6, 5)
+        xaxis_title = str(getattr(getattr(dissonance_subplot.xaxis, "title", None), "text", "") or "")
+        assert xaxis_title == "Position x"
+        assert "(0 to L)" not in xaxis_title
         yaxis_title = str(getattr(getattr(dissonance_subplot.yaxis, "title", None), "text", "") or "")
         assert yaxis_title == "Thermal Diffusivity"
 
@@ -1442,8 +1457,24 @@ class TestVisualize:
         line_traces = [tr for tr in fig.data if getattr(tr, "name", "") in {"Model", "Implied"}]
         assert len(line_traces) == 2
         assert all(getattr(tr, "showlegend", None) is False for tr in line_traces)
-        ann_texts = {str(getattr(a, "text", "") or "") for a in (fig.layout.annotations or [])}
-        assert {"Model", "Implied"} <= ann_texts
+        legend_anns = [
+            a
+            for a in (fig.layout.annotations or [])
+            if str(getattr(a, "text", "") or "") in {"Model", "Implied"}
+        ]
+        assert {str(getattr(a, "text", "") or "") for a in legend_anns} == {"Model", "Implied"}
+        assert all(str(getattr(a, "xref", "") or "").endswith(" domain") for a in legend_anns)
+        assert all(str(getattr(a, "yref", "") or "").endswith(" domain") for a in legend_anns)
+        assert all(0.30 < float(getattr(a, "x", 0.0)) < 0.70 for a in legend_anns)
+        assert all(0.90 < float(getattr(a, "y", 0.0)) < 1.0 for a in legend_anns)
+        legend_shapes = [
+            s
+            for s in (fig.layout.shapes or [])
+            if str(getattr(s, "xref", "") or "").endswith(" domain")
+            and str(getattr(s, "yref", "") or "").endswith(" domain")
+            and 0.90 < float(getattr(s, "y0", 0.0)) < 1.0
+        ]
+        assert len(legend_shapes) >= 2
 
     def test_visualize_forensic_tab_heatmap_has_data_driven_zlim(self):
         pytest.importorskip("plotly")

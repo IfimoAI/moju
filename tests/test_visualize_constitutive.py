@@ -284,6 +284,8 @@ def test_prepare_mi_vs_x_embed_2d_balance() -> None:
     assert emb["y_title"] == "Thermal Diffusivity"
     assert emb["term_label"] == "Thermal Diffusivity"
     assert emb["title"] == "Constitutive Dissonance (worst slice)"
+    assert emb["x_title"] == "Position x"
+    assert "(0 to L)" not in emb["x_title"]
     assert len(t0.x) == len(t0.y) == len(t1.y)
     xs = list(t0.x)
     assert xs == sorted(xs) or len(xs) <= 1
@@ -303,6 +305,8 @@ def test_prepare_mi_vs_x_embed_1d_subtract() -> None:
     assert emb["traces"][1].line.color == MOJU_LIGHT.palette.cat_constitutive
     assert emb["y_title"] == "Ideal Gas Rho"
     assert emb["title"] == "Constitutive Dissonance"
+    assert emb["x_title"] == "Position x"
+    assert "(0 to L)" not in emb["x_title"]
     n = 64
     assert len(emb["traces"][0].x) == n
 

@@ -382,9 +382,9 @@ def _x_abscissa_0_to_L(cx: np.ndarray, bundle: Dict[str, Any]) -> Tuple[np.ndarr
     if L is None:
         L = float(span) if np.isfinite(span) and span > 0 else 1.0
     if not np.isfinite(span) or span <= 0:
-        return np.linspace(0.0, float(L), n, dtype=float), float(L), "Position x (0 to L)"
+        return np.linspace(0.0, float(L), n, dtype=float), float(L), "Position x"
     x_plot = (x - lo) / span * float(L)
-    return x_plot, float(L), "Position x (0 to L)"
+    return x_plot, float(L), "Position x"
 
 
 def prepare_constitutive_model_implied_vs_x_embed(
