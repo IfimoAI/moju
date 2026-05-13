@@ -204,12 +204,16 @@ def compute_implied_delta_with_debug(
     except (TypeError, ValueError):
         return None, None
     try:
+        pred_debug, implied_debug = jnp.broadcast_arrays(jnp.asarray(pred), implied)
+    except (TypeError, ValueError):
+        pred_debug, implied_debug = jnp.asarray(pred), implied
+    try:
         delta = apply_closure_discrepancy_normalize(raw, pred, implied, ref=ref_tensor)
     except (TypeError, ValueError):
         return None, None
     debug = {
-        "pred": jnp.asarray(pred),
-        "implied": implied,
+        "pred": pred_debug,
+        "implied": implied_debug,
         "raw": raw,
         "scale_a": None,
         "scale_b": None,

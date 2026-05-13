@@ -45,6 +45,37 @@ def test_compute_implied_delta_with_debug_subtract_mode() -> None:
     assert debug["scale_b"] is None
 
 
+def test_subtract_debug_broadcasts_scalar_pred_to_implied_shape() -> None:
+    from moju.monitor.closure_registry import (
+        MODEL_FNS,
+        compute_implied_delta_with_debug,
+    )
+
+    fn, arg_names = MODEL_FNS["thermal_diffusivity"]
+    merged = {
+        "k": jnp.array(2.0),
+        "rho": jnp.array(1.0),
+        "cp": jnp.array(1.0),
+        "alpha_implied": jnp.array([2.0, 2.0, 2.0]),
+    }
+    delta, debug = compute_implied_delta_with_debug(
+        fn=fn,
+        arg_names=arg_names,
+        state_map={"k": "k", "rho": "rho", "cp": "cp"},
+        state_pred=merged,
+        constants={},
+        implied_value_key="alpha_implied",
+        output_key="alpha",
+    )
+    assert delta is not None
+    assert debug is not None
+    assert debug["mode"] == "subtract"
+    assert debug["raw"].shape == (3,)
+    assert debug["pred"].shape == (3,)
+    assert debug["implied"].shape == (3,)
+    assert jnp.allclose(debug["pred"], jnp.array([2.0, 2.0, 2.0]))
+
+
 def test_compute_implied_delta_with_debug_balance_mode() -> None:
     from moju.monitor.closure_registry import (
         MODEL_FNS,

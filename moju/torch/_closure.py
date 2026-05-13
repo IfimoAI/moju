@@ -146,12 +146,13 @@ def compute_implied_delta_torch_with_debug(
     implied_t = _to_tensor(implied)
     try:
         raw = pred - implied_t
+        pred_debug, implied_debug = torch.broadcast_tensors(pred, implied_t)
         delta = normalize_discrepancy_torch(raw, pred, implied_t, ref=ref_tensor)
     except Exception:  # noqa: BLE001
         return None, None
     debug = {
-        "pred": pred,
-        "implied": implied_t,
+        "pred": pred_debug,
+        "implied": implied_debug,
         "raw": raw,
         "scale_a": None,
         "scale_b": None,

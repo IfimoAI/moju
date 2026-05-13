@@ -366,7 +366,10 @@ def prepare_constitutive_model_implied_vs_x_embed(
     if a_full.size == 0 or b_full.size == 0:
         return None
     if a_full.shape != b_full.shape:
-        return None
+        try:
+            a_full, b_full = np.broadcast_arrays(a_full, b_full)
+        except ValueError:
+            return None
 
     coords_pred = _closure_coords_for_reduce(bundle)
     try:
@@ -601,7 +604,10 @@ def _prepare_spatial_divergence(
     if a_full.size == 0 or b_full.size == 0:
         return (bn, "No spatial data for divergence")
     if a_full.shape != b_full.shape:
-        return (bn, "Model and Implied shapes differ; cannot render side-by-side heatmaps")
+        try:
+            a_full, b_full = np.broadcast_arrays(a_full, b_full)
+        except ValueError:
+            return (bn, "Model and Implied shapes differ; cannot render side-by-side heatmaps")
 
     label_model, label_implied = _user_constitutive_side_labels()
     hint_ax = bundle.get("spatial_coord_hint")

@@ -200,6 +200,41 @@ def test_spatial_normalized_heatmap_uses_time_axis_label() -> None:
     assert fig.layout.yaxis.title.text == "Time t"
 
 
+def test_spatial_normalized_accepts_scalar_model_with_field_implied() -> None:
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import (
+        build_spatial_normalized_divergence_figure,
+        prepare_constitutive_model_implied_vs_x_embed,
+    )
+
+    x = np.linspace(0.0, 1.0, 6)
+    implied = np.full_like(x, 2.0)
+    bundle = {
+        "log": [{"coord_snapshot": {"x": list(x)}}],
+        "plot_keys": ["constitutive/c/law_x/implied_delta"],
+        "r_norm_mat": [[0.0]],
+        "spatial_coord_hint": "x",
+        "closure_debug": {
+            "c/law_x": {
+                "pred": np.array(2.0),
+                "implied": implied,
+                "raw": np.zeros_like(implied),
+                "scale_a": None,
+                "scale_b": None,
+                "ref": None,
+                "mode": "subtract",
+                "output_key": "alpha",
+            }
+        },
+    }
+    fig = build_spatial_normalized_divergence_figure(bundle)
+    assert len(fig.data) == 1
+    assert fig.data[0].type == "scatter"
+    emb = prepare_constitutive_model_implied_vs_x_embed(bundle)
+    assert emb is not None
+    assert len(emb["traces"]) == 2
+
+
 def test_spatial_normalized_only_single_trace_1d() -> None:
     pytest.importorskip("plotly")
     from moju.monitor.visualize_constitutive import build_spatial_normalized_divergence_figure
