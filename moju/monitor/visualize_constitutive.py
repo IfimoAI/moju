@@ -32,6 +32,9 @@ Modes
 - ``"hotspot"`` — top-k worst points by ``|divergence|``, plotted in 2-D /
   3-D over collocation coordinates ``(x, y, [z], [t])``.
 
+The helper :func:`build_spatial_normalized_divergence_figure` renders **only**
+the normalised divergence (single axes), for the monitor wide row.
+
 Composite entry: :func:`build_constitutive_divergence_dashboard` returns a
 2x2 :class:`plotly.graph_objects.Figure` with one panel of each mode for
 the basename whose final-step R_norm is largest (or the explicit basename
@@ -39,7 +42,7 @@ passed by the caller).
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -270,67 +273,81 @@ def _coords_for_points(
 # ---------------------------------------------------------------------------
 
 
-def build_spatial_divergence_panel(
+class _SpatialDivPrep(NamedTuple):
+    """Shared spatial divergence slice (1-D lines or 2-D heatmaps) for card + monitor."""
+
+    basename: str
+    label_model: str
+    label_implied: str
+    is_1d: bool
+    a: np.ndarray
+    b: np.ndarray
+    div: np.ndarray
+    xs_1d: Optional[np.ndarray]
+    x_title: str
+    y_qty: str
+    cx: Optional[np.ndarray]
+    cy: Optional[np.ndarray]
+    abs_lim: float
+
+
+def _prepare_spatial_divergence(
     bundle: Dict[str, Any],
     residual_basename: Optional[str] = None,
-    *,
-    theme: Any = MOJU_LIGHT,
-    height: Optional[int] = None,
-    title: Optional[str] = None,
-) -> Any:
-    """Three-panel spatial heatmap: model, implied, normalised divergence."""
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-
-    t = get_theme(theme)
+) -> Union[_SpatialDivPrep, Tuple[str, str]]:
+    """
+    Resolve closure sidecars and return arrays for model, implied, and normalised divergence,
+    or ``(title, message)`` for an empty card.
+    """
     debug = _closure_debug(bundle)
     if not debug:
-        return _empty_card(title or "Constitutive divergence (spatial)", "No closure_debug sidecar available", theme)
+        return ("Constitutive divergence (spatial)", "No closure_debug sidecar available")
     bn = residual_basename or _auto_select_basename(bundle, debug)
     if bn is None or bn not in debug:
-        return _empty_card(title or "Constitutive divergence (spatial)", "No constitutive basename to render", theme)
+        return ("Constitutive divergence (spatial)", "No constitutive basename to render")
     entry = debug[bn]
     a_full = _coerce_to_numpy(entry.get("scale_a") if entry.get("mode") == "balance" else entry.get("pred"))
     b_full = _coerce_to_numpy(entry.get("scale_b") if entry.get("mode") == "balance" else entry.get("implied"))
     ref_full = entry.get("ref")
     ref_arr = _coerce_to_numpy(ref_full) if ref_full is not None else None
     if a_full.size == 0 or b_full.size == 0:
-        return _empty_card(title or bn, "No spatial data for divergence", theme)
+        return (bn, "No spatial data for divergence")
     if a_full.shape != b_full.shape:
-        return _empty_card(title or bn, "Model and Implied shapes differ; cannot render side-by-side heatmaps", theme)
+        return (bn, "Model and Implied shapes differ; cannot render side-by-side heatmaps")
 
     label_model, label_implied = _user_constitutive_side_labels()
     hint_ax = bundle.get("spatial_coord_hint")
 
-    # Squeeze leading singletons (e.g. batch dim)
     a = a_full
     b = b_full
     while a.ndim > 2 and a.shape[0] == 1:
         a = a[0]
         b = b[0]
     y_qty = divergence_y_quantity_label(entry)
+
     if a.ndim == 1:
-        # Render as three 1-D line traces
-        div = _normalized_divergence(a, b, ref=ref_arr.reshape(a.shape) if ref_arr is not None and ref_arr.size == a.size else None)
-        xs, x_title = infer_divergence_abscissa(bundle, int(a.shape[0]), hint_axis=str(hint_ax) if hint_ax else None)
-        fig = make_subplots(
-            rows=1,
-            cols=3,
-            shared_yaxes=False,
-            subplot_titles=(label_model, label_implied, "Normalised divergence"),
+        div = _normalized_divergence(
+            a, b, ref=ref_arr.reshape(a.shape) if ref_arr is not None and ref_arr.size == a.size else None
         )
-        fig.add_trace(go.Scatter(x=xs, y=a, mode="lines", line=dict(color=t.palette.line_primary), name=label_model), row=1, col=1)
-        fig.add_trace(go.Scatter(x=xs, y=b, mode="lines", line=dict(color=t.palette.cat_constitutive), name=label_implied), row=1, col=2)
-        fig.add_trace(go.Scatter(x=xs, y=div, mode="lines", line=dict(color=t.palette.adm_low), name="Δ"), row=1, col=3)
-        for col in (1, 2, 3):
-            fig.update_xaxes(row=1, col=col, title_text=x_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
-            y_lab = "Normalised divergence" if col == 3 else y_qty
-            fig.update_yaxes(row=1, col=col, title_text=y_lab, **themed_axis_style(theme))
-        fig.update_layout(showlegend=False)
-        return apply_theme(fig, theme, title=title or f"{pretty_residual_key(bn)} (divergence)", height=height or t.layout.card_height)
+        xs, x_title = infer_divergence_abscissa(bundle, int(a.shape[0]), hint_axis=str(hint_ax) if hint_ax else None)
+        return _SpatialDivPrep(
+            basename=bn,
+            label_model=label_model,
+            label_implied=label_implied,
+            is_1d=True,
+            a=a,
+            b=b,
+            div=div,
+            xs_1d=np.asarray(xs, dtype=float),
+            x_title=x_title,
+            y_qty=y_qty,
+            cx=None,
+            cy=None,
+            abs_lim=1.0,
+        )
 
     if a.ndim != 2:
-        return _empty_card(title or bn, f"Cannot render divergence for ndim={a.ndim} arrays", theme)
+        return (bn, f"Cannot render divergence for ndim={a.ndim} arrays")
 
     div = _normalized_divergence(
         a,
@@ -347,6 +364,152 @@ def build_spatial_divergence_panel(
     cx = np.asarray(cx) if cx is not None and np.asarray(cx).shape[0] == a.shape[1] else None
     cy = np.asarray(cy) if cy is not None and np.asarray(cy).shape[0] == a.shape[0] else None
 
+    return _SpatialDivPrep(
+        basename=bn,
+        label_model=label_model,
+        label_implied=label_implied,
+        is_1d=False,
+        a=a,
+        b=b,
+        div=div,
+        xs_1d=None,
+        x_title="",
+        y_qty=y_qty,
+        cx=cx,
+        cy=cy,
+        abs_lim=abs_lim,
+    )
+
+
+def build_spatial_normalized_divergence_figure(
+    bundle: Dict[str, Any],
+    residual_basename: Optional[str] = None,
+    *,
+    theme: Any = MOJU_LIGHT,
+    height: Optional[int] = None,
+    title: Optional[str] = None,
+) -> Any:
+    """
+    Single-plot normalised constitutive divergence (heatmap or line): no model/implied subpanels.
+    Intended for monitor embedding on a wide ``colspan`` cell.
+    """
+    import plotly.graph_objects as go
+
+    t = get_theme(theme)
+    pre = _prepare_spatial_divergence(bundle, residual_basename)
+    if not isinstance(pre, _SpatialDivPrep):
+        return _empty_card(pre[0], pre[1], theme)
+
+    if pre.is_1d:
+        xs = pre.xs_1d
+        if xs is None:
+            return _empty_card(pre.basename, "Missing abscissa for divergence", theme)
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=xs,
+                y=pre.div,
+                mode="lines",
+                line=dict(color=t.palette.adm_low, width=2),
+                name="Δ",
+                showlegend=False,
+            )
+        )
+        fig.update_xaxes(title_text=pre.x_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
+        fig.update_yaxes(title_text="Normalised divergence", **themed_axis_style(theme))
+        fig.update_layout(showlegend=False)
+        return apply_theme(fig, theme, title=title or f"{pretty_residual_key(pre.basename)} (divergence)", height=height or t.layout.card_height)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Heatmap(
+            z=pre.div,
+            x=pre.cx,
+            y=pre.cy,
+            colorscale=t.colorscales.divergence,
+            zmid=0,
+            zmin=-pre.abs_lim,
+            zmax=pre.abs_lim,
+            colorbar=themed_colorbar(theme, title="(Model − Implied) / scale"),
+            hovertemplate="x=%{x:.3g}<br>y=%{y:.3g}<br>Δ=%{z:.3g}<extra></extra>",
+            showscale=True,
+        )
+    )
+    fig.update_xaxes(title_text="Position x", **themed_axis_style(theme, show_grid=False, zero_line=False))
+    fig.update_yaxes(title_text="Position y", **themed_axis_style(theme, show_grid=False, zero_line=False))
+    return apply_theme(fig, theme, title=title or f"{pretty_residual_key(pre.basename)} (divergence)", height=height or t.layout.card_height)
+
+
+def build_spatial_divergence_panel(
+    bundle: Dict[str, Any],
+    residual_basename: Optional[str] = None,
+    *,
+    theme: Any = MOJU_LIGHT,
+    height: Optional[int] = None,
+    title: Optional[str] = None,
+) -> Any:
+    """Three-panel spatial heatmap: model, implied, normalised divergence."""
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    t = get_theme(theme)
+    pre = _prepare_spatial_divergence(bundle, residual_basename)
+    if not isinstance(pre, _SpatialDivPrep):
+        return _empty_card(pre[0], pre[1], theme)
+
+    label_model, label_implied = pre.label_model, pre.label_implied
+    bn = pre.basename
+
+    if pre.is_1d:
+        xs = pre.xs_1d
+        if xs is None:
+            return _empty_card(pre.basename, "Missing abscissa for divergence", theme)
+        fig = make_subplots(
+            rows=1,
+            cols=3,
+            shared_yaxes=False,
+            subplot_titles=(label_model, label_implied, "Normalised divergence"),
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=xs,
+                y=pre.a,
+                mode="lines",
+                line=dict(color=t.palette.line_primary),
+                name=label_model,
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=xs,
+                y=pre.b,
+                mode="lines",
+                line=dict(color=t.palette.cat_constitutive),
+                name=label_implied,
+            ),
+            row=1,
+            col=2,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=xs,
+                y=pre.div,
+                mode="lines",
+                line=dict(color=t.palette.adm_low),
+                name="Δ",
+            ),
+            row=1,
+            col=3,
+        )
+        for col in (1, 2, 3):
+            fig.update_xaxes(row=1, col=col, title_text=pre.x_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
+            y_lab = "Normalised divergence" if col == 3 else pre.y_qty
+            fig.update_yaxes(row=1, col=col, title_text=y_lab, **themed_axis_style(theme))
+        fig.update_layout(showlegend=False)
+        return apply_theme(fig, theme, title=title or f"{pretty_residual_key(bn)} (divergence)", height=height or t.layout.card_height)
+
     fig = make_subplots(
         rows=1,
         cols=3,
@@ -356,9 +519,9 @@ def build_spatial_divergence_panel(
     )
     fig.add_trace(
         go.Heatmap(
-            z=a,
-            x=cx,
-            y=cy,
+            z=pre.a,
+            x=pre.cx,
+            y=pre.cy,
             colorscale=t.colorscales.sequential,
             colorbar=themed_colorbar(theme, title=label_model),
             hovertemplate="x=%{x:.3g}<br>y=%{y:.3g}<br>val=%{z:.3g}<extra></extra>",
@@ -368,9 +531,9 @@ def build_spatial_divergence_panel(
     )
     fig.add_trace(
         go.Heatmap(
-            z=b,
-            x=cx,
-            y=cy,
+            z=pre.b,
+            x=pre.cx,
+            y=pre.cy,
             colorscale=t.colorscales.sequential_alt,
             colorbar=themed_colorbar(theme, title=label_implied),
             hovertemplate="x=%{x:.3g}<br>y=%{y:.3g}<br>val=%{z:.3g}<extra></extra>",
@@ -381,13 +544,13 @@ def build_spatial_divergence_panel(
     )
     fig.add_trace(
         go.Heatmap(
-            z=div,
-            x=cx,
-            y=cy,
+            z=pre.div,
+            x=pre.cx,
+            y=pre.cy,
             colorscale=t.colorscales.divergence,
             zmid=0,
-            zmin=-abs_lim,
-            zmax=abs_lim,
+            zmin=-pre.abs_lim,
+            zmax=pre.abs_lim,
             colorbar=themed_colorbar(theme, title="(Model − Implied) / scale"),
             hovertemplate="x=%{x:.3g}<br>y=%{y:.3g}<br>Δ=%{z:.3g}<extra></extra>",
             showscale=True,
@@ -889,6 +1052,7 @@ __all__ = [
     "build_hotspot_divergence_panel",
     "build_scatter_divergence_panel",
     "build_spatial_divergence_panel",
+    "build_spatial_normalized_divergence_figure",
     "divergence_y_quantity_label",
     "infer_divergence_abscissa",
     "list_constitutive_basenames",

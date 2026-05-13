@@ -20,7 +20,7 @@ from moju.monitor.visualize_labels import (
     truncate_display_label,
 )
 from moju.monitor.visualize_constitutive import (
-    build_constitutive_divergence_card,
+    build_spatial_normalized_divergence_figure,
     infer_divergence_abscissa,
     primary_closure_debug_field_length,
 )
@@ -861,7 +861,7 @@ def _monitor_flat_subplot_titles(
         st[36] = "Constitutive Residual"
     tag_title = {
         "state": "State snapshot (predicted)",
-        "constitutive_divergence": "Constitutive divergence (Model / Implied / normalized Δ)",
+        "constitutive_divergence": "Constitutive divergence (normalised Δ)",
     }
     for i, tag in enumerate(trailing_rows):
         row_1 = base_rows + 1 + i
@@ -1123,9 +1123,9 @@ def _build_plotly_monitor_figure_single(
     div_legacy_train = 0.14
 
     _div_row_spec: List[Any] = [
-        {"type": "heatmap"},
-        {"type": "heatmap"},
-        {"type": "heatmap"},
+        {"type": "xy", "colspan": 8},
+        None,
+        None,
         None,
         None,
         None,
@@ -1743,15 +1743,10 @@ def _build_plotly_monitor_figure_single(
                 )
 
     if has_cd and cd_row is not None:
-        div_fig = build_constitutive_divergence_card(bundle, mode="spatial", title=None)
+        div_fig = build_spatial_normalized_divergence_figure(bundle, title=None)
         traces = list(div_fig.data)
-        if len(traces) >= 3:
-            for j in range(3):
-                fig.add_trace(traces[j], row=cd_row, col=j + 1)
-        elif traces:
-            for j, tr in enumerate(traces):
-                if j < 3:
-                    fig.add_trace(tr, row=cd_row, col=j + 1)
+        if len(traces) >= 1:
+            fig.add_trace(traces[0], row=cd_row, col=1)
         else:
             fig.add_trace(
                 go.Scatter(
@@ -1763,11 +1758,10 @@ def _build_plotly_monitor_figure_single(
                     hoverinfo="skip",
                 ),
                 row=cd_row,
-                col=2,
+                col=1,
             )
-        for col in (1, 2, 3):
-            fig.update_xaxes(automargin=True, row=cd_row, col=col)
-            fig.update_yaxes(automargin=True, row=cd_row, col=col)
+        fig.update_xaxes(automargin=True, row=cd_row, col=1)
+        fig.update_yaxes(automargin=True, row=cd_row, col=1)
         tl0 = traces[0] if traces else None
         tty = getattr(tl0, "type", None) if tl0 is not None else None
         if tty == "scatter":
@@ -1782,12 +1776,10 @@ def _build_plotly_monitor_figure_single(
             _, xtit = infer_divergence_abscissa(
                 bundle, nlen_i, hint_axis=str(hin) if hin else None
             )
-            for col in (1, 2, 3):
-                fig.update_xaxes(title_text=xtit, row=cd_row, col=col, automargin=True)
+            fig.update_xaxes(title_text=xtit, row=cd_row, col=1, automargin=True)
         elif tty == "heatmap":
-            for col in (1, 2, 3):
-                fig.update_xaxes(title_text="Position x", row=cd_row, col=col, automargin=True)
-                fig.update_yaxes(title_text="Position y", row=cd_row, col=col, automargin=True)
+            fig.update_xaxes(title_text="Position x", row=cd_row, col=1, automargin=True)
+            fig.update_yaxes(title_text="Position y", row=cd_row, col=1, automargin=True)
 
     # Actionable summary
     summary_lines = []

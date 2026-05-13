@@ -151,3 +151,30 @@ def test_unknown_mode_raises() -> None:
 
     with pytest.raises(ValueError, match="Unknown divergence mode"):
         build_constitutive_divergence_card(_subtract_bundle(), mode="histogram")
+
+
+def test_spatial_normalized_only_single_trace_2d() -> None:
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import build_spatial_normalized_divergence_figure
+
+    fig = build_spatial_normalized_divergence_figure(_balance_bundle())
+    assert len(fig.data) == 1
+    assert fig.data[0].type == "heatmap"
+
+
+def test_spatial_normalized_only_single_trace_1d() -> None:
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import build_spatial_normalized_divergence_figure
+
+    fig = build_spatial_normalized_divergence_figure(_subtract_bundle())
+    assert len(fig.data) == 1
+    assert fig.data[0].type == "scatter"
+
+
+def test_spatial_three_panel_card_unchanged_trace_count() -> None:
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import build_constitutive_divergence_card
+
+    fig = build_constitutive_divergence_card(_balance_bundle(), mode="spatial")
+    assert len(fig.data) == 3
+
