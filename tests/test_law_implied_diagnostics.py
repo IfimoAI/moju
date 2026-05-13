@@ -42,8 +42,8 @@ def test_merge_fourier_prepends_thermal_diffusivity():
     assert len(c) == 1
     assert c[0]["name"] == "thermal_diffusivity"
     assert c[0]["residual_basename"] == "thermal_diffusivity/law_fourier_conduction"
-    assert c[0]["implied_balance_fn"] is not None
-    assert c[0].get("implied_fn") is None
+    assert c[0]["implied_fn"] is not None
+    assert c[0].get("implied_balance_fn") is None
     assert s == []
 
 
@@ -98,8 +98,8 @@ def test_fourier_implied_delta_near_zero_on_consistent_state():
     assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-4
 
 
-def test_fourier_implied_balance_finite_when_laplacian_zero():
-    """Balance form avoids division by T_laplacian; residual stays finite when Laplacian vanishes."""
+def test_fourier_implied_delta_nan_when_laplacian_zero():
+    """Direct implied alpha is undefined where T_laplacian vanishes."""
     engine = ResidualEngine(
         laws=[
             {
@@ -132,7 +132,7 @@ def test_fourier_implied_balance_finite_when_laplacian_zero():
     r = engine.compute_residuals(state)
     key = "thermal_diffusivity/law_fourier_conduction/implied_delta"
     arr = r["constitutive"][key]
-    assert jnp.all(jnp.isfinite(arr))
+    assert jnp.all(jnp.isnan(arr))
 
 
 def test_ref_delta_gated_by_include_ref_delta():
@@ -181,6 +181,14 @@ def test_supported_rows_are_constitutive_only():
     c, s = merge_law_implied_audit_specs(laws, enabled=True)
     assert c
     assert s == []
+
+
+def test_law_linked_rows_use_implied_fn_not_balance_fn():
+    laws = [{"name": n, "state_map": {}} for n in list_laws_with_implied_diagnostics()]
+    c, _ = merge_law_implied_audit_specs(laws, enabled=True)
+    assert c
+    assert all(row.get("implied_fn") is not None for row in c)
+    assert all(row.get("implied_balance_fn") is None for row in c)
 
 
 def test_unsupported_reasons_present_and_disjoint_from_supported():
@@ -305,6 +313,41 @@ def test_ns_stokes_burgers_implied_mu_balance_near_zero():
         r = engine.compute_residuals(dict(common))
         assert key in r["constitutive"]
         assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-5
+
+
+def test_law_linked_implied_rows_use_subtract_debug_mode():
+    engine = ResidualEngine(
+        laws=[
+            {
+                "name": "fourier_conduction",
+                "state_map": {
+                    "T_t": "T_t",
+                    "T_laplacian": "T_xx",
+                    "fo": "Fo",
+                    "t": "t",
+                    "L": "L",
+                },
+            }
+        ],
+        groups=[{"name": "fo", "output_key": "Fo", "state_map": {"alpha": "alpha", "t": "t", "L": "L"}}],
+        law_implied_audits=True,
+    )
+    state = {
+        "T_t": jnp.array([2.0, 4.0]),
+        "T_xx": jnp.array([1.0, 2.0]),
+        "Fo": jnp.array([2.0, 2.0]),
+        "t": jnp.array([1.0, 1.0]),
+        "L": jnp.array([1.0, 1.0]),
+        "k": jnp.array([2.0, 2.0]),
+        "rho": jnp.array([1.0, 1.0]),
+        "cp": jnp.array([1.0, 1.0]),
+        "alpha": jnp.array([2.0, 2.0]),
+    }
+    r = engine.compute_residuals(state)
+    debug = r["closure_debug"]["thermal_diffusivity/law_fourier_conduction"]
+    assert debug["mode"] == "subtract"
+    assert jnp.allclose(debug["pred"], jnp.array([2.0, 2.0]))
+    assert jnp.allclose(debug["implied"], jnp.array([2.0, 2.0]))
 
 
 def test_hookes_implied_stress_near_zero_on_consistent_1d():

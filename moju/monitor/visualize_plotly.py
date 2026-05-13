@@ -38,7 +38,7 @@ MOJU_STUDIO_DASHBOARD_CARD_HEIGHT = 400
 
 # Single-figure visualize: eval canvas height; training scales up so each chart row matches eval's
 # pixel height (training has one extra chart row with the same relative weight as eval's lower chart row).
-MONITOR_SINGLE_FIGURE_HEIGHT = 924
+MONITOR_SINGLE_FIGURE_HEIGHT = 1040
 _MONITOR_ROW_HEIGHT_SUM_EVAL = 0.002 + 0.074 + 0.262 + 0.222
 _MONITOR_ROW_HEIGHT_SUM_TRAINING = 0.002 + 0.074 + 0.262 + 0.222 + 0.222
 MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING = int(
@@ -50,7 +50,7 @@ MONITOR_SINGLE_FIGURE_HEIGHT_TRAINING = int(
 MONITOR_SINGLE_FIGURE_MARGIN_BOTTOM = 268
 MONITOR_SUMMARY_ANNOTATION_Y_PAPER = -0.098
 
-MONITOR_CONSTITUTIVE_DIVERGENCE_EXTRA_PX = 200
+MONITOR_CONSTITUTIVE_DIVERGENCE_EXTRA_PX = 280
 MONITOR_DIV_ROW_WEIGHT_MULT = 3.0
 MONITOR_STATE_OVERLAY_EXTRA_PX = 144
 
@@ -871,7 +871,7 @@ def _monitor_flat_subplot_titles(
         ix = (row_1 - 1) * 8
         if tag == "constitutive_divergence":
             st[ix] = tag_title["constitutive_divergence"]
-            st[ix + 4] = "Constitutive dissonance plot"
+            st[ix + 4] = "Constitutive Dissonance"
         else:
             st[ix] = tag_title.get(tag, "")
     return tuple(st)
@@ -892,6 +892,24 @@ def _plotly_xy_axis_ref_strings_for_subplot(fig: Any, row: int, col: int) -> Tup
         raise ValueError(f"Could not resolve {kind} axis ref for subplot ({row}, {col})")
 
     return _ref(sp.xaxis, "x"), _ref(sp.yaxis, "y")
+
+
+def _legend_upper_right_paper_xy_for_subplot(fig: Any, row: int, col: int) -> Tuple[float, float]:
+    """Paper-normalized (0--1) position for legend upper-right inside a subplot cell.
+
+    Maps the subplot axis ``domain`` rectangles into figure ``paper`` coordinates for
+    ``layout.legend`` (legacy Plotly does not support ``legend.xref`` / ``yref``).
+    """
+    xref, yref = _plotly_xy_axis_ref_strings_for_subplot(fig, row, col)
+    xa = getattr(fig.layout, f"{xref}axis", None)
+    ya = getattr(fig.layout, f"{yref}axis", None)
+    if xa is None or ya is None:
+        return 0.99, 0.99
+    rdx = getattr(xa, "domain", None) or (0.0, 1.0)
+    rdy = getattr(ya, "domain", None) or (0.0, 1.0)
+    lx0, lx1 = float(rdx[0]), float(rdx[1])
+    ly0, ly1 = float(rdy[0]), float(rdy[1])
+    return lx0 + 0.99 * (lx1 - lx0), ly0 + 0.99 * (ly1 - ly0)
 
 
 def _add_monitor_panel_title_annotations(
@@ -1129,6 +1147,7 @@ def _build_plotly_monitor_figure_single(
         cd_row = base_n_rows + 1 + trailing.index("constitutive_divergence")
 
     monitor_show_legend = False
+    apply_cd_dissonance_legend = False
 
     div_legacy_eval = 0.18
     div_legacy_train = 0.14
@@ -1791,13 +1810,26 @@ def _build_plotly_monitor_figure_single(
             )
             fig.update_xaxes(title_text=xtit, row=cd_row, col=1, automargin=True)
         elif tty == "heatmap":
-            fig.update_xaxes(title_text="Position x", row=cd_row, col=1, automargin=True)
-            fig.update_yaxes(title_text="Position y", row=cd_row, col=1, automargin=True)
+            div_x_title = getattr(getattr(div_fig.layout, "xaxis", None), "title", None)
+            div_y_title = getattr(getattr(div_fig.layout, "yaxis", None), "title", None)
+            fig.update_xaxes(
+                title_text=str(getattr(div_x_title, "text", None) or "Position x"),
+                row=cd_row,
+                col=1,
+                automargin=True,
+            )
+            fig.update_yaxes(
+                title_text=str(getattr(div_y_title, "text", None) or "Position y"),
+                row=cd_row,
+                col=1,
+                automargin=True,
+            )
 
         prefer_last_t = bool(bundle.get("spatial_prefer_last_t", True))
         emb = prepare_constitutive_model_implied_vs_x_embed(bundle, prefer_last_t=prefer_last_t)
         if emb and emb.get("traces"):
             monitor_show_legend = True
+            apply_cd_dissonance_legend = True
             for tr in emb["traces"]:
                 fig.add_trace(tr, row=cd_row, col=5)
             fig.update_xaxes(
@@ -1902,6 +1934,20 @@ def _build_plotly_monitor_figure_single(
         paper_bgcolor=paper_bg,
         font=dict(size=12, family=T["font_stack"], color=font_color),
     )
+    if apply_cd_dissonance_legend and cd_row is not None:
+        _lx, _ly = _legend_upper_right_paper_xy_for_subplot(fig, cd_row, 5)
+        fig.update_layout(
+            legend=dict(
+                x=_lx,
+                y=_ly,
+                xanchor="right",
+                yanchor="top",
+                bgcolor="rgba(255,255,255,0.88)",
+                bordercolor="rgba(0,0,0,0.18)",
+                borderwidth=1,
+                font=dict(size=11, family=T["font_stack"], color=font_color),
+            )
+        )
     if export_buttons:
         fig.update_layout(modebar_add=["toImage"])
     if show_branding:
@@ -1942,7 +1988,8 @@ def _build_plotly_monitor_figure_single(
     # Extra vertical rhythm: wider row gaps (make_subplots) + x-axis padding so tick labels
     # and axis titles clear the subplot title band of the row below.
     # Smaller standoff keeps x-axis titles closer to the plot (still clears tick labels via automargin).
-    fig.update_xaxes(automargin=True, title=dict(standoff=10))
+    fig.update_xaxes(automargin=True, title=dict(standoff=14))
+    fig.update_yaxes(automargin=True, title=dict(standoff=14))
 
     align_heatmap_colorbars_to_subplot_domains(fig)
     _add_monitor_panel_title_annotations(fig, subplot_titles, font_color=font_color)

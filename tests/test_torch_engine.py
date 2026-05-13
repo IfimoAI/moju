@@ -7,7 +7,7 @@ Tests cover:
 - ``_r_eff``: r_eff_scalar_torch / build_loss_torch
 - ``_path_b``: fill_path_b_derivatives_torch
 - ``_closure``: normalize_discrepancy_torch / compute_implied_delta_torch / compute_ref_delta_torch
-- ``_implied_diagnostics``: balance functions + merge_law_implied_audit_specs_torch
+- ``_implied_diagnostics``: implied functions + merge_law_implied_audit_specs_torch
 - ``TorchResidualEngine``: full pipeline, group inference, derived state, user_fns, loss
 """
 from __future__ import annotations
@@ -29,8 +29,8 @@ from moju.torch._closure import (
 )
 from moju.torch._implied_diagnostics import (
     merge_law_implied_audit_specs_torch,
-    balance_implied_fourier_conduction_torch,
-    balance_implied_wave_equation_torch,
+    implied_alpha_fourier_conduction_torch,
+    implied_wave_speed_torch,
     implied_viscous_acceleration_incompressible_torch,
 )
 from moju.torch._engine import TorchResidualEngine
@@ -458,7 +458,8 @@ class TestMergeLawImpliedAuditSpecsTorch:
         specs = merge_law_implied_audit_specs_torch(laws)
         assert len(specs) >= 1
         assert specs[0]["name"] == "thermal_diffusivity"
-        assert "implied_balance_fn_torch" in specs[0]
+        assert "implied_fn_torch" in specs[0]
+        assert "implied_balance_fn_torch" not in specs[0]
 
     def test_disabled_returns_empty(self):
         laws = [{"name": "fourier_conduction"}]
@@ -480,33 +481,27 @@ class TestMergeLawImpliedAuditSpecsTorch:
         assert any(s["name"] == "dynamic_viscosity_from_re" for s in specs)
 
 
-class TestTorchBalanceFunctions:
-    def test_fourier_balance_basic(self):
+class TestTorchImpliedFunctions:
+    def test_fourier_implied_alpha_basic(self):
         law_sm = {"T_t": "T_t", "T_laplacian": "T_laplacian"}
-        fn = balance_implied_fourier_conduction_torch(law_sm)
+        fn = implied_alpha_fourier_conduction_torch(law_sm)
         state = {"T_t": _t(4.0), "T_laplacian": _t(2.0)}
-        pred = _t(1.0)  # alpha = 1
-        result = fn(state, {}, pred)
+        result = fn(state, {})
         assert result is not None
-        raw, a, b = result
-        # raw = T_t - alpha * T_laplacian = 4 - 1*2 = 2
-        assert abs(float(raw) - 2.0) < 1e-6
+        assert abs(float(result) - 2.0) < 1e-6
 
-    def test_wave_balance_basic(self):
+    def test_wave_implied_speed_basic(self):
         law_sm = {"phi_tt": "phi_tt", "phi_laplacian": "phi_laplacian"}
-        fn = balance_implied_wave_equation_torch(law_sm)
+        fn = implied_wave_speed_torch(law_sm)
         state = {"phi_tt": _t(9.0), "phi_laplacian": _t(1.0)}
-        pred = _t(3.0)  # c = 3
-        result = fn(state, {}, pred)
+        result = fn(state, {})
         assert result is not None
-        raw, _, _ = result
-        # raw = phi_tt - c^2 * phi_lap = 9 - 9 = 0
-        assert abs(float(raw)) < 1e-6
+        assert abs(float(result) - 3.0) < 1e-6
 
-    def test_balance_returns_none_on_missing(self):
+    def test_implied_returns_none_on_missing(self):
         law_sm = {"T_t": "T_t", "T_laplacian": "T_laplacian"}
-        fn = balance_implied_fourier_conduction_torch(law_sm)
-        result = fn({}, {}, _t(1.0))  # missing T_t
+        fn = implied_alpha_fourier_conduction_torch(law_sm)
+        result = fn({}, {})  # missing T_t
         assert result is None
 
 

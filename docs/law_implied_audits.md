@@ -16,15 +16,29 @@ unless a reference field resolves (audit **`implied_delta_ref_key`**, or **`{out
 R^* = \frac{F - \tilde F}{\varepsilon + |\text{ref}|}.
 \]
 
-## Balance mode (law-linked coefficient audits)
+## Direct implied-term mode (law-linked coefficient audits)
 
-For several law-linked rows, Moju uses **`implied_balance_fn(state, constants, pred)`** with **`pred = F(...)`** from the catalog model. The closure returns **`(raw, scale_a, scale_b)`** where **`raw`** is the **governing-equation residual** written with **`pred`** as the constitutive coefficient (e.g. **Fourier:** \(T_t - \alpha_{\text{model}}\,T_{\text{laplacian}}\)), and **`scale_a` / `scale_b`** are the two term magnitudes used for symmetric normalization:
+For supported law-linked rows, Moju now recovers a direct **implied constitutive term** from the governing-law fields and compares it to the catalog model output. For example, Fourier conduction compares:
 
 \[
-R^* = \frac{\text{raw}}{\varepsilon + |\text{scale}_a| + |\text{scale}_b|}
+\alpha_{\text{model}} = \mathrm{Models.thermal\_diffusivity}(k,\rho,c_p)
+\quad\text{vs}\quad
+\alpha_{\text{implied}} = \frac{T_t}{T_{\text{laplacian}}}.
 \]
 
-(or **`/ (ε + |ref|)`** when a ref tensor resolves). There is **no** division of fields to recover an “implied” coefficient for these rows.
+The stored tensor is the standard subtract-mode nondimensional discrepancy:
+
+\[
+R^* = \frac{F - \tilde F}{\varepsilon + |F| + |\tilde F|}
+\]
+
+(or **`/ (ε + |ref|)`** when a ref tensor resolves). This means the closure debug sidecar contains:
+
+- **`pred`**: the model constitutive term \(F\);
+- **`implied`**: the law-implied constitutive term \(\tilde F\);
+- **`mode`**: **`"subtract"`**.
+
+Divisions are masked: points with ill-conditioned denominators are stored as **`NaN`** instead of huge finite implied values. Downstream reductions use nan-aware statistics, and all-invalid rows become non-finite diagnostics.
 
 There is **no** raw SI-difference mode. **`Models.*`** still uses your physical state keys; the **monitor residual** is always normalized as above.
 
@@ -45,7 +59,7 @@ Rows are merged in **`merge_law_implied_audit_specs(laws_spec, enabled=...)`**. 
 
 ## Auto materialization (`derived_state_chain`)
 
-Law-linked rows only define **which** constitutive audits exist and how **`implied_balance_fn`** compares the law to **`pred = Models.*(…)`**. Dimensionless **groups** may still need the same quantity as a **state key** (e.g. **`alpha`** for **`Groups.fo`**).
+Law-linked rows only define **which** constitutive audits exist and how **`implied_fn`** recovers the law-implied term. Dimensionless **groups** may still need the same quantity as a **state key** (e.g. **`alpha`** for **`Groups.fo`**).
 
 When a constitutive audit’s **`name`** is registered in **`moju.monitor.model_derived_registry.MODEL_DERIVED_REGISTRY`** and its **`output_key`** appears in some **`groups`** **`state_map` value**, :class:`ResidualEngine` **appends** a matching JSON DSL step to **`derived_state_chain`** at engine construction (same rules as Moju Studio’s **`enrich_fragment_from_model_audits`**). Supported catalog bridges today: **`thermal_diffusivity`** (\(\alpha = k/(\rho c_p)\)), **`mass_diffusivity`** (\(D = \mathrm{Fo}_{\text{mass}}\,L^2/t\)), **`wave_speed_from_st`** (\(c = \omega L/\mathrm{St}\)).
 
@@ -77,13 +91,13 @@ The mapping lives in **`moju/monitor/law_implied_diagnostics.py`** (`_LAW_IMPLIE
 
 | Law | Auto implied constitutive audit | Notes |
 |-----|-------------------------------|-------|
-| `fourier_conduction` | `thermal_diffusivity` | Balance \(T_t - \alpha_{\text{model}}\,T_{\text{laplacian}}\); model uses **k**, **rho**, **cp**. |
-| `fick_diffusion` | `mass_diffusivity` | Balance \(\phi_t - D_{\text{model}}\,\phi_{\text{laplacian}}\); model uses **fo_mass**, **t**, **L**. |
-| `wave_equation` | `wave_speed_from_st` | Balance \(\phi_{tt} - c_{\text{model}}^2\,\phi_{\text{laplacian}}\); model uses **omega**, **L**, **st_wave**. |
-| `advection_diffusion` | `scalar_diffusivity_from_pe` | Balance \(\phi_t + \mathbf u\!\cdot\!\nabla\phi - (\kappa_{\text{model}}/(|\mathbf u|L))\,\phi_{\text{laplacian}}\); model uses **u**, **L**, **pe**. |
-| `momentum_navier_stokes` | `dynamic_viscosity_from_re` | Vector **`Laws.momentum_navier_stokes`** with **Re** from **ρ|u|L/μ_model**. |
-| `stokes_flow` | `dynamic_viscosity_from_re` | Vector **`Laws.stokes_flow`** with **Re** from **ρ|u|L/μ_model** ( **`u`**, **ρ**, **L** may come from state if omitted from the law `state_map`). |
-| `burgers_equation` | `dynamic_viscosity_from_re` | Vector **`Laws.burgers_equation`** with **Re** from **ρ|u|L/μ_model**. |
+| `fourier_conduction` | `thermal_diffusivity` | Implied \(\alpha = T_t / T_{\text{laplacian}}\); model uses **k**, **rho**, **cp**. |
+| `fick_diffusion` | `mass_diffusivity` | Implied \(D = \phi_t / \phi_{\text{laplacian}}\); model uses **fo_mass**, **t**, **L**. |
+| `wave_equation` | `wave_speed_from_st` | Implied \(c = \sqrt{\phi_{tt}/\phi_{\text{laplacian}}}\); negative or ill-conditioned ratios become **NaN**. |
+| `advection_diffusion` | `scalar_diffusivity_from_pe` | Implied \(\kappa = (\phi_t + \mathbf u\!\cdot\!\nabla\phi)|\mathbf u|L / \phi_{\text{laplacian}}\). |
+| `momentum_navier_stokes` | `dynamic_viscosity_from_re` | Implied **μ** from least-squares projection of \(u_t + u\cdot\nabla u + \nabla p\) onto \(\nabla^2u\). |
+| `stokes_flow` | `dynamic_viscosity_from_re` | Implied **μ** from least-squares projection of \(\nabla p\) onto \(\nabla^2u\). |
+| `burgers_equation` | `dynamic_viscosity_from_re` | Implied **μ** from projected kinematic viscosity in \(u_t + u\cdot\nabla u = \nu\nabla^2u\). |
 | `momentum_incompressible_newtonian_laplacian` | `turbulent_viscous_acceleration_*` | Three auto rows: k-ω, k-ε, and Smagorinsky; **subtract** mode **`pred − implied_fn`**. |
 | `momentum_compressible_newtonian_laplacian` | `turbulent_viscous_acceleration_compressible_*` | Three auto rows: compressible k-ω, k-ε, and Smagorinsky; **subtract** mode. |
 
@@ -96,11 +110,11 @@ Laws without an entry add **no** law-linked implied rows. These gaps are intenti
 - model-context-dependent closure choice (`darcy_flow`, `brinkman_extension`),
 - laws requiring domain-specific closure/model choices not yet encoded in the constitutive registry.
 
-If you still want implied constitutive checks for unsupported laws, add explicit rows under `constitutive_audit` (for example with `implied_fn` or a custom `implied_balance_fn`).
+If you still want implied constitutive checks for unsupported laws, add explicit rows under `constitutive_audit` (for example with `implied_fn` or a custom `implied_balance_fn` for advanced balance-style diagnostics).
 
 ## Studio and dependency planning
 
-**`build_studio_auto_fragment`** prepends the same dict rows (with **`implied_balance_fn`** or **`implied_fn`** attached) and sets **`law_implied_audits: true`**.
+**`build_studio_auto_fragment`** prepends the same dict rows (with **`implied_fn`** attached) and sets **`law_implied_audits: true`**.
 
 **`apps/moju_studio/studio_dependency_planner`** uses **`effective_audit_specs_for_fragment(fragment)`** so required keys (e.g. **k**, **rho**, **cp** for Fourier) appear in preflight even though JSON exports omit callables.
 
@@ -128,4 +142,4 @@ Notes:
 
 ## Custom extensions
 
-Expert users can attach **`implied_balance_fn`** or **`implied_fn`** on manual **`constitutive_audit`** dict rows (same shapes as law-linked rows). Use **`residual_basename`** for unique log keys when reusing a `Models.*` name.
+Expert users can attach **`implied_fn`** on manual **`constitutive_audit`** dict rows (same subtract-style shape as law-linked rows). Advanced users may still attach **`implied_balance_fn`** directly to `ResidualEngine` specs for custom diagnostics, but law-linked built-ins use direct implied terms. Use **`residual_basename`** for unique log keys when reusing a `Models.*` name.

@@ -72,10 +72,10 @@ def _user_constitutive_side_labels() -> Tuple[str, str]:
 
 
 def divergence_y_quantity_label(debug_entry: Optional[Dict[str, Any]] = None) -> str:
-    """Y-axis wording for spatial line panels."""
+    """Y-axis label for constitutive quantity (``output_key``) on spatial / dissonance panels."""
     ok = (debug_entry or {}).get("output_key")
     if ok:
-        return f"Value ({ok})"
+        return str(ok)
     return "Value"
 
 
@@ -510,10 +510,73 @@ class _SpatialDivPrep(NamedTuple):
     div: np.ndarray
     xs_1d: Optional[np.ndarray]
     x_title: str
+    y_title: str
     y_qty: str
     cx: Optional[np.ndarray]
     cy: Optional[np.ndarray]
     abs_lim: float
+
+
+def _coord_axis_title(axis: str) -> str:
+    titles = {"x": "Position x", "y": "Position y", "z": "Position z", "t": "Time t"}
+    return titles.get(str(axis), f"Position {axis}")
+
+
+def _coord_vector_for_axis(bundle: Dict[str, Any], axis: str, expected_len: int) -> Optional[np.ndarray]:
+    """Best-effort coordinate vector for a named axis from spatial metadata or log coord snapshots."""
+    spatial_any = bundle.get("spatial") or {}
+    if isinstance(spatial_any, dict):
+        coords = spatial_any.get("coords") or {}
+        v = coords.get(axis) if isinstance(coords, dict) else None
+        if v is None:
+            v = spatial_any.get(axis)
+        if v is not None:
+            arr = np.asarray(v, dtype=float).ravel()
+            if arr.shape[0] == expected_len:
+                return arr
+    log = bundle.get("log") or []
+    if log and isinstance(log[-1], dict):
+        cs = log[-1].get("coord_snapshot") or {}
+        if isinstance(cs, dict) and cs.get(axis) is not None:
+            arr = np.asarray(cs.get(axis), dtype=float).ravel()
+            if arr.shape[0] == expected_len:
+                return arr
+    return None
+
+
+def _infer_2d_divergence_axes(bundle: Dict[str, Any], shape: Tuple[int, int]) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], str, str]:
+    """Infer heatmap x/y coordinate vectors and labels from the reduced array shape."""
+    n_rows, n_cols = int(shape[0]), int(shape[1])
+    hint = str(bundle.get("spatial_coord_hint") or "").strip().lower()
+
+    x_order: List[str] = []
+    if hint in ("x", "y", "z", "t"):
+        x_order.append(hint)
+    for axis in ("x", "y", "z", "t"):
+        if axis not in x_order:
+            x_order.append(axis)
+
+    x_axis = "x"
+    cx: Optional[np.ndarray] = None
+    for axis in x_order:
+        cx = _coord_vector_for_axis(bundle, axis, n_cols)
+        if cx is not None:
+            x_axis = axis
+            break
+
+    y_order = ["y", "z", "t", "x"]
+    if x_axis in y_order:
+        y_order.remove(x_axis)
+        y_order.append(x_axis)
+    cy: Optional[np.ndarray] = None
+    y_axis = "y"
+    for axis in y_order:
+        cy = _coord_vector_for_axis(bundle, axis, n_rows)
+        if cy is not None:
+            y_axis = axis
+            break
+
+    return cx, cy, _coord_axis_title(x_axis), _coord_axis_title(y_axis)
 
 
 def _prepare_spatial_divergence(
@@ -565,6 +628,7 @@ def _prepare_spatial_divergence(
             div=div,
             xs_1d=np.asarray(xs, dtype=float),
             x_title=x_title,
+            y_title="Normalised divergence",
             y_qty=y_qty,
             cx=None,
             cy=None,
@@ -583,11 +647,7 @@ def _prepare_spatial_divergence(
     if not np.isfinite(abs_lim) or abs_lim == 0.0:
         abs_lim = 1.0
 
-    coords = bundle.get("spatial") or {}
-    cx = coords.get("coords", {}).get("x") if isinstance(coords, dict) else None
-    cy = coords.get("coords", {}).get("y") if isinstance(coords, dict) else None
-    cx = np.asarray(cx) if cx is not None and np.asarray(cx).shape[0] == a.shape[1] else None
-    cy = np.asarray(cy) if cy is not None and np.asarray(cy).shape[0] == a.shape[0] else None
+    cx, cy, x_title, y_title = _infer_2d_divergence_axes(bundle, a.shape)
 
     return _SpatialDivPrep(
         basename=bn,
@@ -598,7 +658,8 @@ def _prepare_spatial_divergence(
         b=b,
         div=div,
         xs_1d=None,
-        x_title="",
+        x_title=x_title,
+        y_title=y_title,
         y_qty=y_qty,
         cx=cx,
         cy=cy,
@@ -660,8 +721,8 @@ def build_spatial_normalized_divergence_figure(
             showscale=True,
         )
     )
-    fig.update_xaxes(title_text="Position x", **themed_axis_style(theme, show_grid=False, zero_line=False))
-    fig.update_yaxes(title_text="Position y", **themed_axis_style(theme, show_grid=False, zero_line=False))
+    fig.update_xaxes(title_text=pre.x_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
+    fig.update_yaxes(title_text=pre.y_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
     return apply_theme(fig, theme, title=title or f"{pretty_residual_key(pre.basename)} (divergence)", height=height or t.layout.card_height)
 
 
@@ -784,8 +845,8 @@ def build_spatial_divergence_panel(
         col=3,
     )
     for col in (1, 2, 3):
-        fig.update_xaxes(row=1, col=col, title_text="Position x", **themed_axis_style(theme, show_grid=False, zero_line=False))
-        fig.update_yaxes(row=1, col=col, title_text="Position y", **themed_axis_style(theme, show_grid=False, zero_line=False))
+        fig.update_xaxes(row=1, col=col, title_text=pre.x_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
+        fig.update_yaxes(row=1, col=col, title_text=pre.y_title, **themed_axis_style(theme, show_grid=False, zero_line=False))
     return apply_theme(fig, theme, title=title or f"{pretty_residual_key(bn)} (divergence)", height=height or t.layout.card_height)
 
 

@@ -162,6 +162,44 @@ def test_spatial_normalized_only_single_trace_2d() -> None:
     assert fig.data[0].type == "heatmap"
 
 
+def test_spatial_normalized_heatmap_uses_time_axis_label() -> None:
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import build_spatial_normalized_divergence_figure
+
+    nt, nx = 4, 5
+    pred = np.ones((nt, nx))
+    implied = pred * 1.1
+    bundle = {
+        "log": [
+            {
+                "coord_snapshot": {
+                    "t": list(np.linspace(0.0, 1.0, nt)),
+                    "x": list(np.linspace(0.0, 2.0, nx)),
+                },
+            }
+        ],
+        "plot_keys": ["constitutive/c/law_x/implied_delta"],
+        "r_norm_mat": [[0.1]],
+        "spatial_coord_hint": "x",
+        "closure_debug": {
+            "c/law_x": {
+                "pred": pred,
+                "implied": implied,
+                "raw": pred - implied,
+                "scale_a": None,
+                "scale_b": None,
+                "ref": None,
+                "mode": "subtract",
+                "output_key": "alpha",
+            }
+        },
+    }
+    fig = build_spatial_normalized_divergence_figure(bundle)
+    assert fig.data[0].type == "heatmap"
+    assert fig.layout.xaxis.title.text == "Position x"
+    assert fig.layout.yaxis.title.text == "Time t"
+
+
 def test_spatial_normalized_only_single_trace_1d() -> None:
     pytest.importorskip("plotly")
     from moju.monitor.visualize_constitutive import build_spatial_normalized_divergence_figure
@@ -193,6 +231,7 @@ def test_prepare_mi_vs_x_embed_2d_balance() -> None:
     assert t0.line.dash == "dash"
     assert t0.line.color == MOJU_LIGHT.palette.adm_low
     assert t1.line.color == MOJU_LIGHT.palette.cat_constitutive
+    assert emb["y_title"] == "alpha"
     assert len(t0.x) == len(t0.y) == len(t1.y)
     xs = list(t0.x)
     assert xs == sorted(xs) or len(xs) <= 1
@@ -210,6 +249,7 @@ def test_prepare_mi_vs_x_embed_1d_subtract() -> None:
     assert emb["traces"][0].line.dash == "dash"
     assert emb["traces"][0].line.color == MOJU_LIGHT.palette.adm_low
     assert emb["traces"][1].line.color == MOJU_LIGHT.palette.cat_constitutive
+    assert emb["y_title"] == "rho"
     n = 64
     assert len(emb["traces"][0].x) == n
 

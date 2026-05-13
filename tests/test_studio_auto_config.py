@@ -80,7 +80,8 @@ def test_fourier_law_linked_implied_no_chain_fields():
     ca = [s for s in d["constitutive_audit"] if s.get("name") == "thermal_diffusivity"]
     assert len(ca) == 1
     assert "law_fourier_conduction" in ca[0].get("residual_basename", "")
-    assert ca[0].get("implied_balance_fn") is not None
+    assert ca[0].get("implied_fn") is not None
+    assert ca[0].get("implied_balance_fn") is None
     assert "predicted_spatial" not in ca[0]
 
 
