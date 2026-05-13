@@ -19,11 +19,7 @@ from moju.monitor.visualize_labels import (
     pretty_category_name,
     truncate_display_label,
 )
-from moju.monitor.visualize_constitutive import (
-    build_constitutive_divergence_card,
-    infer_divergence_abscissa,
-    primary_closure_debug_field_length,
-)
+from moju.monitor.visualize_constitutive import prepare_monitor_closure_divergence_embed
 from moju.monitor.visualize_theme import MOJU_LIGHT, apply_theme, get_theme
 
 R_NORM_LOG_EPS = 1e-12
@@ -870,7 +866,6 @@ def _monitor_flat_subplot_titles(
 
 _MONITOR_WIDE_ROW_PANEL_TITLES: Dict[str, str] = {
     "state": "State snapshot (predicted)",
-    "constitutive_divergence": "Constitutive divergence (Model / Implied / normalized Δ)",
 }
 
 
@@ -904,6 +899,37 @@ def _add_monitor_centered_threecol_title(
     xref_hi, _ = _plotly_xy_axis_ref_strings_for_subplot(fig, row, 3)
     x0, _ = _monitor_axis_domain(fig, axis_kind="x", axis_ref=xref_lo)
     _, x1 = _monitor_axis_domain(fig, axis_kind="x", axis_ref=xref_hi)
+    xc = 0.5 * (x0 + x1)
+    _, y_top = _monitor_axis_domain(fig, axis_kind="y", axis_ref=yref_anchor)
+    fs = T["font_stack"]
+    fsize = 12 if compact else 13
+    pad = 0.011 if compact else 0.012
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=xc,
+        y=min(float(y_top) + pad, 1.0),
+        text=title,
+        showarrow=False,
+        xanchor="center",
+        yanchor="bottom",
+        font=dict(size=fsize, color=font_color, family=fs),
+    )
+
+
+def _add_monitor_single_col_heading(
+    fig: Any,
+    row: int,
+    col: int,
+    font_color: str,
+    *,
+    title: str,
+    compact: bool,
+) -> None:
+    """Title centered above one subplot column (narrow band — avoids overlapping empty neighbours)."""
+    T = _ENTERPRISE_THEME
+    xref_m, yref_anchor = _plotly_xy_axis_ref_strings_for_subplot(fig, row, col)
+    x0, x1 = _monitor_axis_domain(fig, axis_kind="x", axis_ref=xref_m)
     xc = 0.5 * (x0 + x1)
     _, y_top = _monitor_axis_domain(fig, axis_kind="y", axis_ref=yref_anchor)
     fs = T["font_stack"]
@@ -1175,11 +1201,11 @@ def _build_plotly_monitor_figure_single(
     div_legacy_train = 0.14
 
     _div_row_spec: List[Any] = [
-        {"type": "heatmap"},
-        {"type": "heatmap"},
-        {"type": "heatmap"},
+        {"type": "xy"},
         None,
         None,
+        None,
+        {"type": "xy"},
         None,
         None,
         None,
@@ -1796,51 +1822,77 @@ def _build_plotly_monitor_figure_single(
                 )
 
     if has_cd and cd_row is not None:
-        div_fig = build_constitutive_divergence_card(bundle, mode="spatial", title=None)
-        traces = list(div_fig.data)
-        if len(traces) >= 3:
-            for j in range(3):
-                fig.add_trace(traces[j], row=cd_row, col=j + 1)
-        elif traces:
-            for j, tr in enumerate(traces):
-                if j < 3:
-                    fig.add_trace(tr, row=cd_row, col=j + 1)
+        prefer_last_t = bool(bundle.get("spatial_prefer_last_t", True))
+        emb = prepare_monitor_closure_divergence_embed(bundle, prefer_last_t=prefer_last_t)
+        if emb and emb.get("left_traces"):
+            for tr in emb["left_traces"]:
+                fig.add_trace(tr, row=cd_row, col=1)
+            for tr in emb["right_traces"]:
+                fig.add_trace(tr, row=cd_row, col=5)
+            xr_kw = emb.get("scatter_xrange") or {}
+            xrng_list = xr_kw.get("range")
+            lk = str(emb.get("left_kind") or "")
+            if lk == "heatmap":
+                fig.update_xaxes(title_text="Position x", row=cd_row, col=1, automargin=True)
+                fig.update_yaxes(title_text="Position y", row=cd_row, col=1, automargin=True)
+            elif lk == "scatter":
+                fig.update_xaxes(
+                    title_text=emb.get("line_x_title") or "Position x",
+                    row=cd_row,
+                    col=1,
+                    automargin=True,
+                )
+                fig.update_yaxes(
+                    title_text=emb.get("line_y_title_delta") or "Normalised divergence",
+                    row=cd_row,
+                    col=1,
+                    automargin=True,
+                )
+            fig.update_xaxes(
+                title_text=emb.get("line_x_title") or "Position x",
+                row=cd_row,
+                col=5,
+                automargin=True,
+            )
+            fig.update_yaxes(
+                title_text=emb.get("line_y_title_mi") or "Value",
+                row=cd_row,
+                col=5,
+                automargin=True,
+            )
+            if isinstance(xrng_list, (list, tuple)) and len(xrng_list) == 2:
+                xr = [float(xrng_list[0]), float(xrng_list[1])]
+                if math.isfinite(xr[0]) and math.isfinite(xr[1]) and xr[1] > xr[0]:
+                    fig.update_xaxes(range=xr, row=cd_row, col=1)
+                    fig.update_xaxes(range=xr, row=cd_row, col=5)
         else:
             fig.add_trace(
                 go.Scatter(
-                    x=[0.0],
+                    x=[float(mid)],
                     y=[0.0],
                     mode="text",
-                    text=["No constitutive divergence panel"],
+                    text=["No closure divergence data"],
                     showlegend=False,
                     hoverinfo="skip",
                 ),
                 row=cd_row,
-                col=2,
+                col=1,
             )
-        for col in (1, 2, 3):
-            fig.update_xaxes(automargin=True, row=cd_row, col=col)
-            fig.update_yaxes(automargin=True, row=cd_row, col=col)
-        tl0 = traces[0] if traces else None
-        tty = getattr(tl0, "type", None) if tl0 is not None else None
-        if tty == "scatter":
-            nlen_fb = primary_closure_debug_field_length(bundle)
-            xv0 = getattr(tl0, "x", None)
-            nx = len(xv0) if xv0 is not None else 0
-            try:
-                nlen_i = int(nlen_fb) if nlen_fb is not None and int(nlen_fb) > 0 else int(nx)
-            except (TypeError, ValueError):
-                nlen_i = int(nx)
-            hin = bundle.get("spatial_coord_hint")
-            _, xtit = infer_divergence_abscissa(
-                bundle, nlen_i, hint_axis=str(hin) if hin else None
+            fig.add_trace(
+                go.Scatter(
+                    x=[float(mid)],
+                    y=[0.0],
+                    mode="text",
+                    text=["—"],
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=cd_row,
+                col=5,
             )
-            for col in (1, 2, 3):
-                fig.update_xaxes(title_text=xtit, row=cd_row, col=col, automargin=True)
-        elif tty == "heatmap":
-            for col in (1, 2, 3):
-                fig.update_xaxes(title_text="Position x", row=cd_row, col=col, automargin=True)
-                fig.update_yaxes(title_text="Position y", row=cd_row, col=col, automargin=True)
+            for _c in (1, 5):
+                fig.update_xaxes(visible=False, row=cd_row, col=_c)
+                fig.update_yaxes(visible=False, row=cd_row, col=_c)
 
     # Actionable summary
     summary_lines = []
@@ -1969,11 +2021,20 @@ def _build_plotly_monitor_figure_single(
             compact=compact,
         )
     if cd_row is not None:
-        _add_monitor_centered_threecol_title(
+        _add_monitor_single_col_heading(
             fig,
             cd_row,
+            1,
             font_color,
-            title=_MONITOR_WIDE_ROW_PANEL_TITLES["constitutive_divergence"],
+            title="Normalised divergence",
+            compact=compact,
+        )
+        _add_monitor_single_col_heading(
+            fig,
+            cd_row,
+            5,
+            font_color,
+            title="Model / Implied vs x",
             compact=compact,
         )
     apply_theme(

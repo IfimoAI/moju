@@ -39,7 +39,7 @@ passed by the caller).
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -417,6 +417,270 @@ def build_spatial_divergence_panel(
         fig.update_xaxes(row=1, col=col, title_text="Position x", **themed_axis_style(theme, show_grid=False, zero_line=False))
         fig.update_yaxes(row=1, col=col, title_text="Position y", **themed_axis_style(theme, show_grid=False, zero_line=False))
     return apply_theme(fig, theme, title=title or f"{pretty_residual_key(bn)} (divergence)", height=height or t.layout.card_height)
+
+
+def worst_div_mean_abs_row_index(div: np.ndarray) -> int:
+    """Pick row ``y_index`` maximizing mean ``|Δ_norm|`` over ``x`` (monitor line slice)."""
+    d = np.asarray(div, dtype=float)
+    if d.ndim != 2 or d.shape[0] < 1:
+        return 0
+    row_means = np.nanmean(np.abs(d), axis=1)
+    return int(np.nanargmax(row_means))
+
+
+def _coords_pred_for_closure_slice(bundle: Dict[str, Any]) -> Dict[str, Any]:
+    """Build coordinate dict compatible with ``_reduce_spatial_array`` (snapshot + spatial fallback)."""
+    pred: Dict[str, Any] = {}
+    log = bundle.get("log") or []
+    if log and isinstance(log[-1], dict):
+        cs = log[-1].get("coord_snapshot")
+        if isinstance(cs, dict):
+            for axis in ("x", "y", "z", "t"):
+                v = cs.get(axis)
+                if v is None:
+                    continue
+                pred[str(axis)] = np.asarray(v, dtype=float).ravel()
+    sp_any = bundle.get("spatial")
+    if isinstance(sp_any, dict):
+        kind = sp_any.get("kind")
+        if kind == "1d" and pred.get("x") is None and sp_any.get("x") is not None:
+            pred["x"] = np.asarray(sp_any["x"], dtype=float).ravel()
+        if kind == "2d":
+            coords_dict = sp_any.get("coords") or {}
+            cx = coords_dict.get("x") if coords_dict else sp_any.get("x")
+            cy = coords_dict.get("y") if coords_dict else sp_any.get("y")
+            if cx is not None:
+                xv = np.asarray(cx, dtype=float).ravel()
+                if pred.get("x") is None or xv.size > np.asarray(pred["x"]).size:
+                    pred["x"] = xv
+            if cy is not None and pred.get("y") is None:
+                pred["y"] = np.asarray(cy, dtype=float).ravel()
+    return pred
+
+
+def _squeeze_matching_model_implied(a: np.ndarray, b: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    aa, bb = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    while aa.ndim > 2 and aa.shape[0] == 1 and bb.ndim == aa.ndim and bb.shape[0] == 1:
+        aa = aa[0]
+        bb = bb[0]
+    return aa, bb
+
+
+def prepare_monitor_closure_divergence_embed(
+    bundle: Dict[str, Any],
+    *,
+    prefer_last_t: bool = True,
+    theme: Any = MOJU_LIGHT,
+):
+    """
+    Plotly traces for the monitor divergence row only: normalized Δ (**left**) and Model+Implied
+    vs ``x`` (**right**); last ``t`` slice when coordinates align.
+
+    Returns ``dict`` or ``None`` if nothing to embed. Keys include ``left_traces``, ``right_traces``,
+    ``left_kind`` (``\"heatmap\"`` | ``\"scatter\"``).
+    """
+    from moju.monitor.spatial_rnorm_panels import _reduce_spatial_array
+
+    import plotly.graph_objects as go
+
+    debug = _closure_debug(bundle)
+    if not debug:
+        return None
+    bn = _auto_select_basename(bundle, debug)
+    if bn is None or bn not in debug:
+        return None
+    entry = dict(debug[bn])
+    a0, b0, lab_a, lab_b = _sides_for_divergence(entry)
+    a0, b0 = _squeeze_matching_model_implied(a0, b0)
+    if a0.size == 0 or b0.size == 0 or a0.shape != b0.shape:
+        return None
+
+    ref_np: Optional[np.ndarray] = None
+    ref_raw = entry.get("ref")
+    if ref_raw is not None:
+        ref_candidate = np.asarray(ref_raw, dtype=float)
+        if ref_candidate.shape == a0.shape:
+            ref_np = ref_candidate
+
+    coords_pred = _coords_pred_for_closure_slice(bundle)
+
+    try:
+        a_red = np.asarray(_reduce_spatial_array(a0, coords_pred, prefer_last_t=prefer_last_t), dtype=float)
+        b_red = np.asarray(_reduce_spatial_array(b0, coords_pred, prefer_last_t=prefer_last_t), dtype=float)
+        ref_red: Optional[np.ndarray] = None
+        if ref_np is not None and ref_np.size > 0:
+            ref_try = np.asarray(_reduce_spatial_array(ref_np, coords_pred, prefer_last_t=prefer_last_t), dtype=float)
+            if ref_try.shape == a_red.shape:
+                ref_red = ref_try
+    except (TypeError, ValueError):
+        return None
+
+    if a_red.ndim == 0 or b_red.ndim == 0 or a_red.shape != b_red.shape:
+        return None
+
+    hint_ax = bundle.get("spatial_coord_hint")
+
+    div = _normalized_divergence(
+        a_red,
+        b_red,
+        ref=ref_red if ref_red is not None else None,
+    )
+
+    line_y_qty = divergence_y_quantity_label(entry)
+    t = get_theme(theme)
+
+    out: Dict[str, Any] = {"debug_entry": entry, "left_kind": "", "left_traces": [], "right_traces": []}
+
+    def _fill_scatter_from_1d(xs: np.ndarray, x_lab: str) -> bool:
+        d2 = np.asarray(div, dtype=float)
+        aa = np.asarray(a_red, dtype=float)
+        bb = np.asarray(b_red, dtype=float)
+        if d2.ndim != 1 or aa.ndim != 1 or bb.ndim != 1:
+            return False
+        nx = int(xs.shape[0])
+        if d2.shape[0] != nx or aa.shape[0] != nx or bb.shape[0] != nx:
+            return False
+        lo, hi = float(np.nanmin(xs)), float(np.nanmax(xs))
+        xrange_kw: Dict[str, Any] = dict(range=[lo, hi]) if np.isfinite(lo) and np.isfinite(hi) and hi > lo else {}
+        out["left_traces"] = [
+            go.Scatter(
+                x=np.asarray(xs, dtype=float),
+                y=d2,
+                mode="lines",
+                line=dict(color=t.palette.adm_low, width=2),
+                name="Normalised Δ",
+                showlegend=False,
+            )
+        ]
+        out["right_traces"] = [
+            go.Scatter(
+                x=np.asarray(xs, dtype=float),
+                y=aa,
+                mode="lines",
+                line=dict(color=t.palette.line_primary, width=2),
+                name=lab_a,
+                showlegend=False,
+                hovertemplate=f"%{{x:.4g}}<br>{lab_a}=%{{y:.4g}}<extra></extra>",
+            ),
+            go.Scatter(
+                x=np.asarray(xs, dtype=float),
+                y=bb,
+                mode="lines",
+                line=dict(color=t.palette.cat_constitutive, width=2),
+                name=lab_b,
+                showlegend=False,
+                hovertemplate=f"%{{x:.4g}}<br>{lab_b}=%{{y:.4g}}<extra></extra>",
+            ),
+        ]
+        out["left_kind"] = "scatter"
+        out["line_x_title"] = x_lab
+        out["line_y_title_delta"] = "Normalised divergence"
+        out["line_y_title_mi"] = line_y_qty
+        out["scatter_xrange"] = xrange_kw
+        return True
+
+    if np.asarray(div).ndim == 1:
+        n = int(np.asarray(div).shape[0])
+        xs, x_lab = infer_divergence_abscissa(bundle, n, hint_axis=str(hint_ax) if hint_ax else None)
+        xv = np.asarray(xs, dtype=float).ravel()
+        if xv.shape[0] == n:
+            if _fill_scatter_from_1d(xv, x_lab):
+                return out
+        if _fill_scatter_from_1d(np.arange(n, dtype=float), x_lab):
+            return out
+        return None
+
+    d2 = np.asarray(div, dtype=float)
+    if d2.ndim != 2:
+        return None
+
+    coords = bundle.get("spatial")
+    coords = coords if isinstance(coords, dict) else {}
+    cxx: Optional[np.ndarray] = None
+    cyy: Optional[np.ndarray] = None
+    cds_raw = coords.get("coords") or {}
+    xv0 = cds_raw.get("x") if cds_raw else coords.get("x")
+    yv0 = cds_raw.get("y") if cds_raw else coords.get("y")
+    if xv0 is not None:
+        xv = np.asarray(xv0, dtype=float).ravel()
+        if xv.size == d2.shape[1]:
+            cxx = xv
+    if yv0 is not None:
+        yvv = np.asarray(yv0, dtype=float).ravel()
+        if yvv.size == d2.shape[0]:
+            cyy = yvv
+    if cxx is None and coords_pred.get("x") is not None:
+        px = np.asarray(coords_pred["x"], dtype=float).ravel()
+        if px.size == d2.shape[1]:
+            cxx = px
+    if cyy is None and coords_pred.get("y") is not None:
+        py = np.asarray(coords_pred["y"], dtype=float).ravel()
+        if py.size == d2.shape[0]:
+            cyy = py
+    nx, ny = d2.shape[1], d2.shape[0]
+    if cxx is None:
+        cxx_infer, _ = infer_divergence_abscissa(bundle, nx, hint_axis=str(hint_ax) if hint_ax else None)
+        cxx = np.asarray(cxx_infer, dtype=float).ravel()
+        if cxx.size != nx:
+            cxx = np.linspace(0.0, 1.0, nx, dtype=float)
+    if cyy is None:
+        cyy = np.linspace(0.0, 1.0, ny, dtype=float)
+
+    abs_lim = float(np.nanpercentile(np.abs(d2), 95)) if d2.size else 1.0
+    if not np.isfinite(abs_lim) or abs_lim == 0.0:
+        abs_lim = 1.0
+    out["left_traces"] = [
+        go.Heatmap(
+            z=d2,
+            x=np.asarray(cxx, dtype=float),
+            y=np.asarray(cyy, dtype=float),
+            colorscale=t.colorscales.divergence,
+            zmid=0,
+            zmin=-abs_lim,
+            zmax=abs_lim,
+            colorbar=themed_colorbar(theme, title="Δ_norm"),
+            hovertemplate="x=%{x:.3g}<br>y=%{y:.3g}<br>Δ=%{z:.3g}<extra></extra>",
+        )
+    ]
+    out["left_kind"] = "heatmap"
+
+    y_ix = worst_div_mean_abs_row_index(d2)
+    y_pick = float(np.asarray(cyy[y_ix]))
+    xm = np.asarray(np.asarray(a_red, dtype=float)[y_ix], dtype=float).ravel()
+    xi = np.asarray(np.asarray(b_red, dtype=float)[y_ix], dtype=float).ravel()
+    x_line = np.asarray(cxx, dtype=float).ravel()
+    if xm.size != x_line.size or xi.size != x_line.size:
+        return None
+    lo, hi = float(np.nanmin(x_line)), float(np.nanmax(x_line))
+    xrange_kw: Dict[str, Any] = dict(range=[lo, hi]) if np.isfinite(lo) and np.isfinite(hi) and hi > lo else {}
+
+    stripe_note = "(final t, worst |Δ| stripe)" if prefer_last_t else "(worst |Δ| stripe)"
+    out["right_traces"] = [
+        go.Scatter(
+            x=x_line,
+            y=xm,
+            mode="lines",
+            line=dict(color=t.palette.line_primary, width=2),
+            showlegend=False,
+            customdata=np.full(x_line.shape, y_pick),
+            hovertemplate=f"y*=%{{customdata:.4g}} {stripe_note}<br>%{{x:.4g}}<br>{lab_a}=%{{y:.4g}}<extra></extra>",
+        ),
+        go.Scatter(
+            x=x_line,
+            y=xi,
+            mode="lines",
+            line=dict(color=t.palette.cat_constitutive, width=2),
+            showlegend=False,
+            customdata=np.full(x_line.shape, y_pick),
+            hovertemplate=f"y*=%{{customdata:.4g}} {stripe_note}<br>%{{x:.4g}}<br>{lab_b}=%{{y:.4g}}<extra></extra>",
+        ),
+    ]
+    out["stripe_y_value"] = y_pick
+    out["stripe_row_index"] = y_ix
+    out["line_x_title"] = _spatial_position_axis_title(coords)
+    out["line_y_title_mi"] = line_y_qty
+    out["scatter_xrange"] = xrange_kw
+    return out
 
 
 def build_scatter_divergence_panel(
@@ -910,5 +1174,7 @@ __all__ = [
     "divergence_y_quantity_label",
     "infer_divergence_abscissa",
     "list_constitutive_basenames",
+    "prepare_monitor_closure_divergence_embed",
     "primary_closure_debug_field_length",
+    "worst_div_mean_abs_row_index",
 ]

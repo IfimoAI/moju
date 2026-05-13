@@ -877,6 +877,7 @@ def _build_visualize_bundle(
     residuals: Optional[Dict[str, Any]] = None,
     spatial_coord_hint: Optional[str] = None,
     state_field_snapshots: Optional[List[Dict[str, Any]]] = None,
+    spatial_prefer_last_t: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """
     Shared arrays and metadata for :func:`visualize` (Plotly).
@@ -985,6 +986,7 @@ def _build_visualize_bundle(
         "residuals": residuals,
         "spatial_coord_hint": spatial_coord_hint,
         "state_field_snapshots": list(state_field_snapshots) if state_field_snapshots else None,
+        "spatial_prefer_last_t": bool(spatial_prefer_last_t),
     }
 
 
@@ -1209,6 +1211,7 @@ def build_monitor_visualize_bundle(
         residuals=eff_residuals,
         spatial_coord_hint=str(spatial_coord_key),
         state_field_snapshots=state_snaps,
+        spatial_prefer_last_t=spatial_prefer_last_t,
     )
 
 
@@ -1465,6 +1468,7 @@ def visualize(
         residuals=eff_residuals,
         spatial_coord_hint=str(spatial_coord_key),
         state_field_snapshots=state_vis_snaps,
+        spatial_prefer_last_t=spatial_prefer_last_t,
     )
     if bundle is None:
         return None
