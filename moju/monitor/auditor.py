@@ -1478,16 +1478,21 @@ def visualize(
         return None
 
 
-def _coord_snapshot_from_merged(merged: Mapping[str, Any]) -> Dict[str, List[float]]:
+def _coord_snapshot_from_merged(merged: Mapping[str, Any]) -> Dict[str, Any]:
     """
     Extract 1D ``x`` / ``y`` / ``z`` / ``t`` vectors from built state for JSON-safe log storage.
 
     Used for :attr:`ResidualEngine.log` ``coord_snapshot`` so :func:`visualize` can build
     position heatmaps when ``state_pred`` is omitted but the last log step recorded coords.
+
+    When ``x`` and ``t`` together form a flattened ``ij``-indexing meshgrid
+    (``n_t`` blocks of ``n_x`` repeated x values), the unique axis vectors are stored as
+    ``x_grid``, ``t_grid``, and ``grid_shape = [n_t, n_x]`` so visualization functions can
+    reconstruct the 2-D layout.
     """
     import numpy as np
 
-    out: Dict[str, List[float]] = {}
+    out: Dict[str, Any] = {}
     for key in ("x", "y", "z", "t"):
         if key not in merged:
             continue
@@ -1501,6 +1506,27 @@ def _coord_snapshot_from_merged(merged: Mapping[str, Any]) -> Dict[str, List[flo
         if arr.size == 0:
             continue
         out[key] = [float(v) for v in arr.tolist()]
+
+    # Detect flattened ij-meshgrid structure over (t, x) and store unique grid axes.
+    if "x" in out and "t" in out:
+        x_raw = np.array(out["x"], dtype=float)
+        t_raw = np.array(out["t"], dtype=float)
+        n = x_raw.size
+        if n == t_raw.size and n > 1:
+            x_uniq = np.unique(x_raw)
+            t_uniq = np.unique(t_raw)
+            nx, nt = int(x_uniq.size), int(t_uniq.size)
+            if nx > 1 and nt > 1 and nx * nt == n:
+                try:
+                    t_blk = t_raw.reshape(nt, nx)
+                    x_blk = x_raw.reshape(nt, nx)
+                    if np.allclose(t_blk, t_uniq[:, None]) and np.allclose(x_blk, x_uniq[None, :]):
+                        out["x_grid"] = [float(v) for v in x_uniq.tolist()]
+                        out["t_grid"] = [float(v) for v in t_uniq.tolist()]
+                        out["grid_shape"] = [nt, nx]
+                except (ValueError, TypeError):
+                    pass
+
     return out
 
 

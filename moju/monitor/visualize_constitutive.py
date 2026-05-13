@@ -321,7 +321,12 @@ def _coords_for_points(
 
 
 def _closure_coords_for_reduce(bundle: Dict[str, Any]) -> Dict[str, Any]:
-    """Coordinate dict for :func:`~moju.monitor.spatial_rnorm_panels._reduce_spatial_array` (snapshot + spatial)."""
+    """Coordinate dict for :func:`~moju.monitor.spatial_rnorm_panels._reduce_spatial_array` (snapshot + spatial).
+
+    When the log snapshot contains ``t_grid`` (unique time axis from a flattened meshgrid),
+    that vector is used as ``pred["t"]`` so :func:`_reduce_spatial_array` can correctly
+    identify and slice the time dimension after data has been reshaped to ``(n_t, n_x)``.
+    """
     pred: Dict[str, Any] = {}
     log = bundle.get("log") or []
     if log and isinstance(log[-1], dict):
@@ -332,6 +337,11 @@ def _closure_coords_for_reduce(bundle: Dict[str, Any]) -> Dict[str, Any]:
                 if v is None:
                     continue
                 pred[str(axis)] = np.asarray(v, dtype=float).ravel()
+            # Override flattened t with the unique t_grid vector when available so that
+            # _reduce_spatial_array can match shape[0] of a reshaped (n_t, n_x) array.
+            t_grid = cs.get("t_grid")
+            if t_grid is not None:
+                pred["t"] = np.asarray(t_grid, dtype=float).ravel()
     sp_any = bundle.get("spatial")
     if isinstance(sp_any, dict):
         kind = sp_any.get("kind")
@@ -422,6 +432,17 @@ def prepare_constitutive_model_implied_vs_x_embed(
             a_full, b_full = np.broadcast_arrays(a_full, b_full)
         except ValueError:
             return None
+
+    # Reshape flattened meshgrid data (n_t*n_x,) → (n_t, n_x) so _reduce_spatial_array
+    # can take the last-t slice and produce a clean 1-D spatial profile.
+    cs_last = ((bundle.get("log") or [{}])[-1] or {}).get("coord_snapshot") or {}
+    gs = cs_last.get("grid_shape")
+    if a_full.ndim == 1 and gs and int(gs[0]) * int(gs[1]) == a_full.size:
+        nt, nx = int(gs[0]), int(gs[1])
+        a_full = a_full.reshape(nt, nx)
+        b_full = b_full.reshape(nt, nx)
+        if ref_arr is not None and ref_arr.size == nt * nx:
+            ref_arr = ref_arr.reshape(nt, nx)
 
     coords_pred = _closure_coords_for_reduce(bundle)
     try:
@@ -609,10 +630,18 @@ def _coord_vector_for_axis(bundle: Dict[str, Any], axis: str, expected_len: int)
     log = bundle.get("log") or []
     if log and isinstance(log[-1], dict):
         cs = log[-1].get("coord_snapshot") or {}
-        if isinstance(cs, dict) and cs.get(axis) is not None:
-            arr = np.asarray(cs.get(axis), dtype=float).ravel()
-            if arr.shape[0] == expected_len:
-                return arr
+        if isinstance(cs, dict):
+            # Prefer unique grid axis vector (from meshgrid detection) over raw flattened coords.
+            grid_key = axis + "_grid"
+            v_grid = cs.get(grid_key)
+            if v_grid is not None:
+                arr = np.asarray(v_grid, dtype=float).ravel()
+                if arr.shape[0] == expected_len:
+                    return arr
+            if cs.get(axis) is not None:
+                arr = np.asarray(cs.get(axis), dtype=float).ravel()
+                if arr.shape[0] == expected_len:
+                    return arr
     return None
 
 
@@ -688,6 +717,17 @@ def _prepare_spatial_divergence(
         b = b[0]
     y_qty = divergence_y_quantity_label(entry)
     term_label = constitutive_term_label(entry, bn)
+
+    # Reshape flattened meshgrid data (n_t*n_x,) → (n_t, n_x) so the heatmap path is taken.
+    if a.ndim == 1:
+        cs_last = ((bundle.get("log") or [{}])[-1] or {}).get("coord_snapshot") or {}
+        gs = cs_last.get("grid_shape")
+        if gs and int(gs[0]) * int(gs[1]) == a.size:
+            nt, nx = int(gs[0]), int(gs[1])
+            a = a.reshape(nt, nx)
+            b = b.reshape(nt, nx)
+            if ref_arr is not None and ref_arr.size == nt * nx:
+                ref_arr = ref_arr.reshape(nt, nx)
 
     if a.ndim == 1:
         div = _normalized_divergence(
