@@ -407,6 +407,93 @@ def _x_abscissa_0_to_L(cx: np.ndarray, bundle: Dict[str, Any]) -> Tuple[np.ndarr
     return x_plot, float(L), "Position x"
 
 
+def _build_dissonance_band_traces(
+    x_plot: np.ndarray,
+    a_1d: np.ndarray,
+    theme: Any,
+) -> Tuple[List[Any], List[float]]:
+    """Build acceptability-band fill traces and y-axis range for the dissonance subplot.
+
+    ``a_1d`` must be the **final 1D plotted slice** (post-reduction / worst-row
+    extraction), never the pre-reduction full array.
+
+    Band half-widths are spatially varying, derived from:
+
+        δ(x) = |m(x) − mref(x)| / (|mref(x)| + ε) × 100
+
+    where ``mref(x) = a(x)`` (model value) is the reference/normaliser and
+    ``ε = _DIVERGENCE_EPS``.  The half-width at threshold p% is therefore:
+
+        w_p(x) = (p / 100) × (|a(x)| + ε)
+
+    Returns
+    -------
+    band_traces : list[go.Scatter]
+        Five fill traces ordered for bottom-to-top rendering:
+        alarm lower, alarm upper, warning lower, warning upper, acceptable.
+        All have ``showlegend=False`` and blank names so they are invisible to
+        ``_add_dissonance_inline_legend``.
+    y_range : [float, float]
+        ``[y_lo, y_hi]`` covering at least the ±6 % alarm envelope of ``a``.
+        Callers should expand this further to also encompass the implied ``b``.
+    """
+    import plotly.graph_objects as go
+
+    t = get_theme(theme)
+    a = np.asarray(a_1d, dtype=float).ravel()
+    xs = np.asarray(x_plot, dtype=float).ravel()
+
+    # Element-wise half-widths: model value a(x) is the reference/normaliser
+    w1 = 0.01 * (np.abs(a) + _DIVERGENCE_EPS)   # ±1%  acceptable
+    w5 = 0.05 * (np.abs(a) + _DIVERGENCE_EPS)   # ±5%  warning boundary
+    w6 = 0.06 * (np.abs(a) + _DIVERGENCE_EPS)   # ±6%  alarm / axis floor
+
+    xs_rev = xs[::-1]
+
+    def _poly(y_hi: np.ndarray, y_lo: np.ndarray) -> Tuple[List[float], List[float]]:
+        return (
+            [*xs.tolist(), *xs_rev.tolist()],
+            [*y_hi.tolist(), *y_lo[::-1].tolist()],
+        )
+
+    # Colors as rgba strings for semi-transparent fills
+    c_ok = "rgba(16,185,129,0.15)"     # adm_high emerald
+    c_warn = "rgba(245,158,11,0.20)"   # adm_med  amber
+    c_alarm = "rgba(239,68,68,0.18)"   # adm_low  red
+
+    def _fill(px: List[float], py: List[float], color: str) -> Any:
+        return go.Scatter(
+            x=px,
+            y=py,
+            fill="toself",
+            fillcolor=color,
+            line=dict(width=0),
+            mode="lines",
+            name="",
+            showlegend=False,
+            hoverinfo="skip",
+        )
+
+    band_traces = [
+        _fill(*_poly(a - w5, a - w6), c_alarm),   # alarm lower
+        _fill(*_poly(a + w6, a + w5), c_alarm),   # alarm upper
+        _fill(*_poly(a - w1, a - w5), c_warn),    # warning lower
+        _fill(*_poly(a + w5, a + w1), c_warn),    # warning upper
+        _fill(*_poly(a + w1, a - w1), c_ok),      # acceptable centre
+    ]
+
+    # Y-axis range: cover the full ±6 % alarm envelope of the model curve
+    y_lo = float(np.nanmin(a - w6))
+    y_hi = float(np.nanmax(a + w6))
+    a_mean = float(np.nanmean(a)) if a.size > 0 else 0.0
+    margin = (y_hi - y_lo) * 0.05
+    if margin == 0.0:
+        margin = abs(a_mean) * 0.07 or 0.1
+    y_range = [y_lo - margin, y_hi + margin]
+
+    return band_traces, y_range
+
+
 def prepare_constitutive_model_implied_vs_x_embed(
     bundle: Dict[str, Any],
     residual_basename: Optional[str] = None,
@@ -489,12 +576,18 @@ def prepare_constitutive_model_implied_vs_x_embed(
             xs = np.arange(n, dtype=float)
             x_title_use = "Sample index"
         x_plot, _L, x_ax_title = _x_abscissa_0_to_L(xs, bundle)
-        traces = [
+        band_traces, y_range = _build_dissonance_band_traces(x_plot, a, t)
+        # Expand y_range to also cover the implied curve b
+        y_range = [
+            min(y_range[0], float(np.nanmin(b))),
+            max(y_range[1], float(np.nanmax(b))),
+        ]
+        line_traces = [
             go.Scatter(
                 x=x_plot,
                 y=a,
                 mode="lines",
-                line=dict(color=t.palette.adm_low, dash="dash", width=2),
+                line=dict(color=t.palette.line_primary, dash="dash", width=2.5),
                 name=label_model,
                 showlegend=True,
             ),
@@ -502,14 +595,14 @@ def prepare_constitutive_model_implied_vs_x_embed(
                 x=x_plot,
                 y=b,
                 mode="lines",
-                line=dict(color=t.palette.cat_constitutive, width=2),
+                line=dict(color=t.palette.title_color, width=2.5),
                 name=label_implied,
                 showlegend=True,
             ),
         ]
         subtitle = ", ".join(note_parts) if note_parts else ""
         return {
-            "traces": traces,
+            "traces": band_traces + line_traces,
             "x_title": x_ax_title,
             "y_title": y_qty,
             "term_label": y_qty,
@@ -521,6 +614,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
             "row_note": "1-D profile",
             "is_transient_slice": is_transient_slice,
             "is_worst_slice": False,
+            "y_range": y_range,
         }
 
     if a.ndim == 2 and b.ndim == 2:
@@ -556,12 +650,18 @@ def prepare_constitutive_model_implied_vs_x_embed(
             cyy = np.asarray(cy_src, dtype=float).ravel()
             if cyy.size > y_ix:
                 cy_val = float(cyy[y_ix])
-        traces = [
+        band_traces_2d, y_range_2d = _build_dissonance_band_traces(x_plot, la, t)
+        # Expand y_range to also cover the implied curve lb
+        y_range_2d = [
+            min(y_range_2d[0], float(np.nanmin(lb))),
+            max(y_range_2d[1], float(np.nanmax(lb))),
+        ]
+        line_traces_2d = [
             go.Scatter(
                 x=x_plot,
                 y=la,
                 mode="lines",
-                line=dict(color=t.palette.adm_low, dash="dash", width=2),
+                line=dict(color=t.palette.line_primary, dash="dash", width=2.5),
                 name=label_model,
                 showlegend=True,
             ),
@@ -569,7 +669,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
                 x=x_plot,
                 y=lb,
                 mode="lines",
-                line=dict(color=t.palette.cat_constitutive, width=2),
+                line=dict(color=t.palette.title_color, width=2.5),
                 name=label_implied,
                 showlegend=True,
             ),
@@ -578,7 +678,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
         if cy_val is not None and np.isfinite(cy_val):
             row_note = f"y* ≈ {cy_val:.4g} ({row_note})"
         return {
-            "traces": traces,
+            "traces": band_traces_2d + line_traces_2d,
             "x_title": x_ax_title,
             "y_title": y_qty,
             "term_label": y_qty,
@@ -590,6 +690,7 @@ def prepare_constitutive_model_implied_vs_x_embed(
             "row_note": row_note,
             "is_transient_slice": is_transient_slice,
             "is_worst_slice": True,
+            "y_range": y_range_2d,
         }
 
     return None
