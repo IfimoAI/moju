@@ -1233,7 +1233,10 @@ class TestVisualize:
         pytest.importorskip("plotly")
         import numpy as np
 
-        log = [{"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5, "scaling/pe/x": 0.2}, "scale": {}}]
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5, "scaling/pe/x": 0.2}, "scale": {}},
+            {"index": 1, "rms": {"laws/a": 0.8, "constitutive/m/c": 0.4, "scaling/pe/x": 0.1}, "scale": {}},
+        ]
         x = np.linspace(0, 1, 8)
         spatial_law = {"x": x, "values": {"laws/a": np.ones(8) * 0.01}}
         spatial_c = {"x": x, "values": {"constitutive/m/c": np.ones(8) * 0.5}}
@@ -1256,6 +1259,13 @@ class TestVisualize:
         yax = getattr(fig.layout, yaxis_name)
         assert getattr(yax, "type", None) == "log"
         assert getattr(yax, "exponentformat", None) == "power"
+        anns = [str(getattr(a, "text", "") or "") for a in (fig.layout.annotations or [])]
+        summary = next((a for a in anns if a.startswith("Summary:")), "")
+        assert "Training trend improving" not in summary
+        assert "Training trend degrading" not in summary
+        primary = next(a for a in fig.layout.annotations if "Primary Issue:" in str(getattr(a, "text", "") or ""))
+        assert float(primary.y) > 1.0
+        assert getattr(primary, "yanchor", None) == "bottom"
         hms = [
             t
             for t in fig.data
@@ -1264,6 +1274,27 @@ class TestVisualize:
         ]
         assert len(hms) == 2
         assert all(int(t.meta.get("subplot_row", 0)) == 4 for t in hms)
+        domains = []
+        for hm in hms:
+            xref = getattr(hm, "xaxis", "x")
+            axis_name = "xaxis" if xref == "x" else f"xaxis{xref[1:]}"
+            dom = getattr(getattr(fig.layout, axis_name), "domain")
+            domains.append((float(dom[0]), float(dom[1])))
+        widths = [b - a for a, b in domains]
+        assert min(widths) > 0.38
+        assert abs(widths[0] - widths[1]) < 1e-9
+
+    def test_visualize_training_summary_keeps_training_trend_line(self):
+        pytest.importorskip("plotly")
+
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/m/c": 0.5}, "scale": {}},
+            {"index": 1, "rms": {"laws/a": 0.5, "constitutive/m/c": 0.25}, "scale": {}},
+        ]
+        fig = visualize(log, backend="plotly", mode="training", dashboard_mode="single-figure")
+        anns = [str(getattr(a, "text", "") or "") for a in (fig.layout.annotations or [])]
+        summary = next((a for a in anns if a.startswith("Summary:")), "")
+        assert "Training trend improving" in summary
 
     def test_visualize_single_figure_subplot_title_annotations_match_panels(self):
         """Explicit panel titles (merged grid + domain cells) plus spatial colorbar/hover wording."""
@@ -1407,12 +1438,12 @@ class TestVisualize:
         yaxis_title = str(getattr(getattr(dissonance_subplot.yaxis, "title", None), "text", "") or "")
         assert yaxis_title == "Thermal Diffusivity"
 
-        legend = fig.layout.legend
-        assert float(legend.x) < 1.0 and float(legend.y) < 1.0
-        x0, x1 = dissonance_subplot.xaxis.domain
-        y0, y1 = dissonance_subplot.yaxis.domain
-        assert x0 < float(legend.x) < x1
-        assert y0 < float(legend.y) < y1
+        assert fig.layout.showlegend is False
+        line_traces = [tr for tr in fig.data if getattr(tr, "name", "") in {"Model", "Implied"}]
+        assert len(line_traces) == 2
+        assert all(getattr(tr, "showlegend", None) is False for tr in line_traces)
+        ann_texts = {str(getattr(a, "text", "") or "") for a in (fig.layout.annotations or [])}
+        assert {"Model", "Implied"} <= ann_texts
 
     def test_visualize_forensic_tab_heatmap_has_data_driven_zlim(self):
         pytest.importorskip("plotly")

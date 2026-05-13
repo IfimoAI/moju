@@ -63,7 +63,7 @@ HEATMAP_COLORBAR_X_RIGHT_CAP = 0.995
 HEATMAP_COLORBAR_THICKNESS = 12
 HEATMAP_COLORBAR_XPAD = 8
 # Inset each heatmap subplot x-domain so the colorbar (paper-x anchored) sits beside the heatmap in-cell.
-HEATMAP_COLORBAR_DOMAIN_RESERVE_PAPER = 0.052
+HEATMAP_COLORBAR_DOMAIN_RESERVE_PAPER = 0.038
 HEATMAP_COLORBAR_X_DOMAIN_MIN_WIDTH = 0.12
 
 RESIDUAL_COLOR_LAWS = "#8B5CF6"  # royal purple
@@ -79,8 +79,8 @@ OVERALL_ADMISSIBILITY_TREND_LINE_COLOR = "#000000"
 LOW_ADM_COLOR = "#e67e22"  # between moderate (amber) and non-admissible (red)
 # Horizontal category-breakdown bars: fraction of category spacing (Plotly default ~0.8); higher = thicker bars, tighter vertical gaps.
 CATEGORY_BREAKDOWN_BAR_WIDTH = 0.46
-# Y (axis domain, 0=bottom 1=top): Primary Issue label inside the plot, top-anchored with a small inset from y=1.
-PRIMARY_ISSUE_ANNOTATION_Y_DOMAIN = 0.98
+# Y (axis domain, 0=bottom 1=top): Primary Issue label above the plot so it does not cover bars.
+PRIMARY_ISSUE_ANNOTATION_Y_DOMAIN = 1.08
 # KPI ``go.Indicator`` domain x-span inside each subplot cell (symmetric → centered score stack).
 KPI_INDICATOR_DOMAIN_X = (0.10, 0.90)
 
@@ -915,6 +915,53 @@ def _legend_upper_right_paper_xy_for_subplot(fig: Any, row: int, col: int) -> Tu
     return lx0 + 0.98 * (lx1 - lx0), ly0 + 0.98 * (ly1 - ly0)
 
 
+def _add_inline_trace_label(
+    fig: Any,
+    trace: Any,
+    *,
+    row: int,
+    col: int,
+    label: str,
+    yshift: int = 0,
+) -> None:
+    """Annotate the final finite point of a line trace inside its subplot."""
+    try:
+        import numpy as np
+
+        xs = np.asarray(getattr(trace, "x", []), dtype=float)
+        ys = np.asarray(getattr(trace, "y", []), dtype=float)
+    except Exception:
+        return
+    if xs.size == 0 or ys.size == 0:
+        return
+    n = min(int(xs.size), int(ys.size))
+    finite = np.flatnonzero(np.isfinite(xs[:n]) & np.isfinite(ys[:n]))
+    if finite.size == 0:
+        return
+    ix = int(finite[-1])
+    try:
+        xref, yref = _plotly_xy_axis_ref_strings_for_subplot(fig, row, col)
+    except Exception:
+        return
+    line = getattr(trace, "line", None)
+    color = getattr(line, "color", None) if line is not None else None
+    fig.add_annotation(
+        x=float(xs[ix]),
+        y=float(ys[ix]),
+        xref=xref,
+        yref=yref,
+        text=str(label),
+        showarrow=False,
+        xanchor="right",
+        yanchor="middle",
+        xshift=-6,
+        yshift=int(yshift),
+        font=dict(size=11, color=color or _ENTERPRISE_THEME["font_color"], family=_ENTERPRISE_THEME["font_stack"]),
+        bgcolor="rgba(255,255,255,0.72)",
+        borderpad=1,
+    )
+
+
 def _add_monitor_panel_title_annotations(
     fig: Any,
     flat_titles: Tuple[str, ...],
@@ -1491,7 +1538,7 @@ def _build_plotly_monitor_figure_single(
             yref=f"{cat_yaxis} domain",
             text=f"Primary Issue: {worst_label}",
             showarrow=False,
-            yanchor="top",
+            yanchor="bottom",
             align="left",
             font=dict(size=11, color=DISSONANCE_COLOR, family=T["font_stack"]),
         )
@@ -1845,10 +1892,17 @@ def _build_plotly_monitor_figure_single(
 
         emb = cd_dissonance_embed
         if emb and emb.get("traces"):
-            monitor_show_legend = True
-            apply_cd_dissonance_legend = True
-            for tr in emb["traces"]:
+            for i, tr in enumerate(emb["traces"]):
+                tr.showlegend = False
                 fig.add_trace(tr, row=cd_row, col=5)
+                _add_inline_trace_label(
+                    fig,
+                    tr,
+                    row=cd_row,
+                    col=5,
+                    label=str(getattr(tr, "name", "") or ""),
+                    yshift=10 if i == 0 else -10,
+                )
             fig.update_xaxes(
                 title_text=str(emb.get("x_title") or "Position x"),
                 row=cd_row,
@@ -1889,7 +1943,7 @@ def _build_plotly_monitor_figure_single(
             if is_high_admissibility(const_last)
             else "Constitutive inconsistency detected"
         )
-    if math.isfinite(last_ov) and math.isfinite(first_ov):
+    if not is_eval and math.isfinite(last_ov) and math.isfinite(first_ov):
         summary_lines.append("Training trend improving" if last_ov >= first_ov else "Training trend degrading")
     if show_primary_issue:
         summary_lines.append(
