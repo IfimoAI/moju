@@ -23,7 +23,20 @@ from __future__ import annotations
 
 import datetime
 import math
-from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Set, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+    Set,
+    Union,
+)
 import inspect
 
 import jax
@@ -1102,6 +1115,19 @@ def _maybe_build_spatial_panels(
     return law_out, rnorm_out
 
 
+def _effective_visualize_state_pred(
+    state_pred: Optional[Mapping[str, Any]],
+    engine: Optional[Any],
+) -> Optional[Mapping[str, Any]]:
+    """Predictor-side state for ``visualize``: explicit ``state_pred`` or injected engine fallback."""
+    if state_pred is not None:
+        return state_pred
+    if engine is None:
+        return None
+    lbs = getattr(engine, "last_built_state", None)
+    return lbs
+
+
 def build_monitor_visualize_bundle(
     log: List[Dict[str, Any]],
     keys: Optional[List[str]] = None,
@@ -1130,6 +1156,8 @@ def build_monitor_visualize_bundle(
     default False uses absolute :math:`|r|` vs position (labels match).
 
     ``engine``: when ``residuals`` is omitted, use :attr:`ResidualEngine.last_residuals` if given.
+    When ``state_pred`` is omitted, coordinate arrays and overlays use
+    :attr:`ResidualEngine.last_built_state` if available (same as :func:`visualize`).
 
     ``mode``: same as :func:`visualize` — ``training`` or ``eval``; ``test`` is a silent alias for ``eval``.
 
@@ -1139,6 +1167,7 @@ def build_monitor_visualize_bundle(
     eff_residuals = residuals
     if eff_residuals is None and engine is not None:
         eff_residuals = getattr(engine, "last_residuals", None)
+    eff_state = _effective_visualize_state_pred(state_pred, engine)
     closure_debug_sidecar: Optional[Dict[str, Dict[str, Any]]] = None
     if isinstance(eff_residuals, dict):
         cd = eff_residuals.get("closure_debug")
@@ -1149,7 +1178,7 @@ def build_monitor_visualize_bundle(
         spatial_law_panel,
         spatial_rnorm_panel,
         eff_residuals,
-        state_pred,
+        eff_state,
         r_ref,
         spatial_coord_key,
         spatial_prefer_last_t,
@@ -1162,8 +1191,8 @@ def build_monitor_visualize_bundle(
     spatial_parsed = _parse_spatial_law_panel(law_panel)
     spatial_rnorm_parsed = _parse_spatial_rnorm_panel(rnorm_panel)
     state_snaps: Optional[List[Dict[str, Any]]] = None
-    if bool(show_state_overlay) and state_pred is not None:
-        state_snaps = _extract_state_field_snapshots(state_pred, spatial_parsed)
+    if bool(show_state_overlay) and eff_state is not None:
+        state_snaps = _extract_state_field_snapshots(eff_state, spatial_parsed)
         if not state_snaps:
             state_snaps = None
     return _build_visualize_bundle(
@@ -1299,7 +1328,9 @@ def visualize(
     state_pred
         Optional state dict with coordinate arrays (``x``, optional ``y`` / ``z``, ``t``) for
         auto spatial panels. May be omitted or partial when ``log[-1]["coord_snapshot"]``
-        supplies the missing axes.
+        supplies missing axes or when passing ``engine=`` whose
+        :attr:`~ResidualEngine.last_built_state` already holds injected coordinates after
+        ``compute_residuals``.
     spatial_coord_key
         Primary 1D axis name when falling back from 3D/2D to a line slice (default ``"x"``).
     spatial_prefer_last_t
@@ -1309,11 +1340,14 @@ def visualize(
         uses absolute residual :math:`|r|` vs position.
     show_state_overlay
         When ``True``, try to add an optional **predicted-state** overlay row aligned to law
-        spatial axes (requires ``state_pred`` and compatible field layouts). Default ``False``.
+        spatial axes (needs compatible field layouts; coordinates may come from explicit
+        ``state_pred`` or from ``engine.last_built_state``). Default ``False``.
     engine
         Optional :class:`ResidualEngine` whose :attr:`~ResidualEngine.last_residuals` is used
         when ``residuals`` is omitted, so ``visualize(engine.log, engine=engine)`` can build
         spatial heatmaps using log ``coord_snapshot`` (same convenience as Moju Studio).
+        When ``state_pred`` is omitted, :attr:`~ResidualEngine.last_built_state` fills coordinates
+        and optional ``show_state_overlay`` snapshots after the last ``compute_residuals``.
     figure_title
         Optional override for the Plotly figure layout title. If omitted or blank, a mode-specific
         default is used (training vs eval). The single-figure dashboard shows this as the report
@@ -1353,8 +1387,8 @@ def visualize(
       ``{\"mode\": \"dash-tabs\", \"tabs\": {...}}`` mapping tab ids to figures (and optional
       metadata). Keys under ``tabs`` always include ``kpi``, ``admissibility``, ``forensic_heatmaps``,
       ``convergence``; when ``closure_debug`` is present, ``constitutive_divergence`` is included;
-      when non-empty predicted-state snapshots were built from ``show_state_overlay`` and ``state_pred``,
-      ``state_snapshot`` is included too.
+      when non-empty predicted-state snapshots were built from ``show_state_overlay`` and predictor
+      state (``state_pred`` or ``engine.last_built_state``), ``state_snapshot`` is included too.
     - ``visualize_layout=\"split\"``: a ``dict`` with ``\"monitor\"`` (figure or dash-tabs payload)
       and ``\"worst_keys\"`` (a separate Plotly table figure). When ``dashboard_mode=\"dash-tabs\"``,
       ``monitor`` is the dash-tabs dict and it also receives a top-level ``\"worst_keys\"`` entry
@@ -1393,12 +1427,13 @@ def visualize(
         if isinstance(cd, dict) and cd:
             closure_debug_sidecar = cd
 
+    eff_state = _effective_visualize_state_pred(state_pred, engine)
     law_panel, rnorm_panel = _maybe_build_spatial_panels(
         log,
         spatial_law_panel,
         spatial_rnorm_panel,
         eff_residuals,
-        state_pred,
+        eff_state,
         r_ref,
         spatial_coord_key,
         spatial_prefer_last_t,
@@ -1412,8 +1447,8 @@ def visualize(
     spatial_parsed = _parse_spatial_law_panel(law_panel)
     spatial_rnorm_parsed = _parse_spatial_rnorm_panel(rnorm_panel)
     state_vis_snaps: Optional[List[Dict[str, Any]]] = None
-    if bool(show_state_overlay) and state_pred is not None:
-        state_vis_snaps = _extract_state_field_snapshots(state_pred, spatial_parsed)
+    if bool(show_state_overlay) and eff_state is not None:
+        state_vis_snaps = _extract_state_field_snapshots(eff_state, spatial_parsed)
         if not state_vis_snaps:
             state_vis_snaps = None
     bundle = _build_visualize_bundle(
@@ -1465,6 +1500,38 @@ def visualize(
         return out
     except ImportError:
         return None
+
+
+def _coord_key_valid_for_snapshot(raw: Any) -> bool:
+    """Whether ``raw`` looks like a non-empty coordinate-like array for snapshots."""
+    import numpy as np
+
+    try:
+        arr = np.asarray(jax.device_get(jnp.asarray(raw)), dtype=float).ravel()
+    except (TypeError, ValueError):
+        return False
+    return arr.size > 0
+
+
+def _collocation_xyz_t(collocation: Any) -> Dict[str, Any]:
+    """Subset of ``collocation`` with keys ``x``/``y``/``z``/``t`` only (Path A spill)."""
+    keys = frozenset({"x", "y", "z", "t"})
+    if not isinstance(collocation, Mapping):
+        return {}
+    return {str(k): collocation[k] for k in keys if k in collocation}
+
+
+def _inject_missing_coord_arrays(target: MutableMapping[str, Any], source: Mapping[str, Any]) -> None:
+    """Copy coordinate arrays from ``source`` into ``target`` when missing."""
+    for k in ("x", "y", "z", "t"):
+        if k in target:
+            continue
+        if k not in source:
+            continue
+        raw = source.get(k)
+        if raw is None or not _coord_key_valid_for_snapshot(raw):
+            continue
+        target[k] = raw
 
 
 def _coord_snapshot_from_merged(merged: Mapping[str, Any]) -> Dict[str, List[float]]:
@@ -1588,11 +1655,16 @@ class ResidualEngine:
 
     Each :meth:`compute_residuals` log entry may include ``coord_snapshot``: a dict with optional
     keys ``x``, ``y``, ``z``, ``t`` (1D float lists) copied from built state when present, for
-    spatial dashboards.
+    spatial dashboards. Coordinate arrays present only in ``constants`` or Path-A ``collocation``
+    but omitted from predictor state may be injected into ``state_pred_built`` before the snapshot.
 
     :attr:`last_residuals` references the nested dict from the latest successful
     :meth:`compute_residuals` (``None`` after :meth:`clear_log`) so :func:`visualize` can run as
     ``visualize(engine.log, engine=engine)`` without a separate ``residuals=`` argument.
+
+    :attr:`last_built_state` holds a shallow copy of built predictor-side state plus injected
+    ``x``/``y``/``z``/``t`` when missing (same lifecycle as ``last_residuals``), for overlays and
+    :func:`visualize` without an explicit ``state_pred``.
     """
 
     def __init__(
@@ -1706,6 +1778,7 @@ class ResidualEngine:
         self._log: List[Dict[str, Any]] = []
         self._index = 0
         self._last_residuals: Optional[Dict[str, Any]] = None
+        self._last_built_state: Optional[Dict[str, Any]] = None
 
     @property
     def log(self) -> List[Dict[str, Any]]:
@@ -1716,6 +1789,13 @@ class ResidualEngine:
         """Nested residual dict from the latest successful :meth:`compute_residuals` (same object)."""
         return self._last_residuals
 
+    @property
+    def last_built_state(self) -> Optional[Dict[str, Any]]:
+        """Predictor-built state dict after coord injection from the latest successful step (shallow copy)."""
+        if self._last_built_state is None:
+            return None
+        return dict(self._last_built_state)
+
     def clear_log(self) -> None:
         """Remove all logged steps and reset the step counter.
 
@@ -1724,6 +1804,7 @@ class ResidualEngine:
         self._log.clear()
         self._index = 0
         self._last_residuals = None
+        self._last_built_state = None
 
     def _state_builder(
         self,
@@ -2196,6 +2277,11 @@ class ResidualEngine:
             state_ref_built_for_scale,
             to_python=log_to_python,
         )
+        # Predictor viz: inject x/y/z/t from Path-A collocation or merged constants when missing in state.
+        if isinstance(collocation, Mapping):
+            _inject_missing_coord_arrays(state_pred_built, _collocation_xyz_t(collocation))
+        _inject_missing_coord_arrays(state_pred_built, merged)
+        merged_final = {**self.constants, **state_pred_built}
         entry: Dict[str, Any] = {
             "index": self._index,
             "rms": rms_per_key,
@@ -2209,12 +2295,13 @@ class ResidualEngine:
         if unresolved_dependencies:
             entry["unresolved_dependencies"] = unresolved_dependencies
         if "coord_snapshot" not in entry:
-            cs = _coord_snapshot_from_merged(merged)
+            cs = _coord_snapshot_from_merged(merged_final)
             if cs:
                 entry["coord_snapshot"] = cs
         self._log.append(entry)
         self._index += 1
         self._last_residuals = residuals
+        self._last_built_state = dict(state_pred_built)
         return residuals
 
     def required_state_keys(

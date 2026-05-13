@@ -94,11 +94,36 @@ def infer_divergence_abscissa(
     """
     Return ``(xs, x_title)`` aligned to length ``n`` for divergence line plots.
 
-    Priority: spatial 1-D ``bundle['spatial']['x']``; then ``coord_snapshot`` axes
-    (hint axis first among x/y/z/t, then defaults); fallback index with ``Sample index``.
+    Priority: when ``hint_axis`` / ``spatial_coord_hint`` is ``"t"`` and ``coord_snapshot["t"]``
+    matches ``n``, use **Time t** (transient dashboards are not overwritten by spatial **x**);
+    spatial 1-D ``bundle["spatial"]["x"]``; then remaining ``coord_snapshot`` axes (hint first
+    among ``x``, ``y``, ``z``, ``t``, then defaults); fallback ``Sample index``.
     """
     if n <= 0:
         return np.asarray([], dtype=float), "Sample index"
+
+    eff_hint: Optional[str] = None
+    if isinstance(hint_axis, str) and hint_axis.strip():
+        eff_hint = hint_axis.strip().lower()
+    if eff_hint is None:
+        bk = bundle.get("spatial_coord_hint")
+        if isinstance(bk, str) and bk.strip():
+            eff_hint = bk.strip().lower()
+
+    cs: Any = {}
+    log = bundle.get("log") or []
+    if log and isinstance(log[-1], dict):
+        cs = log[-1].get("coord_snapshot") or {}
+
+    axes_order = ("x", "y", "z", "t")
+    coord_titles = {"x": "Position x", "y": "Position y", "z": "Position z", "t": "Time t"}
+
+    if isinstance(cs, dict) and eff_hint == "t":
+        v = cs.get("t")
+        arr = np.asarray(v, dtype=float).ravel() if v is not None else np.asarray([])
+        if arr.shape[0] == n:
+            return arr, coord_titles["t"]
+
     spatial_any = bundle.get("spatial") or {}
     if isinstance(spatial_any, dict) and spatial_any.get("kind") == "1d":
         x_sp = spatial_any.get("x")
@@ -106,25 +131,18 @@ def infer_divergence_abscissa(
             arr = np.asarray(x_sp, dtype=float).ravel()
             if arr.shape[0] == n:
                 return arr, _spatial_position_axis_title(spatial_any)
-    cs: Any = {}
-    log = bundle.get("log") or []
-    if log and isinstance(log[-1], dict):
-        cs = log[-1].get("coord_snapshot") or {}
     if isinstance(cs, dict):
-        axes_order = ("x", "y", "z", "t")
-        hinted = hint_axis.strip().lower() if isinstance(hint_axis, str) and hint_axis.strip() else None
         probe = []
-        if hinted and hinted in axes_order:
-            probe.append(hinted)
+        if eff_hint and eff_hint in axes_order:
+            probe.append(eff_hint)
         for ax in axes_order:
             if ax not in probe:
                 probe.append(ax)
-        titles = {"x": "Position x", "y": "Position y", "z": "Position z", "t": "Time t"}
         for ax in probe:
             v = cs.get(ax)
             arr = np.asarray(v, dtype=float).ravel() if v is not None else np.asarray([])
             if arr.shape[0] == n:
-                return arr, titles.get(ax, f"Position {ax}")
+                return arr, coord_titles.get(ax, f"Position {ax}")
 
     return np.arange(n, dtype=float), "Sample index"
 

@@ -232,6 +232,45 @@ class TestResidualEngineResidualDict:
         assert len(snap["x"]) == 5
         assert all(isinstance(v, float) for v in snap["x"])
 
+    def test_coord_snapshot_injects_constants_x_when_missing_from_state(self):
+        x = jnp.linspace(0.0, 1.0, 4)
+        core = ResidualEngine(
+            constants={"x": x},
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
+        )
+        core.compute_residuals({"phi_laplacian": jnp.array(1.0)})
+        snap = core.log[-1].get("coord_snapshot") or {}
+        assert "x" in snap and len(snap["x"]) == 4
+        assert core.last_built_state is not None and "x" in core.last_built_state
+
+    def test_path_a_coord_snapshot_pulls_x_from_collocation(self):
+        x = jnp.linspace(0.0, 1.0, 3)
+
+        def sb(model, params, collocation, constants):
+            xv = collocation["x"]
+            return {"phi_laplacian": jnp.ones_like(jnp.asarray(xv))}
+
+        core = ResidualEngine(
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
+            state_builder=sb,
+        )
+        core.compute_residuals(None, model=1, params=2, collocation={"x": x})
+        snap = core.log[-1].get("coord_snapshot") or {}
+        assert len(snap.get("x", [])) == 3
+        assert core.last_built_state is not None
+        assert int(jnp.asarray(core.last_built_state["x"]).ravel().shape[0]) == 3
+
+    def test_visualize_engine_last_built_state_without_explicit_state_pred(self):
+        pytest.importorskip("plotly")
+        x = jnp.linspace(0.0, 1.0, 3)
+        core = ResidualEngine(
+            constants={"x": x},
+            laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
+        )
+        core.compute_residuals({"phi_laplacian": jnp.array(1.0)})
+        fig = visualize(core.log, engine=core, dashboard_mode="single-figure")
+        assert fig is not None
+
     def test_last_residuals_set_after_compute(self):
         core = ResidualEngine(
             laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian"}}],
@@ -239,8 +278,10 @@ class TestResidualEngineResidualDict:
         state_pred = {"phi_laplacian": jnp.array(1.0)}
         r = core.compute_residuals(state_pred)
         assert core.last_residuals is r
+        assert core.last_built_state is not None
         core.clear_log()
         assert core.last_residuals is None
+        assert core.last_built_state is None
 
     def test_clear_log_resets_entries_and_index(self):
         core = ResidualEngine(

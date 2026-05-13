@@ -484,10 +484,11 @@ class TorchResidualEngine:
         export_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Full Moju audit via the JAX ``ResidualEngine`` (eval mode).
+        Full Moju audit via an ephemeral JAX :class:`~moju.monitor.ResidualEngine` (eval mode).
 
-        Detaches all tensors, converts to numpy, runs the JAX engine, and
-        calls :func:`moju.monitor.audit`.  Not differentiable; intended for
+        Detaches all tensors, converts to numpy, runs that engine, then discards it; only the
+        returned ``report`` survives (there is no :attr:`~moju.monitor.ResidualEngine.last_built_state`
+        retained on ``TorchResidualEngine`` from this path). Intended for non-differentiable
         post-training analysis.
 
         Returns

@@ -203,6 +203,8 @@ engine = ResidualEngine(
 
 
 def build_state_for_engine(params, t, x):
+    # Physical collocation coordinate [m]; included so coord_snapshot / visualize heatmaps align on x.
+    x_phys = jnp.squeeze(x)
     T = scalar_field(params, t, x)
     T_t = T_t_batch(params, t, x)
     T_x = T_x_batch(params, t, x)
@@ -219,6 +221,7 @@ def build_state_for_engine(params, t, x):
         "T_t": T_t,
         "T_x": T_x,
         "T_xx": T_xx,
+        "x": x_phys,
         "t": t,
         "L": Lb,
         "kappa": kappa,

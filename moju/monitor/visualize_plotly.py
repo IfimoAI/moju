@@ -52,6 +52,8 @@ MONITOR_SUMMARY_ANNOTATION_Y_PAPER = -0.098
 MONITOR_CONSTITUTIVE_DIVERGENCE_EXTRA_PX = 200
 MONITOR_DIV_ROW_WEIGHT_MULT = 3.0
 MONITOR_STATE_OVERLAY_EXTRA_PX = 144
+# Relative column widths (heatmap trio gets more horizontal span than KPI / bar merged cells).
+_MONITOR_GRID_COL_WIDTHS: Tuple[float, ...] = (1.65, 1.65, 1.65, 1.0, 1.0, 1.0, 1.0, 1.0)
 
 # Heatmap colorbars: paper coordinates; positioned via align_heatmap_colorbars_to_subplot_domains.
 HEATMAP_COLORBAR_X_GAP_PAPER = 0.012
@@ -859,15 +861,65 @@ def _monitor_flat_subplot_titles(
         st[28] = "Constitutive Residuals"
         st[32] = "Governing Residual"
         st[36] = "Constitutive Residual"
-    tag_title = {
-        "state": "State snapshot (predicted)",
-        "constitutive_divergence": "Constitutive divergence (Model / Implied / normalized Δ)",
-    }
-    for i, tag in enumerate(trailing_rows):
-        row_1 = base_rows + 1 + i
+    for _i in range(len(trailing_rows)):
+        row_1 = base_rows + 1 + _i
         ix = (row_1 - 1) * 8
-        st[ix] = tag_title.get(tag, "")
+        st[ix] = ""
     return tuple(st)
+
+
+_MONITOR_WIDE_ROW_PANEL_TITLES: Dict[str, str] = {
+    "state": "State snapshot (predicted)",
+    "constitutive_divergence": "Constitutive divergence (Model / Implied / normalized Δ)",
+}
+
+
+def _monitor_layout_xy_name(x_or_y_prefix: str, axis_ref: str) -> str:
+    suf = axis_ref[len(x_or_y_prefix) :]
+    return f"{x_or_y_prefix}axis{suf}"
+
+
+def _monitor_axis_domain(
+    fig: Any, *, axis_kind: str, axis_ref: str
+) -> Tuple[float, float]:
+    key = _monitor_layout_xy_name(axis_kind, axis_ref)
+    lay_ax = getattr(fig.layout, key, None)
+    dom = getattr(lay_ax, "domain", None) if lay_ax is not None else None
+    if isinstance(dom, (list, tuple)) and len(dom) >= 2:
+        return float(dom[0]), float(dom[1])
+    return 0.0, 1.0
+
+
+def _add_monitor_centered_threecol_title(
+    fig: Any,
+    row: int,
+    font_color: str,
+    *,
+    title: str,
+    compact: bool,
+) -> None:
+    """Title centered above subplot columns 1–3 (constitutive / state overlay rows)."""
+    T = _ENTERPRISE_THEME
+    xref_lo, yref_anchor = _plotly_xy_axis_ref_strings_for_subplot(fig, row, 1)
+    xref_hi, _ = _plotly_xy_axis_ref_strings_for_subplot(fig, row, 3)
+    x0, _ = _monitor_axis_domain(fig, axis_kind="x", axis_ref=xref_lo)
+    _, x1 = _monitor_axis_domain(fig, axis_kind="x", axis_ref=xref_hi)
+    xc = 0.5 * (x0 + x1)
+    _, y_top = _monitor_axis_domain(fig, axis_kind="y", axis_ref=yref_anchor)
+    fs = T["font_stack"]
+    fsize = 12 if compact else 13
+    pad = 0.011 if compact else 0.012
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=xc,
+        y=min(float(y_top) + pad, 1.0),
+        text=title,
+        showarrow=False,
+        xanchor="center",
+        yanchor="bottom",
+        font=dict(size=fsize, color=font_color, family=fs),
+    )
 
 
 def _plotly_xy_axis_ref_strings_for_subplot(fig: Any, row: int, col: int) -> Tuple[str, str]:
@@ -1215,10 +1267,11 @@ def _build_plotly_monitor_figure_single(
         cols=8,
         specs=specs,
         row_heights=row_heights,
+        column_widths=list(_MONITOR_GRID_COL_WIDTHS),
         # Row gaps (fraction of figure height): test mode uses a larger gap so upper-row x labels
         # clear the subplot titles below (chart row_heights trimmed slightly to compensate).
         vertical_spacing=0.122 if not is_eval else 0.126,
-        horizontal_spacing=0.095,
+        horizontal_spacing=0.088,
         subplot_titles=subplot_titles,
     )
     _drop_paper_subplot_title_annots_with_text(
@@ -1907,6 +1960,22 @@ def _build_plotly_monitor_figure_single(
 
     align_heatmap_colorbars_to_subplot_domains(fig)
     _add_monitor_panel_title_annotations(fig, subplot_titles, font_color=font_color)
+    if state_row is not None:
+        _add_monitor_centered_threecol_title(
+            fig,
+            state_row,
+            font_color,
+            title=_MONITOR_WIDE_ROW_PANEL_TITLES["state"],
+            compact=compact,
+        )
+    if cd_row is not None:
+        _add_monitor_centered_threecol_title(
+            fig,
+            cd_row,
+            font_color,
+            title=_MONITOR_WIDE_ROW_PANEL_TITLES["constitutive_divergence"],
+            compact=compact,
+        )
     apply_theme(
         fig,
         MOJU_LIGHT,
