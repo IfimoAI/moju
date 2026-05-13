@@ -178,3 +178,89 @@ def test_spatial_three_panel_card_unchanged_trace_count() -> None:
     fig = build_constitutive_divergence_card(_balance_bundle(), mode="spatial")
     assert len(fig.data) == 3
 
+
+def test_prepare_mi_vs_x_embed_2d_balance() -> None:
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import prepare_constitutive_model_implied_vs_x_embed
+
+    emb = prepare_constitutive_model_implied_vs_x_embed(_balance_bundle())
+    assert emb is not None
+    assert len(emb["traces"]) == 2
+    t0, t1 = emb["traces"]
+    assert t0.type == "scatter" and t1.type == "scatter"
+    assert len(t0.x) == len(t0.y) == len(t1.y)
+    xs = list(t0.x)
+    assert xs == sorted(xs) or len(xs) <= 1
+
+
+def test_prepare_mi_vs_x_embed_1d_subtract() -> None:
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import prepare_constitutive_model_implied_vs_x_embed
+
+    emb = prepare_constitutive_model_implied_vs_x_embed(_subtract_bundle())
+    assert emb is not None
+    assert len(emb["traces"]) == 2
+    n = 64
+    assert len(emb["traces"][0].x) == n
+
+
+def test_worst_div_mean_abs_row_index_deterministic() -> None:
+    from moju.monitor.visualize_constitutive import worst_div_mean_abs_row_index
+
+    div = np.array([[0.0, 1.0], [2.0, 0.0]], dtype=float)
+    assert worst_div_mean_abs_row_index(div) == 1
+
+
+def test_prepare_mi_vs_x_prefers_last_time_slice() -> None:
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import prepare_constitutive_model_implied_vs_x_embed
+
+    nx, ny = 4, 3
+    rng = np.random.default_rng(42)
+    # Two time slices; slice 1 differs so last-t reduction is visible.
+    pred = np.stack(
+        [
+            rng.standard_normal((ny, nx)) * 0.01,
+            np.full((ny, nx), 999.0),
+        ],
+        axis=0,
+    )
+    implied = np.stack([np.full((ny, nx), 1.4), np.full((ny, nx), 1.4)], axis=0)
+    bundle = {
+        "log": [
+            {
+                "overall_admissibility_score": 0.5,
+                "coord_snapshot": {
+                    "t": [0.0, 1.0],
+                    "x": list(np.linspace(0, 1, nx * ny * 2)),
+                    "y": list(np.linspace(0, 1, nx * ny * 2)),
+                },
+            }
+        ],
+        "indices": [0],
+        "plot_keys": ["constitutive/c/law_x/implied_delta"],
+        "r_norm_mat": [[0.99]],
+        "spatial": {
+            "coords": {"x": np.linspace(0, 1, nx), "y": np.linspace(0, 1, ny)},
+        },
+        "closure_debug": {
+            "c/law_x": {
+                "pred": pred,
+                "implied": implied,
+                "raw": pred - implied,
+                "scale_a": None,
+                "scale_b": None,
+                "ref": None,
+                "mode": "subtract",
+                "output_key": "x",
+                "law_name": "x",
+                "model_name": "c",
+            }
+        },
+    }
+    emb = prepare_constitutive_model_implied_vs_x_embed(bundle, prefer_last_t=True)
+    assert emb is not None
+    # Last t slice has pred grid 999 → implied lines flat 1.4
+    y1 = np.asarray(emb["traces"][1].y, dtype=float)
+    assert np.allclose(y1, 1.4)
+

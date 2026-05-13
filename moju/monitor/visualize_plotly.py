@@ -22,6 +22,7 @@ from moju.monitor.visualize_labels import (
 from moju.monitor.visualize_constitutive import (
     build_spatial_normalized_divergence_figure,
     infer_divergence_abscissa,
+    prepare_constitutive_model_implied_vs_x_embed,
     primary_closure_debug_field_length,
 )
 from moju.monitor.visualize_theme import MOJU_LIGHT, apply_theme, get_theme
@@ -864,6 +865,7 @@ def _monitor_flat_subplot_titles(
     tag_title = {
         "state": "State snapshot (predicted)",
         "constitutive_divergence": "Constitutive divergence (normalised Δ)",
+        "constitutive_mi_vs_x": "Model and Implied vs position x",
     }
     for i, tag in enumerate(trailing_rows):
         row_1 = base_rows + 1 + i
@@ -1115,11 +1117,18 @@ def _build_plotly_monitor_figure_single(
         trailing.append("state")
     if has_cd:
         trailing.append("constitutive_divergence")
+        trailing.append("constitutive_mi_vs_x")
 
     base_n_rows = 4 if is_eval else 5
     n_rows = base_n_rows + len(trailing)
     state_row: Optional[int] = (base_n_rows + 1) if has_state_ov else None
-    cd_row: Optional[int] = (base_n_rows + len(trailing)) if has_cd else None
+    cd_row_heatmap: Optional[int] = None
+    cd_row_lines: Optional[int] = None
+    if has_cd:
+        cd_row_heatmap = base_n_rows + 1 + trailing.index("constitutive_divergence")
+        cd_row_lines = base_n_rows + 1 + trailing.index("constitutive_mi_vs_x")
+
+    monitor_show_legend = False
 
     div_legacy_eval = 0.18
     div_legacy_train = 0.14
@@ -1179,8 +1188,9 @@ def _build_plotly_monitor_figure_single(
                 row_heights.append(div_legacy_eval)
             if has_cd:
                 row_heights.append(div_legacy_eval)
-            if has_cd:
-                row_heights[-1] *= MONITOR_DIV_ROW_WEIGHT_MULT
+                row_heights.append(div_legacy_eval * 0.78)
+                row_heights[-2] *= MONITOR_DIV_ROW_WEIGHT_MULT
+                row_heights[-1] *= MONITOR_DIV_ROW_WEIGHT_MULT * 0.92
             s_tot = sum(row_heights)
             row_heights = [h / s_tot for h in row_heights]
         else:
@@ -1197,8 +1207,9 @@ def _build_plotly_monitor_figure_single(
                 row_heights.append(div_legacy_train)
             if has_cd:
                 row_heights.append(div_legacy_train)
-            if has_cd:
-                row_heights[-1] *= MONITOR_DIV_ROW_WEIGHT_MULT
+                row_heights.append(div_legacy_train * 0.78)
+                row_heights[-2] *= MONITOR_DIV_ROW_WEIGHT_MULT
+                row_heights[-1] *= MONITOR_DIV_ROW_WEIGHT_MULT * 0.92
             s_tot = sum(row_heights)
             row_heights = [h / s_tot for h in row_heights]
         else:
@@ -1745,14 +1756,14 @@ def _build_plotly_monitor_figure_single(
                     col=col,
                 )
 
-    if has_cd and cd_row is not None:
+    if has_cd and cd_row_heatmap is not None:
         div_fig = build_spatial_normalized_divergence_figure(bundle, title=None)
         traces = list(div_fig.data)
         if len(traces) >= 1:
-            fig.add_trace(traces[0], row=cd_row, col=1)
+            fig.add_trace(traces[0], row=cd_row_heatmap, col=1)
             lt = fig.data[-1]
             if getattr(lt, "type", None) == "heatmap" and getattr(lt, "colorbar", None) is not None:
-                lt.update(meta=dict(subplot_row=cd_row, subplot_col=1))
+                lt.update(meta=dict(subplot_row=cd_row_heatmap, subplot_col=1))
         else:
             fig.add_trace(
                 go.Scatter(
@@ -1763,11 +1774,11 @@ def _build_plotly_monitor_figure_single(
                     showlegend=False,
                     hoverinfo="skip",
                 ),
-                row=cd_row,
+                row=cd_row_heatmap,
                 col=1,
             )
-        fig.update_xaxes(automargin=True, row=cd_row, col=1)
-        fig.update_yaxes(automargin=True, row=cd_row, col=1)
+        fig.update_xaxes(automargin=True, row=cd_row_heatmap, col=1)
+        fig.update_yaxes(automargin=True, row=cd_row_heatmap, col=1)
         tl0 = traces[0] if traces else None
         tty = getattr(tl0, "type", None) if tl0 is not None else None
         if tty == "scatter":
@@ -1782,10 +1793,45 @@ def _build_plotly_monitor_figure_single(
             _, xtit = infer_divergence_abscissa(
                 bundle, nlen_i, hint_axis=str(hin) if hin else None
             )
-            fig.update_xaxes(title_text=xtit, row=cd_row, col=1, automargin=True)
+            fig.update_xaxes(title_text=xtit, row=cd_row_heatmap, col=1, automargin=True)
         elif tty == "heatmap":
-            fig.update_xaxes(title_text="Position x", row=cd_row, col=1, automargin=True)
-            fig.update_yaxes(title_text="Position y", row=cd_row, col=1, automargin=True)
+            fig.update_xaxes(title_text="Position x", row=cd_row_heatmap, col=1, automargin=True)
+            fig.update_yaxes(title_text="Position y", row=cd_row_heatmap, col=1, automargin=True)
+
+    if has_cd and cd_row_lines is not None:
+        prefer_last_t = bool(bundle.get("spatial_prefer_last_t", True))
+        emb = prepare_constitutive_model_implied_vs_x_embed(bundle, prefer_last_t=prefer_last_t)
+        if emb and emb.get("traces"):
+            monitor_show_legend = True
+            for tr in emb["traces"]:
+                fig.add_trace(tr, row=cd_row_lines, col=1)
+            fig.update_xaxes(
+                title_text=str(emb.get("x_title") or "Position x"),
+                row=cd_row_lines,
+                col=1,
+                automargin=True,
+            )
+            fig.update_yaxes(
+                title_text=str(emb.get("y_title") or "Value"),
+                row=cd_row_lines,
+                col=1,
+                automargin=True,
+            )
+        else:
+            fig.add_trace(
+                go.Scatter(
+                    x=[0.5],
+                    y=[0.0],
+                    mode="text",
+                    text=["Model / Implied vs x (no 1-D or 2-D slice available)"],
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=cd_row_lines,
+                col=1,
+            )
+            fig.update_xaxes(visible=False, row=cd_row_lines, col=1)
+            fig.update_yaxes(visible=False, row=cd_row_lines, col=1)
 
     # Actionable summary
     summary_lines = []
@@ -1839,6 +1885,7 @@ def _build_plotly_monitor_figure_single(
                 * (1.0 + div_legacy_px * (MONITOR_DIV_ROW_WEIGHT_MULT - 1.0))
             )
         )
+        extra_px += int(round(0.42 * MONITOR_CONSTITUTIVE_DIVERGENCE_EXTRA_PX))
     if has_state_ov:
         extra_px += MONITOR_STATE_OVERLAY_EXTRA_PX
     layout_h = layout_base_h + extra_px
@@ -1852,7 +1899,7 @@ def _build_plotly_monitor_figure_single(
             font=dict(size=12, family=fs, color=font_color),
         ),
         height=layout_h,
-        showlegend=False,
+        showlegend=monitor_show_legend,
         # Bottom margin: spatial x labels + full summary box (border) without clipping.
         margin=dict(l=90, r=90, t=margin_top, b=MONITOR_SINGLE_FIGURE_MARGIN_BOTTOM),
         hovermode="closest",

@@ -268,6 +268,231 @@ def _coords_for_points(
     return out[0], out[1], out[2], out[3]
 
 
+def _closure_coords_for_reduce(bundle: Dict[str, Any]) -> Dict[str, Any]:
+    """Coordinate dict for :func:`~moju.monitor.spatial_rnorm_panels._reduce_spatial_array` (snapshot + spatial)."""
+    pred: Dict[str, Any] = {}
+    log = bundle.get("log") or []
+    if log and isinstance(log[-1], dict):
+        cs = log[-1].get("coord_snapshot")
+        if isinstance(cs, dict):
+            for axis in ("x", "y", "z", "t"):
+                v = cs.get(axis)
+                if v is None:
+                    continue
+                pred[str(axis)] = np.asarray(v, dtype=float).ravel()
+    sp_any = bundle.get("spatial")
+    if isinstance(sp_any, dict):
+        kind = sp_any.get("kind")
+        if kind == "1d" and pred.get("x") is None and sp_any.get("x") is not None:
+            pred["x"] = np.asarray(sp_any["x"], dtype=float).ravel()
+        if kind == "2d":
+            coords_dict = sp_any.get("coords") or {}
+            cx = coords_dict.get("x") if coords_dict else sp_any.get("x")
+            cy = coords_dict.get("y") if coords_dict else sp_any.get("y")
+            if cx is not None:
+                xv = np.asarray(cx, dtype=float).ravel()
+                if pred.get("x") is None or xv.size > np.asarray(pred["x"]).size:
+                    pred["x"] = xv
+            if cy is not None and pred.get("y") is None:
+                pred["y"] = np.asarray(cy, dtype=float).ravel()
+    return pred
+
+
+def worst_div_mean_abs_row_index(div: np.ndarray) -> int:
+    """Pick row ``y`` index maximizing mean ``|Δ_norm|`` over ``x`` (worst horizontal stripe)."""
+    d = np.asarray(div, dtype=float)
+    if d.ndim != 2 or d.shape[0] < 1:
+        return 0
+    row_means = np.nanmean(np.abs(d), axis=1)
+    return int(np.nanargmax(row_means))
+
+
+def _x_abscissa_0_to_L(cx: np.ndarray, bundle: Dict[str, Any]) -> Tuple[np.ndarray, float, str]:
+    """
+    Map physical sample positions ``cx`` to ``[0, L]`` where ``L`` is ``spatial.domain_length`` if set,
+    otherwise ``max(cx)-min(cx)`` (so the axis spans the collocated extent).
+    """
+    x = np.asarray(cx, dtype=float).ravel()
+    n = x.size
+    if n == 0:
+        return np.asarray([], dtype=float), 1.0, "Position x"
+    lo, hi = float(np.nanmin(x)), float(np.nanmax(x))
+    span = hi - lo
+    sp = bundle.get("spatial") if isinstance(bundle.get("spatial"), dict) else {}
+    L: Optional[float] = None
+    if isinstance(sp, dict) and sp.get("domain_length") is not None:
+        try:
+            L_try = float(sp["domain_length"])
+            if np.isfinite(L_try) and L_try > 0:
+                L = L_try
+        except (TypeError, ValueError):
+            L = None
+    if L is None:
+        L = float(span) if np.isfinite(span) and span > 0 else 1.0
+    if not np.isfinite(span) or span <= 0:
+        return np.linspace(0.0, float(L), n, dtype=float), float(L), "Position x (0 to L)"
+    x_plot = (x - lo) / span * float(L)
+    return x_plot, float(L), "Position x (0 to L)"
+
+
+def prepare_constitutive_model_implied_vs_x_embed(
+    bundle: Dict[str, Any],
+    residual_basename: Optional[str] = None,
+    *,
+    prefer_last_t: bool = True,
+    theme: Any = MOJU_LIGHT,
+) -> Optional[Dict[str, Any]]:
+    """
+    Build two line traces (Model vs x, Implied vs x) for the monitor: last time slice when ``t`` aligns,
+    worst-|Δ| row for 2-D, abscissa on ``[0, L]``.
+    Returns ``None`` if nothing to plot.
+    """
+    from moju.monitor.spatial_rnorm_panels import _reduce_spatial_array
+
+    import plotly.graph_objects as go
+
+    t = get_theme(theme)
+    debug = _closure_debug(bundle)
+    if not debug:
+        return None
+    bn = residual_basename or _auto_select_basename(bundle, debug)
+    if bn is None or bn not in debug:
+        return None
+    entry = debug[bn]
+    a_full = _coerce_to_numpy(entry.get("scale_a") if entry.get("mode") == "balance" else entry.get("pred"))
+    b_full = _coerce_to_numpy(entry.get("scale_b") if entry.get("mode") == "balance" else entry.get("implied"))
+    ref_full = entry.get("ref")
+    ref_arr = _coerce_to_numpy(ref_full) if ref_full is not None else None
+    if a_full.size == 0 or b_full.size == 0:
+        return None
+    if a_full.shape != b_full.shape:
+        return None
+
+    coords_pred = _closure_coords_for_reduce(bundle)
+    try:
+        a = np.asarray(_reduce_spatial_array(a_full, coords_pred, prefer_last_t=prefer_last_t), dtype=float)
+        b = np.asarray(_reduce_spatial_array(b_full, coords_pred, prefer_last_t=prefer_last_t), dtype=float)
+        ref_red: Optional[np.ndarray] = None
+        if ref_arr is not None and ref_arr.size and ref_arr.shape == a_full.shape:
+            ref_red = np.asarray(_reduce_spatial_array(ref_arr, coords_pred, prefer_last_t=prefer_last_t), dtype=float)
+    except (TypeError, ValueError):
+        return None
+
+    while a.ndim > 2 and a.shape[0] == 1:
+        a = a[0]
+        b = b[0]
+        if ref_red is not None and ref_red.ndim > 2 and ref_red.shape[0] == 1:
+            ref_red = ref_red[0]
+
+    label_model, label_implied = _user_constitutive_side_labels()
+    y_qty = divergence_y_quantity_label(entry)
+    hint_ax = bundle.get("spatial_coord_hint")
+    note_parts: List[str] = []
+    if prefer_last_t and coords_pred.get("t") is not None and a_full.ndim >= 2:
+        nt = int(np.asarray(coords_pred["t"]).reshape(-1).shape[0])
+        if a_full.shape[0] == nt:
+            note_parts.append("final t")
+
+    if a.ndim == 1 and b.ndim == 1:
+        n = int(a.shape[0])
+        xs, _ = infer_divergence_abscissa(bundle, n, hint_axis=str(hint_ax) if hint_ax else None)
+        xs = np.asarray(xs, dtype=float).ravel()
+        if xs.shape[0] != n:
+            xs = np.arange(n, dtype=float)
+            x_title_use = "Sample index"
+        x_plot, _L, x_ax_title = _x_abscissa_0_to_L(xs, bundle)
+        traces = [
+            go.Scatter(
+                x=x_plot,
+                y=a,
+                mode="lines",
+                line=dict(color=t.palette.line_primary, width=2),
+                name=label_model,
+                showlegend=True,
+            ),
+            go.Scatter(
+                x=x_plot,
+                y=b,
+                mode="lines",
+                line=dict(color=t.palette.cat_constitutive, width=2),
+                name=label_implied,
+                showlegend=True,
+            ),
+        ]
+        subtitle = ", ".join(note_parts) if note_parts else ""
+        return {
+            "traces": traces,
+            "x_title": x_ax_title,
+            "y_title": y_qty,
+            "subtitle": subtitle,
+            "row_note": "1-D profile",
+        }
+
+    if a.ndim == 2 and b.ndim == 2:
+        ref2: Optional[np.ndarray] = None
+        if ref_red is not None and ref_red.shape == a.shape:
+            ref2 = ref_red
+        div = _normalized_divergence(a, b, ref=ref2)
+        y_ix = worst_div_mean_abs_row_index(div)
+        la = np.asarray(a[y_ix], dtype=float).ravel()
+        lb = np.asarray(b[y_ix], dtype=float).ravel()
+        nx = la.shape[0]
+        coords = bundle.get("spatial") or {}
+        cxx: Optional[np.ndarray] = None
+        cds_raw = coords.get("coords") or {} if isinstance(coords, dict) else {}
+        xv0 = cds_raw.get("x") if cds_raw else coords.get("x")
+        if xv0 is not None:
+            cxx = np.asarray(xv0, dtype=float).ravel()
+        if cxx is None and coords_pred.get("x") is not None:
+            px = np.asarray(coords_pred["x"], dtype=float).ravel()
+            if px.size == nx:
+                cxx = px
+        if cxx is None or cxx.size != nx:
+            cxx_infer, _ = infer_divergence_abscissa(bundle, nx, hint_axis=str(hint_ax) if hint_ax else None)
+            cxx = np.asarray(cxx_infer, dtype=float).ravel()
+            if cxx.size != nx:
+                cxx = np.linspace(0.0, 1.0, nx, dtype=float)
+        x_plot, _L, x_ax_title = _x_abscissa_0_to_L(cxx, bundle)
+        note_parts.append("worst |Δ| stripe")
+        subtitle = ", ".join(note_parts)
+        cy_val = None
+        cy_src = cds_raw.get("y") if cds_raw else coords.get("y")
+        if cy_src is not None:
+            cyy = np.asarray(cy_src, dtype=float).ravel()
+            if cyy.size > y_ix:
+                cy_val = float(cyy[y_ix])
+        traces = [
+            go.Scatter(
+                x=x_plot,
+                y=la,
+                mode="lines",
+                line=dict(color=t.palette.line_primary, width=2),
+                name=label_model,
+                showlegend=True,
+            ),
+            go.Scatter(
+                x=x_plot,
+                y=lb,
+                mode="lines",
+                line=dict(color=t.palette.cat_constitutive, width=2),
+                name=label_implied,
+                showlegend=True,
+            ),
+        ]
+        row_note = f"y* row index {y_ix}"
+        if cy_val is not None and np.isfinite(cy_val):
+            row_note = f"y* ≈ {cy_val:.4g} ({row_note})"
+        return {
+            "traces": traces,
+            "x_title": x_ax_title,
+            "y_title": y_qty,
+            "subtitle": subtitle,
+            "row_note": row_note,
+        }
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Mode builders
 # ---------------------------------------------------------------------------
@@ -1056,5 +1281,7 @@ __all__ = [
     "divergence_y_quantity_label",
     "infer_divergence_abscissa",
     "list_constitutive_basenames",
+    "prepare_constitutive_model_implied_vs_x_embed",
     "primary_closure_debug_field_length",
+    "worst_div_mean_abs_row_index",
 ]
