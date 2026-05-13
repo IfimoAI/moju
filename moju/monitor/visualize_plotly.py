@@ -1914,8 +1914,11 @@ def _build_plotly_monitor_figure_single(
                 col=5,
                 automargin=True,
             )
+            yr = emb.get("y_range")
             fig.update_yaxes(
                 title_text=str(emb.get("y_title") or "Value"),
+                range=yr if yr else None,
+                autorange=(yr is None),
                 row=cd_row,
                 col=5,
                 automargin=True,
