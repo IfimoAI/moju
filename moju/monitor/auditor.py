@@ -285,6 +285,21 @@ def _geom_mean_admissibility(values: Sequence[float]) -> float:
     return float(math.exp(sum(math.log(x) for x in finite) / len(finite)))
 
 
+def _min_admissibility(values: Sequence[float]) -> float:
+    """Minimum over finite scores only; returns NaN when no finite scores are present."""
+    finite: List[float] = []
+    for x in values:
+        try:
+            xf = float(x)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(xf):
+            finite.append(xf)
+    if not finite:
+        return float("nan")
+    return float(min(finite))
+
+
 def _rms_per_key(
     residuals_flat: Dict[str, jnp.ndarray],
     *,
@@ -454,10 +469,10 @@ def _compute_log_step_metrics(
     Scale precedence per key: **r_ref** (if given) > entry ``scale`` > first-step RMS > 1.
     Category scores are **0** if any per-key admissibility in that category is non-finite.
 
-    **Overall admissibility:** for ``run_mode == \"training\"``, geometric mean of **laws** and
-    **constitutive** only. For ``run_mode == \"eval\"``, geometric mean of finite, present
-    category scores (missing categories are excluded). For legacy entries without ``run_mode``,
-    geometric mean of **all** present categories.
+    **Overall admissibility:** for ``run_mode == \"training\"``, minimum of present **laws**
+    and **constitutive** category scores. For ``run_mode == \"eval\"``, minimum finite present
+    category score (missing categories are excluded). For legacy entries without ``run_mode``,
+    minimum finite score across all present categories.
     """
     if not log:
         return []
@@ -533,24 +548,20 @@ def _compute_log_step_metrics(
             if not train_cats:
                 overall = float("nan")
             else:
-                overall = _geom_mean_admissibility(
-                    [float(category_scores[c]) for c in train_cats]
-                )
+                overall = _min_admissibility([float(category_scores[c]) for c in train_cats])
         elif rm == "eval":
             eval_vals = [
                 float(vv)
                 for vv in category_scores.values()
                 if math.isfinite(float(vv))
             ]
-            overall = _geom_mean_admissibility(eval_vals) if eval_vals else float("nan")
+            overall = _min_admissibility(eval_vals) if eval_vals else float("nan")
         else:
             # Legacy logs without ``run_mode``: all present categories.
             if not cats_present:
                 overall = float("nan")
             else:
-                overall = _geom_mean_admissibility(
-                    [float(category_scores[c]) for c in cats_present]
-                )
+                overall = _min_admissibility([float(category_scores[c]) for c in cats_present])
         out.append(
             {
                 "r_norm": r_norm,
@@ -591,10 +602,10 @@ def audit(
     ``laws``, ``constitutive``, ``scaling``, ``data`` — only when **every** per-key
     admissibility in that category is finite; if any key is non-finite (NaN/Inf) or
     non-numeric, the category score is **0** (inadmissible for that bucket); empty
-    categories omitted; (3) **overall** score — for ``run_mode == \"training\"``, geometric mean of
-    **laws** and **constitutive** only; for ``run_mode == \"eval\"``, geometric mean of finite,
-    present category scores (missing categories excluded); for legacy entries without ``run_mode``,
-    geometric mean of all present categories.
+    categories omitted; (3) **overall** score — for ``run_mode == \"training\"``, minimum of
+    present **laws** and **constitutive** category scores; for ``run_mode == \"eval\"``, minimum
+    finite present category score (missing categories excluded); for legacy entries without
+    ``run_mode``, minimum finite score across all present categories.
 
     The returned dict includes ``monitor_run_mode`` from the last log entry when present.
     """

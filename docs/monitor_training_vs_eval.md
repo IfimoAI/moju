@@ -26,7 +26,7 @@ Use inside optimization loops.
   - constitutive **`ref_delta`**
   - the **`data/`** block (per-key prediction − reference on overlapping keys)
 
-Each log entry stores **`run_mode`**. **`audit()`** / **`_compute_log_step_metrics`** compute **overall admissibility** as the geometric mean of **laws** and **constitutive** only for **training** entries. Legacy entries **without** **`run_mode`** use the geometric mean of all present categories (including **`data`** or legacy **`scaling/`** keys if present in old logs).
+Each log entry stores **`run_mode`**. **`audit()`** / **`_compute_log_step_metrics`** compute **overall admissibility** as the minimum of the present **laws** and **constitutive** category scores for **training** entries. Legacy entries **without** **`run_mode`** use the minimum finite score across all present categories (including **`data`** or legacy **`scaling/`** keys if present in old logs).
 
 **Plotly `visualize(..., mode="training")`** shows **two** KPI cards: Governing and Constitutive.
 
@@ -35,7 +35,7 @@ Each log entry stores **`run_mode`**. **`audit()`** / **`_compute_log_step_metri
 Use when you have a reference state or want **`ref_delta`** / **`data/`** comparisons.
 
 - Pass **`state_ref`** to enable constitutive **`ref_delta`** and **`data/`** residuals.
-- **`audit()`** rolls up **overall admissibility** for eval as the geometric mean of **finite** per-category scores present in that step (**laws**, **constitutive**, **`data`**, and legacy **`scaling`** buckets if old logs still contain `scaling/...` keys).
+- **`audit()`** rolls up **overall admissibility** for eval as the minimum **finite** per-category score present in that step (**laws**, **constitutive**, **`data`**, and legacy **`scaling`** buckets if old logs still contain `scaling/...` keys).
 
 **`visualize(..., mode="eval")`** uses **two** KPI cards (Governing, Constitutive), matching training layout. Category breakdowns still list whatever categories exist in the log. **`mode="test"`** is accepted as an alias for **`eval`** (no deprecation warning).
 

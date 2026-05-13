@@ -88,16 +88,14 @@ class TestNanTolerantAuditMetrics:
         assert rep["overall_admissibility_level"] == "Non-Admissible"
 
     def test_training_overall_uses_only_laws_and_constitutive(self):
-        import math
-
         from moju.monitor.auditor import _compute_log_step_metrics
 
         log = [
             {
                 "run_mode": "training",
                 "rms": {
-                    "laws/laplace_equation": 0.1,
-                    "constitutive/x/implied_delta": 0.1,
+                    "laws/laplace_equation": 0.01,
+                    "constitutive/x/implied_delta": 0.5,
                     "scaling/pe/ref_delta": 5.0,
                 },
                 "scale": {
@@ -110,8 +108,9 @@ class TestNanTolerantAuditMetrics:
         m = _compute_log_step_metrics(log)
         cl = m[0]["category_admissibility_score"]["laws"]
         cc = m[0]["category_admissibility_score"]["constitutive"]
-        expected = math.exp(0.5 * (math.log(cl) + math.log(cc)))
+        expected = min(cl, cc)
         assert abs(m[0]["overall_admissibility_score"] - expected) < 1e-9
+        assert expected == cc
 
     def test_compute_log_step_metrics_eval_rolls_up_available_categories(self):
         import math
@@ -135,14 +134,7 @@ class TestNanTolerantAuditMetrics:
         ]
         m_ev = _compute_log_step_metrics(log_eval)
         ce = m_ev[0]["category_admissibility_score"]
-        expected_eval = math.exp(
-            (
-                math.log(float(ce["laws"]))
-                + math.log(float(ce["constitutive"]))
-                + math.log(float(ce["scaling"]))
-            )
-            / 3.0
-        )
+        expected_eval = min(float(ce["laws"]), float(ce["constitutive"]), float(ce["scaling"]))
         assert abs(m_ev[0]["overall_admissibility_score"] - expected_eval) < 1e-9
 
         log_eval_no_scaling = [
@@ -160,13 +152,7 @@ class TestNanTolerantAuditMetrics:
         ]
         m_ev2 = _compute_log_step_metrics(log_eval_no_scaling)
         ce2 = m_ev2[0]["category_admissibility_score"]
-        expected_eval2 = math.exp(
-            (
-                math.log(float(ce2["laws"]))
-                + math.log(float(ce2["constitutive"]))
-            )
-            / 2.0
-        )
+        expected_eval2 = min(float(ce2["laws"]), float(ce2["constitutive"]))
         assert abs(m_ev2[0]["overall_admissibility_score"] - expected_eval2) < 1e-9
 
         log_legacy = [
@@ -185,6 +171,34 @@ class TestNanTolerantAuditMetrics:
         ]
         m_leg = _compute_log_step_metrics(log_legacy)
         assert math.isfinite(m_leg[0]["overall_admissibility_score"])
+        ce_leg = m_leg[0]["category_admissibility_score"]
+        assert m_leg[0]["overall_admissibility_score"] == min(float(v) for v in ce_leg.values())
+
+    def test_overall_admissibility_is_capped_by_weak_category(self):
+        from moju.monitor.auditor import _compute_log_step_metrics, admissibility_level
+
+        log = [
+            {
+                "run_mode": "eval",
+                "rms": {
+                    "laws/a": 0.01,
+                    "constitutive/b/implied_delta": 0.01,
+                    "data/T": 2.0,
+                },
+                "scale": {
+                    "laws/a": 1.0,
+                    "constitutive/b/implied_delta": 1.0,
+                    "data/T": 1.0,
+                },
+            }
+        ]
+        m = _compute_log_step_metrics(log)
+        cats = m[0]["category_admissibility_score"]
+        assert cats["laws"] > 0.95
+        assert cats["constitutive"] > 0.95
+        assert cats["data"] < 0.5
+        assert m[0]["overall_admissibility_score"] == cats["data"]
+        assert admissibility_level(m[0]["overall_admissibility_score"]) == "Non-Admissible"
 
     def test_rms_scalar_uses_nanmean(self):
         import math
