@@ -151,6 +151,10 @@ def infer_divergence_abscissa(
 
     Priority: spatial 1-D ``bundle['spatial']['x']``; then ``coord_snapshot`` axes
     (hint axis first among x/y/z/t, then defaults); fallback index with ``Sample index``.
+
+    For each axis the unique grid vector (``coord_snapshot[axis + "_grid"]``) is tried before
+    the raw flattened vector so that plots built from a flattened meshgrid collocation still
+    resolve to the physical 0-to-L coordinate range.
     """
     if n <= 0:
         return np.asarray([], dtype=float), "Sample index"
@@ -176,6 +180,12 @@ def infer_divergence_abscissa(
                 probe.append(ax)
         titles = {"x": "Position x", "y": "Position y", "z": "Position z", "t": "Time t"}
         for ax in probe:
+            # Try unique grid axis first (set when collocation is a flattened meshgrid).
+            v_grid = cs.get(ax + "_grid")
+            if v_grid is not None:
+                arr = np.asarray(v_grid, dtype=float).ravel()
+                if arr.shape[0] == n:
+                    return arr, titles.get(ax, f"Position {ax}")
             v = cs.get(ax)
             arr = np.asarray(v, dtype=float).ravel() if v is not None else np.asarray([])
             if arr.shape[0] == n:
