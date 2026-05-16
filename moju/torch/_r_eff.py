@@ -6,12 +6,14 @@ Exact port of ``_r_eff_scalar`` and ``build_loss`` from
 ``TorchResidualEngine`` is numerically identical to what the JAX audit reports
 under the ``rms`` field.
 
-``R_eff = RMS_δ(r) · Q^p``  with::
+``R_eff = RMS_δ(r)`` when **p** = 0 (default constant :data:`R_EFF_Q_POWER`), else ``R_eff = RMS_δ(r) · Q^p``.
+
+::
 
     RMS_δ(r) = sqrt(mean(r²) + δ²)         # δ² = R_EFF_RMS_JITTER_SQ
-    m_i      = sqrt(r_i² + ε²)             # ε  = _SCALE_EPS
-    Q        = RMS(m) / mean(m)             # ≥ 1 for non-uniform residuals
-    p        = R_EFF_Q_POWER
+    m_i      = sqrt(r_i² + ε²)             # ε  = _SCALE_EPS (only if p ≠ 0)
+    Q        = RMS(m) / mean(m)             # ≥ 1 when |r| is uneven
+    p        = R_EFF_Q_POWER               # set globally via configure_r_eff
 """
 from __future__ import annotations
 
@@ -19,8 +21,8 @@ from typing import Any, Dict, Optional
 
 import torch
 
-# Mirror auditor.py constants exactly.
-R_EFF_Q_POWER: float = 2.0
+# Mirror moju.monitor.auditor constants exactly (configure_r_eff updates both).
+R_EFF_Q_POWER: float = 0.0
 R_EFF_RMS_JITTER_SQ: float = 1e-20
 _SCALE_EPS: float = 1e-30
 
@@ -48,7 +50,8 @@ def r_eff_scalar_torch(r: torch.Tensor) -> torch.Tensor:
     jitter = torch.tensor(R_EFF_RMS_JITTER_SQ, dtype=a.dtype, device=a.device)
     rms_r = torch.sqrt(torch.nanmean(a.square()) + jitter)
 
-    if a.numel() == 1:
+    p = float(R_EFF_Q_POWER)
+    if p == 0.0 or a.numel() == 1:
         return rms_r
 
     eps = torch.tensor(_SCALE_EPS, dtype=a.dtype, device=a.device)
@@ -56,7 +59,7 @@ def r_eff_scalar_torch(r: torch.Tensor) -> torch.Tensor:
     rms_m = torch.sqrt(torch.nanmean(m.square()))
     mean_m = torch.nanmean(m)
     q = rms_m / mean_m
-    return rms_r * torch.pow(q, R_EFF_Q_POWER)
+    return rms_r * torch.pow(q, p)
 
 
 def build_loss_torch(

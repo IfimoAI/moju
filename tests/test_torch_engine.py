@@ -20,7 +20,7 @@ torch = pytest.importorskip("torch", reason="torch not installed")
 from moju.piratio.nondim import NondimScales
 from moju.torch._nondim import dimensional_to_nd_torch, nd_to_dimensional_torch
 from moju.torch._derived import eval_derived_expr_torch, apply_derived_state_chain_torch
-from moju.torch._r_eff import r_eff_scalar_torch, build_loss_torch, R_EFF_Q_POWER
+from moju.torch._r_eff import r_eff_scalar_torch, build_loss_torch
 from moju.torch._path_b import fill_path_b_derivatives_torch
 from moju.torch._closure import (
     normalize_discrepancy_torch,
@@ -248,14 +248,14 @@ class TestREff:
     def test_uniform_residuals_no_q_penalty(self):
         r = torch.ones(100)
         val = r_eff_scalar_torch(r)
-        # For uniform residuals, Q = RMS(m)/mean(m) = 1 → R_eff = RMS_r * 1
+        # Plain smooth RMS under default ``p`` = 0
         assert val.item() > 0.0
         assert torch.isfinite(val)
 
     def test_skewed_residuals_higher_r_eff(self):
         torch.manual_seed(42)
         uniform_r = torch.ones(200)
-        # Concentrated residuals (one big, rest tiny) — higher Q
+        # Larger pointwise residuals → larger RMS even when ``p`` = 0
         skewed_r = torch.zeros(200)
         skewed_r[0] = 200.0
         r_eff_uniform = float(r_eff_scalar_torch(uniform_r))
@@ -265,6 +265,14 @@ class TestREff:
     def test_empty_tensor_returns_nan(self):
         val = r_eff_scalar_torch(torch.tensor([]))
         assert math.isnan(float(val))
+
+    def test_torch_r_eff_q_power_matches_auditor(self):
+        pytest.importorskip("torch")
+
+        import moju.monitor.auditor as aud
+        import moju.torch._r_eff as tr_mod
+
+        assert tr_mod.R_EFF_Q_POWER == aud.R_EFF_Q_POWER
 
     def test_gradient_flows(self):
         r = torch.randn(50, requires_grad=True)

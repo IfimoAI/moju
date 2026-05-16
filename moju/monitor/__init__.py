@@ -7,6 +7,7 @@ from moju.monitor.auditor import (
     build_loss,
     build_minimal_residual_engine,
     build_monitor_visualize_bundle,
+    configure_r_eff,
     list_constitutive_models,
     list_scaling_closure_ids,
     visualize,
@@ -48,6 +49,7 @@ from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_
 __all__ = [
     "ResidualEngine",
     "admissibility_level",
+    "configure_r_eff",
     "build_loss",
     "build_minimal_residual_engine",
     "audit",
