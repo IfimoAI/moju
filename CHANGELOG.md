@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Breaking
 
+- **``R_eff`` default (logged ``rms`` / ``build_loss``):** **`R_EFF_Q_POWER`** defaults to **`0.0`**; **`rms`** is **R_eff** = sqrt(mean(r^2)+delta^2) (**RMS_delta**) without the imbalance factor **Q**. For **R_eff = RMS_delta * Q^p** (e.g. former default **p** = **2**), call **`moju.monitor.configure_r_eff(q_power=2.0)`** once at process start; **Torch** **`moju.torch._r_eff`** mirrors the exponent when PyTorch imports.
+
 - **Law-linked `implied_delta` (balance form):** Auto constitutive rows from `moju.monitor.law_implied_diagnostics` for Fourier, Fick, wave, advection–diffusion (κ), Navier–Stokes / Stokes / Burgers (μ) now use **`implied_balance_fn`** and a **no-division** PDE balance with the model coefficient (e.g. \(T_t - \alpha_{\text{model}}\,T_{\text{laplacian}}\)), not ratio-style rearrangements. **`implied_delta` numeric values** for those keys change vs 1.0.x (zeros still align when the law balance holds). Turbulent viscous-acceleration law-linked rows are unchanged (**`pred − implied_fn`**). See `docs/law_implied_audits.md` and `moju.monitor.closure_registry.compute_implied_delta`.
 
 ## [1.0.2] - 2026-05-13

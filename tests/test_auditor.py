@@ -353,7 +353,7 @@ class TestBuildLossBatch:
 
 
 class TestREff:
-    """R_eff uses jittered RMS × Q^p (p=R_EFF_Q_POWER); Q>1 when |r| is uneven."""
+    """Default ``p=0``: smooth RMS. Use :func:`configure_r_eff(q_power>0)` for Q-imbalance (``p``>0)."""
 
     def test_r_eff_matches_rms_when_uniform_or_scalar(self):
         from moju.monitor.auditor import _rms_scalar, _r_eff_scalar
@@ -363,16 +363,59 @@ class TestREff:
         assert jnp.allclose(_r_eff_scalar(jnp.array(2.0)), _rms_scalar(jnp.array(2.0)))
 
     def test_r_eff_exceeds_rms_and_lowers_admissibility_when_uneven(self):
-        from moju.monitor.auditor import _rms_scalar, _r_eff_scalar
+        import moju.monitor.auditor as aud
+
+        prev = aud.R_EFF_Q_POWER
+        try:
+            aud.configure_r_eff(q_power=2.0)
+            from moju.monitor.auditor import _rms_scalar, _r_eff_scalar
+
+            spike = jnp.array([0.0, 0.0, 0.0, 10.0])
+            r_eff = float(_r_eff_scalar(spike))
+            r_rms = float(_rms_scalar(spike))
+            assert r_eff > r_rms
+            uniform = jnp.ones((4,))
+            adm_u = 1.0 / (1.0 + float(_r_eff_scalar(uniform)))
+            adm_spike = 1.0 / (1.0 + r_eff)
+            assert adm_spike < adm_u
+        finally:
+            aud.configure_r_eff(q_power=prev)
+
+    def test_configure_r_eff_spike_only_when_positive_p(self):
+        import moju.monitor.auditor as aud
 
         spike = jnp.array([0.0, 0.0, 0.0, 10.0])
-        r_eff = float(_r_eff_scalar(spike))
-        r_rms = float(_rms_scalar(spike))
-        assert r_eff > r_rms
-        uniform = jnp.ones((4,))
-        adm_u = 1.0 / (1.0 + float(_r_eff_scalar(uniform)))
-        adm_spike = 1.0 / (1.0 + r_eff)
-        assert adm_spike < adm_u
+        prev = aud.R_EFF_Q_POWER
+        try:
+            jitter = jnp.asarray(aud.R_EFF_RMS_JITTER_SQ, dtype=spike.dtype)
+            baseline = jnp.sqrt(jnp.nanmean(jnp.square(spike)) + jitter)
+
+            aud.configure_r_eff(q_power=0.0)
+            assert jnp.allclose(aud._r_eff_scalar(spike), baseline)
+
+            aud.configure_r_eff(q_power=2.0)
+            assert float(aud._r_eff_scalar(spike)) > float(baseline)
+
+            aud.configure_r_eff(q_power=0.0)
+            assert jnp.allclose(aud._r_eff_scalar(spike), baseline)
+        finally:
+            aud.configure_r_eff(q_power=prev)
+
+    def test_configure_r_eff_syncs_torch_when_installed(self):
+        pytest.importorskip("torch", reason="torch not installed")
+
+        import moju.monitor.auditor as aud
+        import moju.torch._r_eff as tr_mod
+
+        prev = aud.R_EFF_Q_POWER
+        try:
+            aud.configure_r_eff(q_power=1.25)
+            assert tr_mod.R_EFF_Q_POWER == 1.25
+            assert aud.R_EFF_Q_POWER == 1.25
+            aud.configure_r_eff(q_power=0.0)
+            assert tr_mod.R_EFF_Q_POWER == 0.0
+        finally:
+            aud.configure_r_eff(q_power=prev)
 
 
 class TestAudit:
