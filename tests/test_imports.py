@@ -69,6 +69,7 @@ def test_monitor_module_has_all():
     assert set(monitor.__all__) == {
         "ResidualEngine",
         "admissibility_level",
+        "configure_r_eff",
         "build_loss",
         "build_minimal_residual_engine",
         "audit",
