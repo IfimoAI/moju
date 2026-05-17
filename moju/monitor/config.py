@@ -31,8 +31,7 @@ class AuditSpec:
     residual_basename: Optional[str] = None
     # When False, skip F(pred)-F(ref) even if state_ref is set.
     include_ref_delta: bool = True
-    # Optional reference tensor key for implied/ref ND discrepancy denominator (|ref|); else symmetric scale.
-    implied_delta_ref_key: Optional[str] = None
+    # Optional reference tensor key for ref_delta denominator (|ref|); else symmetric scale.
     ref_delta_ref_key: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -44,7 +43,6 @@ class AuditSpec:
             "implied_value_key": self.implied_value_key,
             "residual_basename": self.residual_basename,
             "include_ref_delta": self.include_ref_delta,
-            "implied_delta_ref_key": self.implied_delta_ref_key,
             "ref_delta_ref_key": self.ref_delta_ref_key,
         }
 
@@ -70,12 +68,14 @@ class AuditSpec:
             )
         legacy2 = sorted(
             k
-            for k in ("scaling_custom",)
+            for k in ("scaling_custom", "implied_delta_ref_key")
             if k in (d or {})
         )
         if legacy2:
             raise ValueError(
-                f"AuditSpec: remove unsupported keys {legacy2}."
+                f"AuditSpec: remove unsupported keys {legacy2}. "
+                "implied_delta is now the model-normalised fractional residual; "
+                "implied_delta_ref_key has no effect and must be removed."
             )
         return AuditSpec(
             name=d["name"],
@@ -85,7 +85,6 @@ class AuditSpec:
             implied_fn=d.get("implied_fn"),
             residual_basename=(d.get("residual_basename") or None),
             include_ref_delta=bool(d.get("include_ref_delta", True)),
-            implied_delta_ref_key=(d.get("implied_delta_ref_key") or None),
             ref_delta_ref_key=(d.get("ref_delta_ref_key") or None),
         )
 

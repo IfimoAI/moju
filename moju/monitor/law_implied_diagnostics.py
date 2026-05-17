@@ -1,13 +1,39 @@
 """
-Law-linked implied constitutive / scaling audits.
+Law-linked implied constitutive audits.
 
 For selected :class:`Laws.*` entries, Moju can auto-append ``constitutive_audit`` rows whose
-``implied_fn`` recovers a constitutive quantity directly from the governing-law fields. Residuals
-use subtract-style ``implied_delta``: ``Models.*(...) - implied`` with symmetric normalization
-(see :func:`moju.monitor.closure_registry.compute_implied_delta`).
+``implied_fn`` recovers a constitutive quantity from the governing-law fields.  The residual
+fed to ``R_eff`` is the model-normalised fractional form
 
-We avoid pairing **both** a group and a constitutive closure that are algebraically equivalent
-given fixed scales (e.g. Fourier: only ``thermal_diffusivity``, not a separate ``fo`` implied row).
+    delta = (Models.F(pred) - implied) / (|Models.F(pred)| + eps)
+
+(see :func:`moju.monitor.closure_registry.compute_implied_delta_with_debug`).  This is the
+same array shown in the constitutive divergence and consistency plots, so what is plotted
+is what is scored.
+
+``implied_fn`` comes in two flavours:
+
+1. **Scalar-coefficient via safe division.**  The law rearranges to solve for a single
+   material property (e.g. Fourier: ``alpha = T_t / T_laplacian``).  The helper uses
+   :func:`_safe_ratio` to NaN-mask ill-conditioned regions and returns a scalar field
+   shaped like the source fields.  Covers Fourier → α, Fick → D, wave → c,
+   adv-diff → κ.
+
+2. **Approximate / direct-field reconstruction.**  The law's constitutive term is vector
+   or tensor valued and cannot be inverted to a scalar coefficient by safe division.  The
+   helper returns the law-implied vector/tensor field directly (e.g.
+   ``viscous_acceleration = u_t + (u·grad) u + grad p`` from the momentum balance) so the
+   engine can compute element-wise ``Models.F(pred) - implied``.  μ rows (NS / Stokes /
+   Burgers) use :func:`_project_scalar_coefficient` (LSQ projection onto ``u_laplacian``)
+   to recover a per-point scalar from a vector balance.
+
+Both flavours feed into the same fractional residual via
+:func:`moju.monitor.closure_registry.compute_implied_delta_with_debug`, producing an array
+of the same shape as ``pred`` that flows uniformly into ``_r_eff_scalar``.
+
+We avoid pairing **both** a group and a constitutive closure that are algebraically
+equivalent given fixed scales (e.g. Fourier: only ``thermal_diffusivity``, not a separate
+``fo`` implied row).
 
 See README "Law-linked implied audits" and :func:`merge_law_implied_audit_specs`.
 """

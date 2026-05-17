@@ -30,7 +30,11 @@ Use inside optimization loops.
 
 Each log entry stores **`run_mode`**. **`audit()`** / **`_compute_log_step_metrics`** compute **overall admissibility** as the minimum of the present **laws** and **constitutive** category scores for **training** entries. Legacy entries **without** **`run_mode`** use the minimum finite score across all present categories (including **`data`** or legacy **`scaling/`** keys if present in old logs).
 
-**Plotly `visualize(..., mode="training")`** shows **two** KPI cards: Governing and Constitutive. When closure debug data is present, the dashboard also renders a constitutive row with a **Divergence** heatmap (normalised as `(model − implied) / (|model| + ε)`) and a **Constitutive Consistency** line plot with spatially varying ±1 % / ±5 % acceptability bands centred on the model prediction.
+**Plotly `visualize(..., mode="training")`** shows **two** KPI cards: Governing and Constitutive. The Governing and Constitutive per-key residual time-series panels now plot **`R_eff`** (the raw effective residual that the training loss minimises) — y-axis label `Effective residual (R_eff)` (linear) or `log10(R_eff + ε)` (log). Hovertemplates read `R_eff=…`. The worst-violation marker within each category ranks keys by terminal `R_eff` rather than `R_norm`. When closure debug data is present, the dashboard also renders a constitutive row with a **Divergence** heatmap (the model-normalised fractional residual `δ = (model − implied) / (|model| + ε)`) and a **Constitutive Consistency** line plot with spatially varying ±1 % / ±5 % acceptability bands centred on the model prediction.
+
+### Spatial residual heatmaps (training + eval)
+
+Spatial residual panels (training row 5 and eval row 4) always show the per-point absolute residual `|r|`, the same per-point quantity whose RMS feeds `R_eff`. The legacy `spatial_normalize` keyword has been **removed** from `visualize()`, `build_monitor_visualize_bundle()`, `build_visualize_bundle()`, and `build_spatial_rnorm_panels_from_residuals()` — callers that previously passed `spatial_normalize=False` (the default) see no change; callers that previously asked for `|r| / scale_k` must drop the kwarg.
 
 ## Eval (`run_mode="eval"`)
 
@@ -39,7 +43,7 @@ Use when you have a reference state or want **`ref_delta`** / **`data/`** compar
 - Pass **`state_ref`** to enable constitutive **`ref_delta`** and **`data/`** residuals.
 - **`audit()`** rolls up **overall admissibility** for eval as the minimum **finite** per-category score present in that step (**laws**, **constitutive**, **`data`**, and legacy **`scaling`** buckets if old logs still contain `scaling/...` keys).
 
-**`visualize(..., mode="eval")`** uses **two** KPI cards (Governing, Constitutive), matching training layout. Category breakdowns still list whatever categories exist in the log. **`mode="test"`** is accepted as an alias for **`eval`** (no deprecation warning).
+**`visualize(..., mode="eval")`** uses **two** KPI cards (Governing, Constitutive), matching training layout. The eval **combined bar chart** (row 3, last column) stays on **`R_norm`** — keys are scale-normalised so different residual families can be compared at a glance. Category breakdowns still list whatever categories exist in the log. **`mode="test"`** is accepted as an alias for **`eval`** (no deprecation warning).
 
 ## PDF reports
 

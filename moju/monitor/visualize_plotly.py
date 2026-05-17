@@ -1194,6 +1194,7 @@ def _build_plotly_monitor_figure_single(
 
     use_log_rnorm = r_norm_scale == "log"
     rnorm_y_title = "log10(R_norm + ε)" if use_log_rnorm else "Normalized residual (R norm)"
+    reff_y_title = "log10(R_eff + ε)" if use_log_rnorm else "Effective residual (R_eff)"
     hm_cs = spatial_heatmap_colorscale or DEFAULT_SPATIAL_HEATMAP_COLORSCALE
     compact = density == "compact"
     _sub_px = 14 if compact else 15
@@ -1208,6 +1209,10 @@ def _build_plotly_monitor_figure_single(
     bar_display: List[str] = bundle.get("bar_display") or []
     _bar_values_raw = bundle.get("bar_values")
     bar_values = np.asarray([] if _bar_values_raw is None else _bar_values_raw, dtype=float)
+    _bar_values_eff_raw = bundle.get("bar_values_eff")
+    bar_values_eff = np.asarray(
+        [] if _bar_values_eff_raw is None else _bar_values_eff_raw, dtype=float
+    )
     _overall_raw = bundle.get("overall_adm")
     overall_adm = np.asarray([] if _overall_raw is None else _overall_raw, dtype=float)
     metrics = list(bundle.get("metrics") or [])
@@ -1676,12 +1681,29 @@ def _build_plotly_monitor_figure_single(
         if use_log_rnorm:
             fig.update_yaxes(zeroline=False, row=3, col=_tc)
 
-    # Residual diagnostics (training only; eval uses combined bars on row 3)
+    # Residual diagnostics (training only; eval uses combined bars on row 3).
+    # Training panels plot R_eff (the raw effective residual) so the chart matches the
+    # quantity the loss is minimising; eval bar chart remains on R_norm so different
+    # keys can be compared at a glance after per-key scale normalisation.
     def _plot_residual_panel(cat: str, row: int, col: int, title_prefix: str) -> None:
-        info = category_training.get(cat, {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n))})
+        info = category_training.get(
+            cat, {"keys": [], "displays": [], "r_norm_mat": np.zeros((0, n)), "r_eff_mat": np.zeros((0, n))}
+        )
         ckeys: List[str] = list(info.get("keys") or [])
         displays: List[str] = list(info.get("displays") or [])
-        mat = np.asarray(info.get("r_norm_mat") if info.get("r_norm_mat") is not None else np.zeros((0, n)), dtype=float)
+        reff_raw = info.get("r_eff_mat")
+        if reff_raw is None:
+            rn_mat = np.asarray(
+                info.get("r_norm_mat") if info.get("r_norm_mat") is not None else np.zeros((0, n)),
+                dtype=float,
+            )
+            if rn_mat.size and ckeys:
+                scales = np.asarray([_scale_for_key(k) for k in ckeys], dtype=float).reshape(-1, 1)
+                mat = rn_mat * scales
+            else:
+                mat = np.zeros((0, n), dtype=float)
+        else:
+            mat = np.asarray(reff_raw, dtype=float)
         if mode_eff != "eval" and mat.size and len(ckeys):
             terminal = mat[:, -1]
             worst_i = int(np.nanargmax(terminal)) if np.any(np.isfinite(terminal)) else 0
@@ -1710,7 +1732,7 @@ def _build_plotly_monitor_figure_single(
                         line=dict(color=colr, width=width, dash=dash),
                         showlegend=False,
                         customdata=customdata,
-                        hovertemplate=f"{name}<br>{step_label}=%{{x}}<br>{'log10(R_norm+ε)' if use_log_rnorm else 'R_norm'}=%{{y:.4g}}<br>scale_k=%{{customdata:.4g}}<extra></extra>",
+                        hovertemplate=f"{name}<br>{step_label}=%{{x}}<br>{'log10(R_eff+ε)' if use_log_rnorm else 'R_eff'}=%{{y:.4g}}<br>scale_k=%{{customdata:.4g}}<extra></extra>",
                     ),
                     row=row,
                     col=col,
@@ -1736,7 +1758,20 @@ def _build_plotly_monitor_figure_single(
             fk = [i for i, k in enumerate(bar_keys) if str(k).startswith(f"{cat}/")]
             if fk:
                 xs = [truncate_display_label(bar_display[i], 40) for i in fk]
-                vals = [float(bar_values[i]) if i < len(bar_values) and np.isfinite(bar_values[i]) else 0.0 for i in fk]
+                if bar_values_eff.size:
+                    vals = [
+                        float(bar_values_eff[i])
+                        if i < len(bar_values_eff) and np.isfinite(bar_values_eff[i])
+                        else 0.0
+                        for i in fk
+                    ]
+                else:
+                    vals = [
+                        float(bar_values[i]) * _scale_for_key(bar_keys[i])
+                        if i < len(bar_values) and np.isfinite(bar_values[i])
+                        else 0.0
+                        for i in fk
+                    ]
                 ys = [float(np.log10(max(v, 0.0) + R_NORM_LOG_EPS)) if use_log_rnorm else v for v in vals]
                 cds = [_scale_for_key(bar_keys[i]) for i in fk]
                 _bc = RESIDUAL_COLOR_LAWS if cat == "laws" else RESIDUAL_COLOR_CONSTITUTIVE
@@ -1747,7 +1782,7 @@ def _build_plotly_monitor_figure_single(
                         marker=dict(color=_bc, line=dict(color=_ENTERPRISE_THEME["bar_line"], width=0.5)),
                         customdata=cds,
                         showlegend=False,
-                        hovertemplate="%{x}<br>" + (("log10(R_norm+ε)=%{y:.4g}") if use_log_rnorm else ("R_norm=%{y:.4g}")) + "<br>scale_k=%{customdata:.4g}<extra></extra>",
+                        hovertemplate="%{x}<br>" + (("log10(R_eff+ε)=%{y:.4g}") if use_log_rnorm else ("R_eff=%{y:.4g}")) + "<br>scale_k=%{customdata:.4g}<extra></extra>",
                     ),
                     row=row,
                     col=col,
@@ -1765,7 +1800,7 @@ def _build_plotly_monitor_figure_single(
             automargin=True,
         )
         fig.update_yaxes(
-            title_text=rnorm_y_title if col == 1 else "",
+            title_text=reff_y_title if col == 1 else "",
             row=row,
             col=col,
             automargin=True,

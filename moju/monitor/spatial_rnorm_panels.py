@@ -1,9 +1,9 @@
 """
 Build spatial panels (laws + constitutive) from residuals and ``state_pred``.
 
-By default each cell is :math:`|r|` along the mesh (**absolute residual**). With
-``normalize_spatial=True``, values are :math:`|r|/s_k` (**R_norm-style**, same per-key
-scale as audit logs).
+Each cell is :math:`|r|` along the mesh — the per-point absolute residual whose RMS
+feeds :math:`R_{\\mathrm{eff}}`.  Spatial heatmaps are therefore R_eff-aligned: the
+visual you see matches the residual the engine is scoring.
 
 Used by :func:`moju.monitor.auditor.visualize` when ``residuals`` and coordinates are
 available without explicit ``spatial_law_panel`` / ``spatial_rnorm_panel``.
@@ -77,29 +77,6 @@ def infer_default_coord_axis_from_residuals(
     if n_spatial is None:
         return None
     return np.linspace(0.0, 1.0, n_spatial, dtype=float)
-
-
-def _per_key_scale_flat(
-    flat_key: str,
-    *,
-    log_entry: Optional[Dict[str, Any]],
-    first_rms: Optional[Dict[str, Any]],
-    r_ref: Optional[Dict[str, float]],
-) -> float:
-    """Scalar scale for R_norm-style normalization (matches audit log rules)."""
-    if log_entry is None:
-        return 1.0
-    rms = log_entry.get("rms") or {}
-    entry_scale = log_entry.get("scale") or {}
-    fr = first_rms or {}
-    ref = r_ref or {}
-    if flat_key in ref and ref[flat_key] is not None and float(ref[flat_key]) > 0:
-        return float(ref[flat_key])
-    if flat_key in entry_scale and entry_scale[flat_key] is not None and float(entry_scale[flat_key]) > 0:
-        return float(entry_scale[flat_key])
-    if flat_key in fr and fr[flat_key] is not None and float(fr[flat_key]) > 0:
-        return float(fr[flat_key])
-    return 1.0
 
 
 def _is_law_linked_implied_constitutive_key(flat_key: str) -> bool:
@@ -202,11 +179,7 @@ def _build_nd_spatial_panels(
     pred: Dict[str, Any],
     *,
     prefer_last_t: bool,
-    log_entry: Optional[Dict[str, Any]],
-    first_rms: Optional[Dict[str, Any]],
-    r_ref: Optional[Dict[str, float]],
     dim: int,
-    normalize_spatial: bool,
 ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     if dim == 3:
         if pred.get("x") is None or pred.get("y") is None or pred.get("z") is None:
@@ -246,10 +219,6 @@ def _build_nd_spatial_panels(
         if field is None:
             continue
         row = np.abs(np.asarray(field, dtype=float))
-        if normalize_spatial:
-            scale_k = _per_key_scale_flat(k, log_entry=log_entry, first_rms=first_rms, r_ref=r_ref)
-            denom = max(float(scale_k), 1e-30)
-            row = row / denom
         sk = str(k)
         if sk.startswith("laws/") and len(law_values) < 12:
             law_values[sk] = row
@@ -287,14 +256,18 @@ def build_spatial_rnorm_panels_from_residuals(
     first_rms: Optional[Dict[str, Any]] = None,
     r_ref: Optional[Dict[str, float]] = None,
     log_step_index: Optional[int] = None,
-    normalize_spatial: bool = False,
 ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """
     Law and constitutive spatial panels: 3D volume, 2D grid, or 1D along ``coord_key``.
 
-    Default ``normalize_spatial=False``: :math:`|r|` (absolute residual). If True,
-    :math:`|r|/s_k` using the same scales as audit R_norm.
+    Each cell is :math:`|r|`, the per-point absolute residual whose RMS feeds
+    :math:`R_{\\mathrm{eff}}` — so spatial heatmaps are R_eff-aligned.
+
+    ``log_entry`` / ``first_rms`` / ``r_ref`` are kept for backwards-compatible call sites;
+    they are no longer used internally but remain accepted to avoid breaking existing
+    integrations.
     """
+    _ = (log_entry, first_rms, r_ref)
 
     def _tag_step(panel: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if panel is None or log_step_index is None:
@@ -316,11 +289,7 @@ def build_spatial_rnorm_panels_from_residuals(
         flat,
         pred_work,
         prefer_last_t=prefer_last_t,
-        log_entry=log_entry,
-        first_rms=first_rms,
-        r_ref=r_ref,
         dim=3,
-        normalize_spatial=normalize_spatial,
     )
     if p3[0] is not None or p3[1] is not None:
         return _tag_step(p3[0]), _tag_step(p3[1])
@@ -329,11 +298,7 @@ def build_spatial_rnorm_panels_from_residuals(
         flat,
         pred_work,
         prefer_last_t=prefer_last_t,
-        log_entry=log_entry,
-        first_rms=first_rms,
-        r_ref=r_ref,
         dim=2,
-        normalize_spatial=normalize_spatial,
     )
     if p2[0] is not None or p2[1] is not None:
         return _tag_step(p2[0]), _tag_step(p2[1])
@@ -351,10 +316,6 @@ def build_spatial_rnorm_panels_from_residuals(
         if sl is None:
             continue
         row = np.abs(np.asarray(sl, dtype=float))
-        if normalize_spatial:
-            scale_k = _per_key_scale_flat(k, log_entry=log_entry, first_rms=first_rms, r_ref=r_ref)
-            denom = max(float(scale_k), 1e-30)
-            row = row / denom
         if k.startswith("laws/") and len(law_values) < 12:
             law_values[k] = row
         elif k.startswith("constitutive/"):

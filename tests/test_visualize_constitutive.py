@@ -1,6 +1,6 @@
 """
-Unit tests for the Constitutive Divergence card (all four modes, balance +
-subtract closures, composite dashboard).
+Unit tests for the Constitutive Divergence card (all four modes, subtract
+closures, composite dashboard).
 """
 
 from __future__ import annotations
@@ -9,14 +9,12 @@ import numpy as np
 import pytest
 
 
-def _balance_bundle(nx: int = 8, ny: int = 6) -> dict:
+def _twod_bundle(nx: int = 8, ny: int = 6) -> dict:
+    """2-D subtract-mode bundle (pred / implied have shape (ny, nx))."""
     rng = np.random.default_rng(0)
-    T_t = rng.standard_normal((ny, nx)) * 0.1
-    T_lap = rng.standard_normal((ny, nx)) * 0.05
     alpha_pred = np.full((ny, nx), 1.5e-5)
-    scale_a = T_t
-    scale_b = alpha_pred * T_lap
-    raw = scale_a - scale_b
+    # Implied alpha = T_t / T_lap; noise so divergence is nonzero in places.
+    alpha_implied = alpha_pred * (1.0 + 0.2 * rng.standard_normal((ny, nx)))
     return {
         "log": [
             {
@@ -34,18 +32,20 @@ def _balance_bundle(nx: int = 8, ny: int = 6) -> dict:
         "closure_debug": {
             "thermal_diffusivity/law_fourier_conduction": {
                 "pred": alpha_pred,
-                "implied": None,
-                "raw": raw,
-                "scale_a": scale_a,
-                "scale_b": scale_b,
-                "ref": None,
-                "mode": "balance",
+                "implied": alpha_implied,
+                "raw": alpha_pred - alpha_implied,
+                "delta": (alpha_pred - alpha_implied) / (np.abs(alpha_pred) + 1e-30),
+                "mode": "subtract",
                 "output_key": "alpha",
                 "law_name": "fourier_conduction",
                 "model_name": "thermal_diffusivity",
             },
         },
     }
+
+
+# Legacy alias for tests that historically used a 2-D balance fixture.
+_balance_bundle = _twod_bundle
 
 
 def _subtract_bundle(n: int = 64) -> dict:
@@ -68,9 +68,7 @@ def _subtract_bundle(n: int = 64) -> dict:
                 "pred": pred,
                 "implied": implied,
                 "raw": pred - implied,
-                "scale_a": None,
-                "scale_b": None,
-                "ref": None,
+                "delta": (pred - implied) / (np.abs(pred) + 1e-30),
                 "mode": "subtract",
                 "output_key": "rho",
                 "law_name": "mass_compressible",
@@ -81,11 +79,11 @@ def _subtract_bundle(n: int = 64) -> dict:
 
 
 @pytest.mark.parametrize("mode", ["spatial", "scatter", "distribution", "hotspot"])
-def test_balance_mode_all_panels(mode: str) -> None:
+def test_subtract_mode_2d_all_panels(mode: str) -> None:
     pytest.importorskip("plotly")
     from moju.monitor.visualize_constitutive import build_constitutive_divergence_card
 
-    bundle = _balance_bundle()
+    bundle = _twod_bundle()
     fig = build_constitutive_divergence_card(bundle, mode=mode)
     assert fig is not None
     assert len(fig.data) >= 1
@@ -106,7 +104,7 @@ def test_constitutive_dashboard_composes_four_panels() -> None:
     pytest.importorskip("plotly")
     from moju.monitor.visualize_constitutive import build_constitutive_divergence_dashboard
 
-    bundle = _balance_bundle()
+    bundle = _twod_bundle()
     fig = build_constitutive_divergence_dashboard(bundle)
     # 2x2 composite: spatial trio + scatter (1) + hist (1) + hotspot (1) = at least 6
     assert len(fig.data) >= 6
@@ -115,14 +113,12 @@ def test_constitutive_dashboard_composes_four_panels() -> None:
 def test_list_basenames_sorted_by_worst_rnorm() -> None:
     from moju.monitor.visualize_constitutive import list_constitutive_basenames
 
-    bundle = _balance_bundle()
+    bundle = _twod_bundle()
     bundle["closure_debug"]["second/law_other"] = {
         "pred": np.array([1.0]),
         "implied": np.array([1.0]),
         "raw": np.array([0.0]),
-        "scale_a": None,
-        "scale_b": None,
-        "ref": None,
+        "delta": np.array([0.0]),
         "mode": "subtract",
         "output_key": "x",
         "law_name": "other",
@@ -157,7 +153,7 @@ def test_spatial_normalized_only_single_trace_2d() -> None:
     pytest.importorskip("plotly")
     from moju.monitor.visualize_constitutive import build_spatial_normalized_divergence_figure
 
-    fig = build_spatial_normalized_divergence_figure(_balance_bundle())
+    fig = build_spatial_normalized_divergence_figure(_twod_bundle())
     assert len(fig.data) == 1
     assert fig.data[0].type == "heatmap"
 
@@ -186,9 +182,7 @@ def test_spatial_normalized_heatmap_uses_time_axis_label() -> None:
                 "pred": pred,
                 "implied": implied,
                 "raw": pred - implied,
-                "scale_a": None,
-                "scale_b": None,
-                "ref": None,
+                "delta": (pred - implied) / (np.abs(pred) + 1e-30),
                 "mode": "subtract",
                 "output_key": "alpha",
             }
@@ -219,9 +213,7 @@ def test_spatial_normalized_accepts_scalar_model_with_field_implied() -> None:
                 "pred": np.array(2.0),
                 "implied": implied,
                 "raw": np.zeros_like(implied),
-                "scale_a": None,
-                "scale_b": None,
-                "ref": None,
+                "delta": np.zeros_like(implied),
                 "mode": "subtract",
                 "output_key": "alpha",
             }
@@ -253,7 +245,7 @@ def test_spatial_normalized_heatmap_uses_user_term_title_and_colorbar() -> None:
     pytest.importorskip("plotly")
     from moju.monitor.visualize_constitutive import build_spatial_normalized_divergence_figure
 
-    fig = build_spatial_normalized_divergence_figure(_balance_bundle())
+    fig = build_spatial_normalized_divergence_figure(_twod_bundle())
     assert str(fig.layout.title.text) == "Constitutive Divergence (Thermal Diffusivity)"
     hm = fig.data[0]
     assert hm.type == "heatmap"
@@ -268,15 +260,15 @@ def test_spatial_three_panel_card_unchanged_trace_count() -> None:
     pytest.importorskip("plotly")
     from moju.monitor.visualize_constitutive import build_constitutive_divergence_card
 
-    fig = build_constitutive_divergence_card(_balance_bundle(), mode="spatial")
+    fig = build_constitutive_divergence_card(_twod_bundle(), mode="spatial")
     assert len(fig.data) == 3
 
 
-def test_prepare_mi_vs_x_embed_2d_balance() -> None:
+def test_prepare_mi_vs_x_embed_2d_subtract() -> None:
     pytest.importorskip("plotly")
     from moju.monitor.visualize_constitutive import prepare_constitutive_model_implied_vs_x_embed
 
-    emb = prepare_constitutive_model_implied_vs_x_embed(_balance_bundle())
+    emb = prepare_constitutive_model_implied_vs_x_embed(_twod_bundle())
     assert emb is not None
     # 4 tier-boundary + 5 band-fill + 2 named line traces (model + implied)
     assert len(emb["traces"]) == 11
@@ -368,9 +360,7 @@ def test_prepare_mi_vs_x_prefers_last_time_slice() -> None:
                 "pred": pred,
                 "implied": implied,
                 "raw": pred - implied,
-                "scale_a": None,
-                "scale_b": None,
-                "ref": None,
+                "delta": (pred - implied) / (np.abs(pred) + 1e-30),
                 "mode": "subtract",
                 "output_key": "x",
                 "law_name": "x",

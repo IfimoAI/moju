@@ -43,7 +43,6 @@ from moju.monitor.model_derived_registry import (
     enrich_derived_state_from_constitutive_audits,
 )
 from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
-from moju.monitor.closure_registry import apply_closure_discrepancy_normalize
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
 
 __all__ = [
@@ -77,7 +76,6 @@ __all__ = [
     "ModelDerivedBridge",
     "collect_group_input_state_keys",
     "enrich_derived_state_from_constitutive_audits",
-    "apply_closure_discrepancy_normalize",
     "pretty_residual_key",
     "pretty_category_name",
     "build_spatial_rnorm_panels_from_residuals",

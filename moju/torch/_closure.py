@@ -1,10 +1,17 @@
 """
-Torch-native closure normalization and delta computation.
+Torch-native closure normalisation and delta computation.
 
-Mirrors ``moju.monitor.closure_registry`` functions:
-- :func:`normalize_discrepancy_torch`  ↔  ``apply_closure_discrepancy_normalize``
-- :func:`compute_implied_delta_torch`  ↔  ``compute_implied_delta``
-- :func:`compute_ref_delta_torch`      ↔  ``compute_ref_delta``
+Mirrors :mod:`moju.monitor.closure_registry`:
+
+- :func:`compute_implied_delta_torch`   ↔  ``compute_implied_delta``
+- :func:`compute_ref_delta_torch`       ↔  ``compute_ref_delta``
+
+``implied_delta`` is the model-normalised fractional residual
+
+    delta = (F(pred) - implied) / (|F(pred)| + eps)
+
+with ``eps = _NORMALIZE_EPS = 1e-30`` (kept in sync with the JAX side).  The
+formula is element-wise, so scalar / vector / tensor predictions all work.
 
 All operations use ``torch`` so residuals remain on the autograd tape.
 """
@@ -13,6 +20,8 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
+
+_NORMALIZE_EPS: float = 1e-30
 
 
 def _val(state: Dict[str, Any], constants: Dict[str, Any], key: str) -> Optional[Any]:
@@ -28,31 +37,6 @@ def _to_tensor(v: Any) -> torch.Tensor:
     return torch.as_tensor(v, dtype=torch.float32)
 
 
-def normalize_discrepancy_torch(
-    diff: Any,
-    pred: Any,
-    other: Any,
-    *,
-    ref: Any = None,
-    eps: float = 1e-30,
-) -> torch.Tensor:
-    """
-    Nondimensional closure discrepancy — torch version.
-
-    - If ``ref`` is not ``None``: ``diff / (ε + |ref|)``
-    - Else: ``diff / (ε + |pred| + |other|)``
-
-    Matches :func:`moju.monitor.closure_registry.apply_closure_discrepancy_normalize`.
-    """
-    diff_t = _to_tensor(diff)
-    if ref is not None:
-        ref_t = _to_tensor(ref)
-        return diff_t / (eps + torch.abs(ref_t))
-    pred_t = _to_tensor(pred)
-    other_t = _to_tensor(other)
-    return diff_t / (eps + torch.abs(pred_t) + torch.abs(other_t))
-
-
 def compute_implied_delta_torch_with_debug(
     *,
     fn_wrapped: Callable[..., torch.Tensor],
@@ -60,33 +44,22 @@ def compute_implied_delta_torch_with_debug(
     state_map: Dict[str, str],
     state_pred: Dict[str, Any],
     constants: Dict[str, Any],
-    implied_balance_fn_torch: Optional[
-        Callable[[Dict[str, Any], Dict[str, Any], torch.Tensor],
-                 Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]]
-    ] = None,
     implied_fn_torch: Optional[
         Callable[[Dict[str, Any], Dict[str, Any]], Optional[torch.Tensor]]
     ] = None,
     output_key: Optional[str] = None,
-    implied_delta_ref_key: Optional[str] = None,
 ) -> Tuple[Optional[torch.Tensor], Optional[Dict[str, Any]]]:
     """
-    Torch version of :func:`moju.monitor.closure_registry.compute_implied_delta_with_debug`.
+    Torch version of
+    :func:`moju.monitor.closure_registry.compute_implied_delta_with_debug`.
 
-    Returns ``(delta, debug_dict)`` so visualisations can access raw
-    ``pred`` / ``implied`` / balance terms.  ``debug_dict`` is ``None`` when
-    the audit row was skipped.
+    Returns ``(delta, debug_dict)``.  ``debug_dict`` is ``None`` when the audit
+    row was skipped, otherwise has keys ``pred``, ``implied``, ``raw``
+    (dimensional difference), ``delta`` (array sent to ``R_eff``), ``mode``,
+    ``output_key``.
     """
-    modes = (
-        (1 if implied_balance_fn_torch is not None else 0)
-        + (1 if implied_fn_torch is not None else 0)
-    )
-    if modes == 0:
+    if implied_fn_torch is None:
         return None, None
-    if modes > 1:
-        raise ValueError(
-            "Provide at most one of implied_balance_fn_torch and implied_fn_torch"
-        )
 
     pred_args: List[torch.Tensor] = []
     for an in arg_names:
@@ -103,42 +76,8 @@ def compute_implied_delta_torch_with_debug(
     except Exception:  # noqa: BLE001
         return None, None
 
-    ref_tensor: Optional[torch.Tensor] = None
-    if implied_delta_ref_key:
-        rv = _val(state_pred, constants, implied_delta_ref_key)
-        if rv is not None:
-            ref_tensor = _to_tensor(rv)
-    if ref_tensor is None and output_key is not None:
-        rv = _val(state_pred, constants, f"{output_key}_ref")
-        if rv is not None:
-            ref_tensor = _to_tensor(rv)
-
-    if implied_balance_fn_torch is not None:
-        try:
-            triple = implied_balance_fn_torch(state_pred, constants, pred)
-        except Exception:  # noqa: BLE001
-            return None, None
-        if triple is None:
-            return None, None
-        raw, scale_a, scale_b = triple
-        try:
-            delta = normalize_discrepancy_torch(raw, scale_a, scale_b, ref=ref_tensor)
-        except Exception:  # noqa: BLE001
-            return None, None
-        debug = {
-            "pred": pred,
-            "implied": None,
-            "raw": raw,
-            "scale_a": scale_a,
-            "scale_b": scale_b,
-            "ref": ref_tensor,
-            "mode": "balance",
-            "output_key": output_key,
-        }
-        return delta, debug
-
     try:
-        implied = implied_fn_torch(state_pred, constants)  # type: ignore[misc]
+        implied = implied_fn_torch(state_pred, constants)
     except Exception:  # noqa: BLE001
         return None, None
     if implied is None:
@@ -147,16 +86,14 @@ def compute_implied_delta_torch_with_debug(
     try:
         raw = pred - implied_t
         pred_debug, implied_debug = torch.broadcast_tensors(pred, implied_t)
-        delta = normalize_discrepancy_torch(raw, pred, implied_t, ref=ref_tensor)
+        delta = raw / (torch.abs(pred) + _NORMALIZE_EPS)
     except Exception:  # noqa: BLE001
         return None, None
     debug = {
         "pred": pred_debug,
         "implied": implied_debug,
         "raw": raw,
-        "scale_a": None,
-        "scale_b": None,
-        "ref": ref_tensor,
+        "delta": delta,
         "mode": "subtract",
         "output_key": output_key,
     }
@@ -170,34 +107,18 @@ def compute_implied_delta_torch(
     state_map: Dict[str, str],
     state_pred: Dict[str, Any],
     constants: Dict[str, Any],
-    implied_balance_fn_torch: Optional[
-        Callable[[Dict[str, Any], Dict[str, Any], torch.Tensor],
-                 Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]]
-    ] = None,
     implied_fn_torch: Optional[
         Callable[[Dict[str, Any], Dict[str, Any]], Optional[torch.Tensor]]
     ] = None,
     output_key: Optional[str] = None,
-    implied_delta_ref_key: Optional[str] = None,
 ) -> Optional[torch.Tensor]:
     """
     Torch version of :func:`moju.monitor.closure_registry.compute_implied_delta`.
 
-    Evaluates ``fn_wrapped(*model_args)`` → ``pred`` (torch.Tensor), then
-    computes the normalized discrepancy in one of two modes:
-
-    - **Balance mode** (``implied_balance_fn_torch``): calls
-      ``fn(state_pred, constants, pred)`` → ``(raw, scale_a, scale_b)`` and
-      normalizes symmetrically.
-    - **Subtract mode** (``implied_fn_torch``): computes
-      ``pred − implied`` normalized by ``|pred| + |implied|``.
-
+    Evaluates ``fn_wrapped(*model_args)`` → ``pred`` and returns the
+    model-normalised fractional residual ``(pred − implied) / (|pred| + eps)``.
     Returns ``None`` if any required key is missing or the result is
     numerically degenerate.
-
-    Note: thin wrapper around
-    :func:`compute_implied_delta_torch_with_debug` that discards the debug
-    sidecar.  Use the ``_with_debug`` variant for visualisations.
     """
     delta, _debug = compute_implied_delta_torch_with_debug(
         fn_wrapped=fn_wrapped,
@@ -205,10 +126,8 @@ def compute_implied_delta_torch(
         state_map=state_map,
         state_pred=state_pred,
         constants=constants,
-        implied_balance_fn_torch=implied_balance_fn_torch,
         implied_fn_torch=implied_fn_torch,
         output_key=output_key,
-        implied_delta_ref_key=implied_delta_ref_key,
     )
     return delta
 
@@ -227,8 +146,9 @@ def compute_ref_delta_torch(
     """
     Torch version of :func:`moju.monitor.closure_registry.compute_ref_delta`.
 
-    Evaluates ``fn_wrapped`` on both pred and ref states, returns
-    normalised difference ``(F(pred) − F(ref)) / (ε + |F(pred)| + |F(ref)|)``.
+    Evaluates ``fn_wrapped`` on both pred and ref states and returns the
+    normalised difference ``(F(pred) − F(ref)) / (ε + |F(pred)| + |F(ref)|)``,
+    or ``/ (ε + |ref|)`` when a reference tensor is supplied.
     """
     pred_args: List[torch.Tensor] = []
     ref_args: List[torch.Tensor] = []
@@ -261,6 +181,8 @@ def compute_ref_delta_torch(
             ref_tensor = _to_tensor(rv)
 
     try:
-        return normalize_discrepancy_torch(raw, pred, refv, ref=ref_tensor)
+        if ref_tensor is not None:
+            return raw / (_NORMALIZE_EPS + torch.abs(ref_tensor))
+        return raw / (_NORMALIZE_EPS + torch.abs(pred) + torch.abs(refv))
     except Exception:  # noqa: BLE001
         return None

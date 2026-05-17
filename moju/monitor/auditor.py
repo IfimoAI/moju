@@ -8,8 +8,11 @@ ResidualEngine: residuals for governing laws, optional groups (dimensionless num
 
 Constitutive audits are tied to Models.* functions via
 **ref_delta** and **implied_delta**.
-**implied_delta** and **ref_delta** are always **nondimensional** (see
-``moju.monitor.closure_registry.apply_closure_discrepancy_normalize``). Logged ``rms`` per key is
+**implied_delta** is the model-normalised fractional residual
+``(F(pred) - implied) / (|F(pred)| + eps)`` (see
+``moju.monitor.closure_registry.compute_implied_delta_with_debug``); ``ref_delta`` keeps a
+symmetric / reference normalisation. Both are nondimensional by construction. Logged
+``rms`` per key is
 **R_eff** = **RMS_δ(r)** = √(mean(r²)+δ²) with tiny **δ²** = :data:`R_EFF_RMS_JITTER_SQ` (AD-smooth at **r=0**).
 With default **p** = :data:`R_EFF_Q_POWER` (**0**, plain smooth RMS), **Q** is not used.
 Nonzero **p** multiplies **RMS_δ** by **Q^p**, **Q** = RMS(m)/mean(m), **m_i** = sqrt(r_i²+ε²); **Q=1** when magnitudes are
@@ -898,7 +901,6 @@ def _build_visualize_bundle(
     spatial_parsed: Optional[Dict[str, Any]],
     spatial_rnorm_parsed: Optional[Dict[str, Any]] = None,
     mode: str,
-    spatial_normalize: bool = False,
     worst_keys_top_n: int = 12,
     closure_debug: Optional[Dict[str, Dict[str, Any]]] = None,
     residuals: Optional[Dict[str, Any]] = None,
@@ -932,14 +934,23 @@ def _build_visualize_bundle(
         cat_keys = sorted(buckets.get(cat, []))[:cap]
         nk = len(cat_keys)
         mat = np.zeros((nk, n)) if nk else np.zeros((0, n))
+        reff_mat = np.zeros((nk, n)) if nk else np.zeros((0, n))
         for j in range(n):
+            rms_j = (log[j].get("rms") or {}) if isinstance(log[j], dict) else {}
             for i, kk in enumerate(cat_keys):
                 v = metrics[j]["r_norm"].get(kk)
                 mat[i, j] = float(v) if v is not None else float("nan")
+                rv = rms_j.get(kk)
+                try:
+                    rv_f = float(rv) if rv is not None else float("nan")
+                except (TypeError, ValueError):
+                    rv_f = float("nan")
+                reff_mat[i, j] = rv_f
         category_training[cat] = {
             "keys": cat_keys,
             "displays": [pretty_residual_key(k) for k in cat_keys],
             "r_norm_mat": mat,
+            "r_eff_mat": reff_mat,
         }
 
     legend_keys = plot_keys[: min(cap, len(plot_keys))]
@@ -952,11 +963,19 @@ def _build_visualize_bundle(
     legend_display = [pretty_residual_key(k) for k in legend_keys]
     bar_display = [pretty_residual_key(k) for k in bar_keys]
     bar_values = []
+    bar_values_eff: List[float] = []
     last_rn = metrics[-1]["r_norm"]
+    last_rms = (log[-1].get("rms") or {}) if isinstance(log[-1], dict) else {}
     for kk in bar_keys:
         v = last_rn.get(kk)
         bar_values.append(float(v) if v is not None else float("nan"))
+        rv = last_rms.get(kk)
+        try:
+            bar_values_eff.append(float(rv) if rv is not None else float("nan"))
+        except (TypeError, ValueError):
+            bar_values_eff.append(float("nan"))
     bar_values_arr = np.asarray(bar_values, dtype=float)
+    bar_values_eff_arr = np.asarray(bar_values_eff, dtype=float)
 
     cat_colors = {
         "laws": "#4e79a7",
@@ -975,9 +994,9 @@ def _build_visualize_bundle(
         nr_title = f"Normalized Residuals (showing {len(legend_keys)} of {len(plot_keys)} keys)"
 
     category_titles = {
-        "laws": "Normalized Governing Laws Residuals",
-        "constitutive": "Normalized Constitutive Residuals",
-        "scaling": "Normalized Scaling Residuals",
+        "laws": "Governing Laws Residuals (R_eff)",
+        "constitutive": "Constitutive Residuals (R_eff)",
+        "scaling": "Scaling Residuals (R_eff)",
     }
 
     return {
@@ -995,6 +1014,7 @@ def _build_visualize_bundle(
         "bar_keys": bar_keys,
         "bar_display": bar_display,
         "bar_values": bar_values_arr,
+        "bar_values_eff": bar_values_eff_arr,
         "overall_adm": [float(metrics[i]["overall_admissibility_score"]) for i in range(n)],
         "cats_fin": cats_fin,
         "cat_colors": cat_colors,
@@ -1003,7 +1023,6 @@ def _build_visualize_bundle(
         "mode": mode,
         "nr_title": nr_title,
         "np": np,
-        "spatial_normalize": bool(spatial_normalize),
         "worst_keys_rows": _worst_keys_table_rows(
             log, plot_keys, metrics, top_n=worst_keys_top_n
         ),
@@ -1103,8 +1122,6 @@ def _maybe_build_spatial_panels(
     r_ref: Optional[Dict[str, float]],
     spatial_coord_key: str,
     spatial_prefer_last_t: bool,
-    *,
-    spatial_normalize: bool = False,
 ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     if residuals is None:
         return spatial_law_panel, spatial_rnorm_panel
@@ -1119,8 +1136,6 @@ def _maybe_build_spatial_panels(
                 if k in snap and snap[k] is not None and k not in pred:
                     pred[k] = snap[k]
 
-    auto_law: Optional[Dict[str, Any]] = None
-    auto_rnorm: Optional[Dict[str, Any]] = None
     log_entry = log_full[-1] if log_full else None
     first_rms = (log_full[0].get("rms") or {}) if log_full else {}
     log_step_index = len(log_full) - 1 if log_full else None
@@ -1134,7 +1149,6 @@ def _maybe_build_spatial_panels(
         first_rms=first_rms,
         r_ref=rr,
         log_step_index=log_step_index,
-        normalize_spatial=bool(spatial_normalize),
     )
 
     law_out = spatial_law_panel if spatial_law_panel is not None else auto_law
@@ -1155,7 +1169,6 @@ def build_monitor_visualize_bundle(
     state_pred: Optional[Mapping[str, Any]] = None,
     spatial_coord_key: str = "x",
     spatial_prefer_last_t: bool = True,
-    spatial_normalize: bool = False,
     engine: Optional[Any] = None,
     worst_keys_top_n: int = 12,
     show_state_overlay: bool = False,
@@ -1166,8 +1179,8 @@ def build_monitor_visualize_bundle(
     Intended for Studio and other callers that want several small Plotly figures instead of
     one combined subplot grid.
 
-    ``spatial_normalize``: if True, auto-built spatial panels use R_norm-style :math:`|r|/s_k`;
-    default False uses absolute :math:`|r|` vs position (labels match).
+    Spatial panels always show per-point ``|r|`` (the same per-point quantity whose RMS
+    feeds ``R_eff``).
 
     ``engine``: when ``residuals`` is omitted, use :attr:`ResidualEngine.last_residuals` if given.
 
@@ -1193,7 +1206,6 @@ def build_monitor_visualize_bundle(
         r_ref,
         spatial_coord_key,
         spatial_prefer_last_t,
-        spatial_normalize=spatial_normalize,
     )
     mode = _normalize_visualize_mode(mode)
     work_log = list(log)
@@ -1214,7 +1226,6 @@ def build_monitor_visualize_bundle(
         spatial_parsed=spatial_parsed,
         spatial_rnorm_parsed=spatial_rnorm_parsed,
         mode=mode,
-        spatial_normalize=spatial_normalize,
         worst_keys_top_n=worst_keys_top_n,
         closure_debug=closure_debug_sidecar,
         residuals=eff_residuals,
@@ -1237,7 +1248,6 @@ def visualize(
     state_pred: Optional[Mapping[str, Any]] = None,
     spatial_coord_key: str = "x",
     spatial_prefer_last_t: bool = True,
-    spatial_normalize: bool = False,
     engine: Optional[Any] = None,
     figure_title: Optional[str] = None,
     step_label: str = "Step",
@@ -1266,11 +1276,11 @@ def visualize(
       final step). **Second row:** **two** KPI indicators (Governing, Constitutive) only.
       **Third row:** two panels — :math:`R_{\\mathrm{norm}}` vs
       step for **governing laws** and **constitutive** (``data/`` and ``scaling/`` omitted);
-      **y-axis** is ``log10(R_{\\mathrm{norm}} + \\varepsilon)`` by default, or linear if
+      **y-axis** is ``log10(R_{\\mathrm{eff}} + \\varepsilon)`` by default, or linear if
       ``r_norm_scale="linear"``. **Fourth row:** **vs spatial coordinate** (last logged step)
-      for laws and constitutive: by default :math:`|r|` (**absolute residual**); set
-      ``spatial_normalize=True`` for :math:`R_{\\mathrm{norm}}`-style :math:`|r|/s_k`.
-      Placeholders if no spatial data. Pass ``spatial_*_panel``, or ``residuals`` with coordinates from
+      for laws and constitutive: per-point :math:`|r|`, the same per-point quantity whose RMS
+      feeds :math:`R_{\\mathrm{eff}}` (R_eff-aligned spatial heatmap). Placeholders if no
+      spatial data. Pass ``spatial_*_panel``, or ``residuals`` with coordinates from
       ``state_pred``, or ``residuals`` with the **last** log entry's ``coord_snapshot``
       (written by :meth:`ResidualEngine.compute_residuals` when the built state has ``x`` /
       ``y`` / ``z`` / ``t``).
@@ -1344,9 +1354,6 @@ def visualize(
         Primary 1D axis name when falling back from 3D/2D to a line slice (default ``"x"``).
     spatial_prefer_last_t
         If True and ``t`` is present, use the last time slice of residual fields.
-    spatial_normalize
-        If True, auto-built spatial panels use :math:`|r|/s_k` (R_norm-style). Default False
-        uses absolute residual :math:`|r|` vs position.
     show_state_overlay
         When ``True``, try to add an optional **predicted-state** overlay row aligned to law
         spatial axes (requires ``state_pred`` and compatible field layouts). Default ``False``.
@@ -1442,7 +1449,6 @@ def visualize(
         r_ref,
         spatial_coord_key,
         spatial_prefer_last_t,
-        spatial_normalize=spatial_normalize,
     )
 
     work_log = list(log)
@@ -1464,7 +1470,6 @@ def visualize(
         spatial_parsed=spatial_parsed,
         spatial_rnorm_parsed=spatial_rnorm_parsed,
         mode=mode,
-        spatial_normalize=spatial_normalize,
         worst_keys_top_n=worst_keys_top_n,
         closure_debug=closure_debug_sidecar,
         residuals=eff_residuals,
@@ -1637,9 +1642,11 @@ class ResidualEngine:
       - **ref_delta** runs when ``state_ref`` is provided **and** :meth:`compute_residuals` is called
         with ``run_mode=\"eval\"`` (default ``run_mode=\"training\"`` ignores ``state_ref`` for
         ref_delta and for the ``data/`` pred−ref block). Unless the spec sets ``include_ref_delta=False``.
-      - **implied_delta** runs for **constitutive** specs when ``implied_value_key``, ``implied_fn``,
-        or ``implied_balance_fn`` is set; omitted if implied/balance is missing.
-      - **ref_delta** / **implied_delta** residuals are nondimensional (see ``closure_registry``).
+      - **implied_delta** runs for **constitutive** specs when ``implied_value_key`` or
+        ``implied_fn`` is set; omitted if implied is missing.
+      - **implied_delta** is the model-normalised fractional residual
+        ``(F(pred) - implied) / (|F(pred)| + eps)`` (see ``closure_registry``); ``ref_delta``
+        retains its symmetric / reference normalisation.
       - A spec with no applicable closure does nothing (optional omit log).
       - Law-linked implied rows (see ``moju.monitor.law_implied_diagnostics``) are prepended when
         ``law_implied_audits`` is true (``MonitorConfig`` default). Use optional ``residual_basename``
@@ -1760,12 +1767,10 @@ class ResidualEngine:
                         raise ValueError(f"{category}:{name} state_map missing args: {missing_args}")
                 ivk = spec.get("implied_value_key")
                 ifn = spec.get("implied_fn")
-                ibf = spec.get("implied_balance_fn")
-                n_implied = (1 if ivk else 0) + (1 if ifn is not None else 0) + (1 if ibf is not None else 0)
+                n_implied = (1 if ivk else 0) + (1 if ifn is not None else 0)
                 if n_implied > 1:
                     raise ValueError(
-                        f"{category}:{name} use only one of implied_value_key, implied_fn, "
-                        "and implied_balance_fn"
+                        f"{category}:{name} use only one of implied_value_key and implied_fn"
                     )
         _validate_specs(self.constitutive_audit, MODEL_FNS, "constitutive")
 
@@ -2117,7 +2122,6 @@ class ResidualEngine:
                 has_implied = (
                     bool(spec.get("implied_value_key"))
                     or spec.get("implied_fn") is not None
-                    or spec.get("implied_balance_fn") is not None
                 )
                 missing = sorted(
                     {
@@ -2197,9 +2201,7 @@ class ResidualEngine:
                         constants=self.constants,
                         implied_value_key=spec.get("implied_value_key"),
                         implied_fn=spec.get("implied_fn"),
-                        implied_balance_fn=spec.get("implied_balance_fn"),
                         output_key=output_key,
-                        implied_delta_ref_key=spec.get("implied_delta_ref_key"),
                     )
                     if arr is not None:
                         out[f"{base}/implied_delta"] = jnp.asarray(arr)

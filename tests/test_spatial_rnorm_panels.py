@@ -44,7 +44,7 @@ def test_build_spatial_rnorm_panels_1d_list_coord_from_snapshot_style():
 
 
 def test_build_spatial_rnorm_panels_default_absolute_residual_ignores_scale():
-    """Default normalize_spatial=False: panel values are |r|, not |r|/scale."""
+    """Spatial panels always emit per-point |r| (R_eff-aligned)."""
     from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
 
     x = np.linspace(0, 1, 4)
@@ -87,7 +87,8 @@ def test_build_spatial_panels_residuals_without_state_pred_or_snapshot():
     assert np.asarray(law["x"]).shape == (5,)
 
 
-def test_build_spatial_rnorm_panels_normalize_spatial_divides_by_scale():
+def test_build_spatial_rnorm_panels_emits_absolute_residual():
+    """Spatial panels always emit per-point |r| (R_eff-aligned)."""
     from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
 
     x = np.linspace(0, 1, 4)
@@ -100,7 +101,6 @@ def test_build_spatial_rnorm_panels_normalize_spatial_divides_by_scale():
         log_entry=log_entry,
         first_rms={},
         r_ref={},
-        normalize_spatial=True,
     )
     assert law is not None
-    assert np.allclose(np.asarray(law["values"]["laws/a"]), 0.08)
+    assert np.allclose(np.asarray(law["values"]["laws/a"]), 0.8)
