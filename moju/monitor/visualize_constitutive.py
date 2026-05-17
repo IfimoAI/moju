@@ -2,21 +2,23 @@
 Constitutive Divergence card — where catalog ``F(pred)`` and the law-implied
 quantity disagree.
 
-For every constitutive audit row, the engine now stashes a sidecar entry on
+For every constitutive audit row, the engine stashes a sidecar entry on
 ``residuals["closure_debug"][basename]``::
 
     {
-        "pred":     F(pred_args),                # always present
-        "implied":  implied (subtract mode) | None,
-        "raw":      pred - implied OR balance raw,
-        "scale_a":  balance side a | None,
-        "scale_b":  balance side b | None,
-        "ref":      ref tensor (when normalisation uses it) | None,
-        "mode":     "subtract" | "balance",
+        "pred":       F(pred_args),                       # always present
+        "implied":    implied,
+        "raw":        pred - implied,                     # dimensional difference (diagnostic)
+        "delta":      raw / (|pred| + eps),               # array fed to R_eff (== log key value)
+        "mode":       "subtract",
         "output_key": str,
-        "law_name": str | None,
+        "law_name":   str | None,
         "model_name": str,
     }
+
+``closure_debug["delta"]`` is exactly :func:`_normalized_divergence` applied to
+``pred`` and ``implied``, so the divergence and consistency plots, the log key
+``…/implied_delta``, and the array RMSed into ``R_eff`` are all the same numbers.
 
 This module produces four visualisation modes plus a composite 2x2 dashboard.
 
@@ -255,10 +257,7 @@ def primary_closure_debug_field_length(bundle: Dict[str, Any]) -> Optional[int]:
     if bn is None or bn not in debug:
         return None
     entry = debug[bn]
-    if entry.get("mode") == "balance":
-        arr = _coerce_to_numpy(entry.get("scale_a"))
-    else:
-        arr = _coerce_to_numpy(entry.get("pred"))
+    arr = _coerce_to_numpy(entry.get("pred"))
     arr = np.asarray(arr, dtype=float)
     while arr.ndim > 2 and arr.shape[0] == 1:
         arr = arr[0]
@@ -280,14 +279,13 @@ def _sides_for_divergence(
     """
     Return ``(side_model, side_implied, label_model, label_implied)``.
 
-    User-facing axis labels **Model** / **Implied** (closure_debug retains ``pred`` / ``implied`` keys).
+    User-facing axis labels **Model** / **Implied** (``closure_debug`` retains ``pred`` /
+    ``implied`` keys).  ``closure_debug["raw"]`` is the dimensional difference
+    ``pred − implied``; the log key ``…/implied_delta`` (and ``closure_debug["delta"]``)
+    is the model-normalised fractional residual ``raw / (|pred| + ε)`` that is fed to
+    ``R_eff``.  ``_normalized_divergence(pred, implied)`` reproduces ``delta`` exactly.
     """
     lab_m, lab_i = _user_constitutive_side_labels()
-    mode = debug_entry.get("mode")
-    if mode == "balance":
-        a = _coerce_to_numpy(debug_entry.get("scale_a"))
-        b = _coerce_to_numpy(debug_entry.get("scale_b"))
-        return a, b, lab_m, lab_i
     a = _coerce_to_numpy(debug_entry.get("pred"))
     b = _coerce_to_numpy(debug_entry.get("implied"))
     return a, b, lab_m, lab_i
@@ -588,8 +586,8 @@ def prepare_constitutive_model_implied_vs_x_embed(
     if bn is None or bn not in debug:
         return None
     entry = debug[bn]
-    a_full = _coerce_to_numpy(entry.get("scale_a") if entry.get("mode") == "balance" else entry.get("pred"))
-    b_full = _coerce_to_numpy(entry.get("scale_b") if entry.get("mode") == "balance" else entry.get("implied"))
+    a_full = _coerce_to_numpy(entry.get("pred"))
+    b_full = _coerce_to_numpy(entry.get("implied"))
     if a_full.size == 0 or b_full.size == 0:
         return None
     if a_full.shape != b_full.shape:
@@ -870,8 +868,8 @@ def _prepare_spatial_divergence(
     if bn is None or bn not in debug:
         return ("Constitutive divergence (spatial)", "No constitutive basename to render")
     entry = debug[bn]
-    a_full = _coerce_to_numpy(entry.get("scale_a") if entry.get("mode") == "balance" else entry.get("pred"))
-    b_full = _coerce_to_numpy(entry.get("scale_b") if entry.get("mode") == "balance" else entry.get("implied"))
+    a_full = _coerce_to_numpy(entry.get("pred"))
+    b_full = _coerce_to_numpy(entry.get("implied"))
     if a_full.size == 0 or b_full.size == 0:
         return (bn, "No spatial data for divergence")
     if a_full.shape != b_full.shape:

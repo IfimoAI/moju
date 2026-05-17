@@ -79,7 +79,6 @@ def test_monitor_module_has_all():
         "build_law_spec_identity",
         "implied_group_specs_for_laws",
         "merge_implied_groups_first",
-        "apply_closure_discrepancy_normalize",
         "list_constitutive_models",
         "list_scaling_closure_ids",
         "AuditSpec",

@@ -3,7 +3,7 @@ Tests for the ``closure_debug`` sidecar produced by the residual engines.
 
 Covers:
 - :func:`moju.monitor.closure_registry.compute_implied_delta_with_debug` for
-  both subtract and balance modes.
+  subtract mode (the only supported mode after balance-mode removal).
 - :class:`moju.monitor.auditor.ResidualEngine.compute_residuals` populating
   ``residuals["closure_debug"]`` and the public
   :attr:`engine.last_residuals` accessor.
@@ -41,8 +41,12 @@ def test_compute_implied_delta_with_debug_subtract_mode() -> None:
     assert debug["mode"] == "subtract"
     assert debug["pred"] is not None
     assert debug["implied"] is not None
-    assert debug["scale_a"] is None
-    assert debug["scale_b"] is None
+    assert debug["raw"] is not None
+    assert debug["delta"] is not None
+    # Sanity: delta == raw / (|pred| + eps)
+    eps = 1e-30
+    expected = jnp.asarray(debug["raw"]) / (jnp.abs(jnp.asarray(debug["pred"])) + eps)
+    assert jnp.allclose(jnp.asarray(debug["delta"]), expected)
 
 
 def test_subtract_debug_broadcasts_scalar_pred_to_implied_shape() -> None:
@@ -76,40 +80,37 @@ def test_subtract_debug_broadcasts_scalar_pred_to_implied_shape() -> None:
     assert jnp.allclose(debug["pred"], jnp.array([2.0, 2.0, 2.0]))
 
 
-def test_compute_implied_delta_with_debug_balance_mode() -> None:
+def test_subtract_debug_vector_pred_keeps_shape() -> None:
     from moju.monitor.closure_registry import (
         MODEL_FNS,
         compute_implied_delta_with_debug,
     )
 
     fn, arg_names = MODEL_FNS["thermal_diffusivity"]
-    k, rho, cp = jnp.array(1.0), jnp.array(1.0), jnp.array(1.0)
-    alpha_m = fn(k, rho, cp)
-    T_lap = jnp.array(1.0)
-    T_t = alpha_m * T_lap
-    merged = {"k": k, "rho": rho, "cp": cp, "T_t": T_t, "T_xx": T_lap}
-
-    def balance(st, _c, pred):
-        tt = jnp.asarray(st["T_t"])
-        lap = jnp.asarray(st["T_xx"])
-        p = jnp.asarray(pred)
-        d = p * lap
-        return tt - d, tt, d
-
+    merged = {
+        "k": jnp.array([1.0, 2.0, 3.0]),
+        "rho": jnp.array([1.0, 1.0, 1.0]),
+        "cp": jnp.array([1.0, 1.0, 1.0]),
+        "alpha_implied": jnp.array([1.1, 1.9, 3.3]),
+    }
     delta, debug = compute_implied_delta_with_debug(
         fn=fn,
         arg_names=arg_names,
         state_map={"k": "k", "rho": "rho", "cp": "cp"},
         state_pred=merged,
         constants={},
-        implied_balance_fn=balance,
+        implied_value_key="alpha_implied",
         output_key="alpha",
     )
     assert delta is not None
     assert debug is not None
-    assert debug["mode"] == "balance"
-    assert debug["scale_a"] is not None
-    assert debug["scale_b"] is not None
+    assert debug["mode"] == "subtract"
+    assert delta.shape == (3,)
+    eps = 1e-30
+    expected = (jnp.asarray(debug["pred"]) - jnp.asarray(debug["implied"])) / (
+        jnp.abs(jnp.asarray(debug["pred"])) + eps
+    )
+    assert jnp.allclose(jnp.asarray(delta), expected)
 
 
 def test_engine_populates_closure_debug_sidecar() -> None:

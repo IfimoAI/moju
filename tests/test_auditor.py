@@ -21,8 +21,8 @@ from moju.monitor.auditor import (
     DEFAULT_VISUALIZE_TITLE_TRAINING,
 )
 from moju.monitor.closure_registry import (
-    apply_closure_discrepancy_normalize,
     MODEL_FNS,
+    _NORMALIZE_EPS,
     compute_implied_delta,
 )
 from moju.piratio.models import Models
@@ -763,6 +763,8 @@ class TestVisualize:
         assert len(fig.data) >= 5
 
     def test_build_visualize_bundle_category_training(self):
+        import numpy as np
+
         from moju.monitor.auditor import _build_visualize_bundle
 
         log = [
@@ -775,9 +777,46 @@ class TestVisualize:
         assert "laws/x" in ct["laws"]["keys"]
         assert "constitutive/a/b" in ct["constitutive"]["keys"]
         assert "scaling" not in ct
+        # r_eff_mat is now sourced from log[j]["rms"][key] directly.
+        reff_laws = np.asarray(ct["laws"]["r_eff_mat"], dtype=float)
+        i = ct["laws"]["keys"].index("laws/x")
+        assert reff_laws.shape[1] == 2
+        assert reff_laws[i, 0] == pytest.approx(1.0)
+        assert reff_laws[i, 1] == pytest.approx(0.5)
+        reff_const = np.asarray(ct["constitutive"]["r_eff_mat"], dtype=float)
+        j = ct["constitutive"]["keys"].index("constitutive/a/b")
+        assert reff_const[j, 0] == pytest.approx(0.5)
+        assert reff_const[j, 1] == pytest.approx(0.25)
+        # bar_values_eff mirrors the last-step rms values for bar_keys.
+        bve = np.asarray(b.get("bar_values_eff"), dtype=float)
+        bkeys = list(b.get("bar_keys") or [])
+        assert bve.size == len(bkeys)
+        idx_x = bkeys.index("laws/x")
+        assert bve[idx_x] == pytest.approx(0.5)
+        # spatial_normalize must no longer be part of the bundle.
+        assert "spatial_normalize" not in b
         wk = b.get("worst_keys_rows") or []
         assert len(wk) >= 1
         assert wk[0]["key"] in ("laws/x", "constitutive/a/b", "scaling/y/z")
+
+    def test_visualize_training_panels_use_reff_axis_and_hovertemplate(self):
+        pytest.importorskip("plotly")
+        log = [
+            {"index": 0, "rms": {"laws/a": 1.0, "constitutive/b": 0.5}, "scale": {}},
+            {"index": 1, "rms": {"laws/a": 0.4, "constitutive/b": 0.2}, "scale": {}},
+        ]
+        fig = visualize(log, mode="training", r_norm_scale="linear")
+        axis_titles = []
+        for ax_name in fig.layout:
+            if ax_name.startswith("yaxis"):
+                t = getattr(fig.layout[ax_name].title, "text", None)
+                if t:
+                    axis_titles.append(str(t))
+        assert any("R_eff" in t for t in axis_titles)
+        hover_blob = " ".join(
+            str(getattr(tr, "hovertemplate", "") or "") for tr in fig.data
+        )
+        assert "R_eff=" in hover_blob
 
     def test_visualize_eval_title_shows_overall_rollup(self):
         pytest.importorskip("plotly")
@@ -1469,9 +1508,7 @@ class TestVisualize:
                     "pred": pred,
                     "implied": implied,
                     "raw": raw,
-                    "scale_a": None,
-                    "scale_b": None,
-                    "ref": None,
+                    "delta": raw / (np.abs(pred) + 1e-30),
                     "mode": "subtract",
                     "output_key": "alpha",
                     "law_name": "fourier_conduction",
@@ -1763,28 +1800,63 @@ class TestCustomFn:
         assert jnp.allclose(state["ab"], 12.0, rtol=rtol, atol=atol)
 
 
-class TestClosureDiscrepancyNormalize:
-    def test_symmetric_zero_when_pred_matches_implied(self, rtol, atol):
-        pred = jnp.array(3.0)
-        implied = jnp.array(3.0)
-        r = apply_closure_discrepancy_normalize(pred - implied, pred, implied)
+class TestImpliedDeltaFractional:
+    """The implied_delta residual fed to R_eff is now (pred - implied) / (|pred| + eps)."""
+
+    def test_zero_when_pred_matches_implied(self, rtol, atol):
+        fn, arg_names = MODEL_FNS["ideal_gas_rho"]
+        P, R, T = jnp.array(1e5), jnp.array(287.0), jnp.array(300.0)
+        rho_m = Models.ideal_gas_rho(P, R, T)
+        merged = {"P": P, "R": R, "T": T, "rho_alt": rho_m}
+        r = compute_implied_delta(
+            fn=fn,
+            arg_names=arg_names,
+            state_map={"P": "P", "R": "R", "T": "T"},
+            state_pred=merged,
+            constants={},
+            implied_value_key="rho_alt",
+        )
+        assert r is not None
         assert jnp.allclose(r, 0.0, rtol=rtol, atol=atol)
 
-    def test_symmetric_scale_doubling_invariant(self, rtol, atol):
-        pred = jnp.array(4.0)
-        implied = jnp.array(2.0)
-        r1 = apply_closure_discrepancy_normalize(pred - implied, pred, implied)
-        r2 = apply_closure_discrepancy_normalize(
-            2 * (pred - implied), 2 * pred, 2 * implied
+    def test_fractional_formula_value(self, rtol, atol):
+        fn, arg_names = MODEL_FNS["ideal_gas_rho"]
+        P, R, T = jnp.array(1e5), jnp.array(287.0), jnp.array(300.0)
+        rho_pred = Models.ideal_gas_rho(P, R, T)
+        rho_implied = rho_pred * 0.9
+        merged = {"P": P, "R": R, "T": T, "rho_alt": rho_implied}
+        r = compute_implied_delta(
+            fn=fn,
+            arg_names=arg_names,
+            state_map={"P": "P", "R": "R", "T": "T"},
+            state_pred=merged,
+            constants={},
+            implied_value_key="rho_alt",
         )
-        assert jnp.allclose(r1, r2, rtol=rtol, atol=atol)
+        expected = (rho_pred - rho_implied) / (jnp.abs(rho_pred) + _NORMALIZE_EPS)
+        assert jnp.allclose(r, expected, rtol=rtol, atol=atol)
 
-    def test_ref_scale_uses_ref_denominator(self, rtol, atol):
-        pred = jnp.array(10.0)
-        implied = jnp.array(6.0)
-        ref = jnp.array(2.0)
-        r = apply_closure_discrepancy_normalize(pred - implied, pred, implied, ref=ref)
-        assert jnp.allclose(r, 4.0 / (1e-30 + 2.0), rtol=rtol, atol=atol)
+    def test_vector_pred_preserves_shape(self, rtol, atol):
+        fn, arg_names = MODEL_FNS["thermal_diffusivity"]
+        merged = {
+            "k": jnp.array([1.0, 2.0, 3.0]),
+            "rho": jnp.array([1.0, 1.0, 1.0]),
+            "cp": jnp.array([1.0, 1.0, 1.0]),
+            "alpha_implied": jnp.array([0.9, 2.2, 2.7]),
+        }
+        r = compute_implied_delta(
+            fn=fn,
+            arg_names=arg_names,
+            state_map={"k": "k", "rho": "rho", "cp": "cp"},
+            state_pred=merged,
+            constants={},
+            implied_value_key="alpha_implied",
+        )
+        assert r is not None
+        assert r.shape == (3,)
+        pred = fn(merged["k"], merged["rho"], merged["cp"])
+        expected = (pred - merged["alpha_implied"]) / (jnp.abs(pred) + _NORMALIZE_EPS)
+        assert jnp.allclose(r, expected, rtol=rtol, atol=atol)
 
 
 class TestImpliedDeltaClosure:
@@ -1816,32 +1888,6 @@ class TestImpliedDeltaClosure:
         )
         assert r is None
 
-    def test_compute_implied_delta_balance_fourier(self, rtol, atol):
-        fn, arg_names = MODEL_FNS["thermal_diffusivity"]
-        k, rho, cp = jnp.array(1.0), jnp.array(1.0), jnp.array(1.0)
-        alpha_m = fn(k, rho, cp)
-        T_lap = jnp.array(1.0)
-        T_t = alpha_m * T_lap
-        merged = {"k": k, "rho": rho, "cp": cp, "T_t": T_t, "T_xx": T_lap}
-
-        def balance(st, _c, pred):
-            tt = jnp.asarray(st["T_t"])
-            lap = jnp.asarray(st["T_xx"])
-            p = jnp.asarray(pred)
-            d = p * lap
-            return tt - d, tt, d
-
-        r = compute_implied_delta(
-            fn=fn,
-            arg_names=arg_names,
-            state_map={"k": "k", "rho": "rho", "cp": "cp"},
-            state_pred=merged,
-            constants={},
-            implied_balance_fn=balance,
-        )
-        assert r is not None
-        assert jnp.allclose(r, 0.0, rtol=rtol, atol=atol)
-
     def test_compute_implied_delta_rejects_multiple_implied_modes(self):
         fn, arg_names = MODEL_FNS["ideal_gas_rho"]
         with pytest.raises(ValueError, match="at most one of implied"):
@@ -1852,7 +1898,7 @@ class TestImpliedDeltaClosure:
                 state_pred={"P": 1.0, "R": 1.0, "T": 1.0, "x": 1.0},
                 constants={},
                 implied_value_key="x",
-                implied_balance_fn=lambda s, c, p: (0.0, 0.0, 0.0),
+                implied_fn=lambda s, c: 0.0,
             )
 
     def test_engine_implied_delta_ideal_gas(self, rtol, atol):

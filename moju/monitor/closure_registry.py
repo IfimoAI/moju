@@ -2,15 +2,22 @@
 Model/Group closure registry for moju.monitor.
 
 This module standardizes constitutive + scaling/similarity audits around:
-  1) ref_delta: F(state_pred) - F(state_ref) (requires state_ref)
-  2) implied_delta: F(state_pred) - implied (implied_value_key in state/constants, or implied_fn),
-     or a law-style **balance** residual via implied_balance_fn(state_pred, constants, pred)
-     with symmetric normalization scales (see :func:`compute_implied_delta`).
+  1) ref_delta: ``F(state_pred) - F(state_ref)`` (requires ``state_ref``)
+  2) implied_delta: ``F(state_pred) - implied`` (``implied_value_key`` in state/constants, or
+     ``implied_fn``).
 
-  **Nondimensional implied/ref discrepancies:** ``implied_delta`` and ``ref_delta`` are always
-  dimensionless: default ``(pred - other) / (ε + |pred| + |other|)``. If a reference tensor is
-  resolved (see ``implied_delta_ref_key`` / ``ref_delta_ref_key`` or ``{output_key}_ref`` in merged
-  state/constants), use ``(pred - other) / (ε + |ref|)`` instead.
+The constitutive ``implied_delta`` residual fed to ``R_eff`` is the **model-normalized
+fractional residual**:
+
+    delta = (F(pred) - implied) / (|F(pred)| + eps)
+
+where ``eps = _NORMALIZE_EPS = 1e-30`` (kept in sync with
+``visualize_constitutive._DIVERGENCE_EPS``).  This is the same array shown in the
+constitutive divergence and consistency plots, so what is plotted is what is scored.
+The formula is element-wise, so it works for scalar, vector and tensor ``pred``.
+
+``ref_delta`` retains a symmetric / reference normalisation for the
+``F(pred) - F(ref)`` comparison.
 """
 
 from __future__ import annotations
@@ -23,30 +30,7 @@ import jax.numpy as jnp
 from moju.piratio.groups import Groups
 from moju.piratio.models import Models
 
-
-def apply_closure_discrepancy_normalize(
-    diff: Any,
-    pred: Any,
-    other: Any,
-    *,
-    ref: Any = None,
-    eps: float = 1e-30,
-) -> jnp.ndarray:
-    """
-    Nondimensional closure discrepancy for constitutive implied/ref audits.
-
-    - If ``ref`` is not ``None``: ``diff / (ε + |ref|)``
-    - Else: ``diff / (ε + |pred| + |other|)`` (symmetric scale)
-    """
-    pred_a = jnp.asarray(pred)
-    other_a = jnp.asarray(other)
-    diff_a = jnp.asarray(diff)
-    if ref is not None:
-        ref_a = jnp.asarray(ref)
-        denom = eps + jnp.abs(ref_a)
-        return diff_a / denom
-    denom = eps + jnp.abs(pred_a) + jnp.abs(other_a)
-    return diff_a / denom
+_NORMALIZE_EPS: float = 1e-30
 
 
 def _val(state: Dict[str, Any], constants: Dict[str, Any], key: str) -> Any:
@@ -95,7 +79,6 @@ def compute_ref_delta(
         ref_args.append(rv)
     pred = fn(*pred_args)
     refv = fn(*ref_args)
-    # Some users may also provide output_key in state_ref; we don't require it.
     raw = jnp.asarray(pred - refv)
     ref_tensor = None
     if ref_delta_ref_key:
@@ -103,7 +86,13 @@ def compute_ref_delta(
     if ref_tensor is None:
         ref_tensor = _val(state_pred, constants, f"{output_key}_ref")
     try:
-        return apply_closure_discrepancy_normalize(raw, pred, refv, ref=ref_tensor)
+        pred_a = jnp.asarray(pred)
+        ref_a = jnp.asarray(refv)
+        if ref_tensor is not None:
+            denom = _NORMALIZE_EPS + jnp.abs(jnp.asarray(ref_tensor))
+        else:
+            denom = _NORMALIZE_EPS + jnp.abs(pred_a) + jnp.abs(ref_a)
+        return raw / denom
     except (TypeError, ValueError):
         return None
 
@@ -117,42 +106,39 @@ def compute_implied_delta_with_debug(
     constants: Dict[str, Any],
     implied_value_key: Optional[str] = None,
     implied_fn: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]] = None,
-    implied_balance_fn: Optional[
-        Callable[[Dict[str, Any], Dict[str, Any], Any], Optional[Tuple[Any, Any, Any]]]
-    ] = None,
     output_key: Optional[str] = None,
-    implied_delta_ref_key: Optional[str] = None,
 ) -> Tuple[Optional[jnp.ndarray], Optional[Dict[str, Any]]]:
     """
-    Same as :func:`compute_implied_delta` but additionally returns a debug
-    sidecar dict so visualisations can inspect the raw quantities feeding the
-    normalised residual.
+    Compute the model-normalised fractional ``implied_delta`` residual plus a
+    debug sidecar so visualisations can inspect the dimensional terms.
 
-    Returns ``(delta, debug)``.  ``debug`` is ``None`` when the row was
-    skipped; otherwise has the shape::
+    The residual fed to ``R_eff`` is
+
+        delta = (F(pred) - implied) / (|F(pred)| + _NORMALIZE_EPS)
+
+    Element-wise, so scalar/vector/tensor ``pred`` are all supported.  The
+    sidecar keeps the dimensional difference ``raw = F(pred) - implied`` for
+    diagnostics, even though ``raw`` no longer feeds ``R_eff``.
+
+    Returns ``(delta, debug)``.  ``debug`` is ``None`` when the row was skipped;
+    otherwise has the shape::
 
         {
-            "pred":     F(pred_args),
-            "implied":  implied or None,   # subtract mode only
-            "raw":      pred - implied OR balance raw,
-            "scale_a":  scale_a or None,   # balance mode only
-            "scale_b":  scale_b or None,   # balance mode only
-            "ref":      ref_tensor or None,
-            "mode":     "subtract" | "balance",
+            "pred":       F(pred_args),
+            "implied":    implied,
+            "raw":        pred - implied,           # dimensional difference
+            "delta":      raw / (|pred| + eps),     # array sent to R_eff
+            "mode":       "subtract",
             "output_key": output_key,
         }
     """
-    modes = (
-        (1 if implied_value_key is not None else 0)
-        + (1 if implied_fn is not None else 0)
-        + (1 if implied_balance_fn is not None else 0)
+    modes = (1 if implied_value_key is not None else 0) + (
+        1 if implied_fn is not None else 0
     )
     if modes == 0:
         return None, None
     if modes > 1:
-        raise ValueError(
-            "Provide at most one of implied_value_key, implied_fn, and implied_balance_fn"
-        )
+        raise ValueError("Provide at most one of implied_value_key and implied_fn")
 
     pred_args: List[jnp.ndarray] = []
     for an in arg_names:
@@ -165,33 +151,6 @@ def compute_implied_delta_with_debug(
         pred_args.append(jnp.asarray(pv))
     pred = fn(*pred_args)
 
-    ref_tensor = None
-    if implied_delta_ref_key:
-        ref_tensor = _val(state_pred, constants, implied_delta_ref_key)
-    if ref_tensor is None and output_key is not None:
-        ref_tensor = _val(state_pred, constants, f"{output_key}_ref")
-
-    if implied_balance_fn is not None:
-        triple = implied_balance_fn(state_pred, constants, pred)
-        if triple is None:
-            return None, None
-        raw, scale_a, scale_b = triple
-        try:
-            delta = apply_closure_discrepancy_normalize(raw, scale_a, scale_b, ref=ref_tensor)
-        except (TypeError, ValueError):
-            return None, None
-        debug = {
-            "pred": jnp.asarray(pred),
-            "implied": None,
-            "raw": jnp.asarray(raw),
-            "scale_a": jnp.asarray(scale_a),
-            "scale_b": jnp.asarray(scale_b),
-            "ref": jnp.asarray(ref_tensor) if ref_tensor is not None else None,
-            "mode": "balance",
-            "output_key": output_key,
-        }
-        return delta, debug
-
     if implied_value_key is not None:
         implied = _val(state_pred, constants, implied_value_key)
     else:
@@ -199,25 +158,24 @@ def compute_implied_delta_with_debug(
     if implied is None:
         return None, None
     implied = jnp.asarray(implied)
+    pred_a = jnp.asarray(pred)
     try:
-        raw = jnp.asarray(pred - implied)
+        raw = jnp.asarray(pred_a - implied)
     except (TypeError, ValueError):
         return None, None
     try:
-        pred_debug, implied_debug = jnp.broadcast_arrays(jnp.asarray(pred), implied)
+        pred_debug, implied_debug = jnp.broadcast_arrays(pred_a, implied)
     except (TypeError, ValueError):
-        pred_debug, implied_debug = jnp.asarray(pred), implied
+        pred_debug, implied_debug = pred_a, implied
     try:
-        delta = apply_closure_discrepancy_normalize(raw, pred, implied, ref=ref_tensor)
+        delta = raw / (jnp.abs(pred_a) + _NORMALIZE_EPS)
     except (TypeError, ValueError):
         return None, None
     debug = {
         "pred": pred_debug,
         "implied": implied_debug,
         "raw": raw,
-        "scale_a": None,
-        "scale_b": None,
-        "ref": jnp.asarray(ref_tensor) if ref_tensor is not None else None,
+        "delta": jnp.asarray(delta),
         "mode": "subtract",
         "output_key": output_key,
     }
@@ -233,31 +191,22 @@ def compute_implied_delta(
     constants: Dict[str, Any],
     implied_value_key: Optional[str] = None,
     implied_fn: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]] = None,
-    implied_balance_fn: Optional[
-        Callable[[Dict[str, Any], Dict[str, Any], Any], Optional[Tuple[Any, Any, Any]]]
-    ] = None,
     output_key: Optional[str] = None,
-    implied_delta_ref_key: Optional[str] = None,
 ) -> Optional[jnp.ndarray]:
     """
-    Residual comparing catalog ``F(pred args)`` to ``implied`` (state key or ``implied_fn``),
-    or evaluating a governing-equation **balance** via ``implied_balance_fn``.
+    Model-normalised fractional ``implied_delta`` residual:
 
-    **Subtract mode** (``implied_value_key`` or ``implied_fn``): nondimensional
-    ``(F - implied) / (ε + |F| + |implied|)``, or ``/ (ε + |ref|)`` when a ref tensor resolves.
+        delta = (F(pred) - implied) / (|F(pred)| + eps)
 
-    **Balance mode** (``implied_balance_fn``): ``implied_balance_fn(state_pred, constants, pred)``
-    must return ``(raw, scale_a, scale_b)`` or ``None``. Nondimensional residual is
-    ``raw / (ε + |scale_a| + |scale_b|)``, or ``/ (ε + |ref|)`` when ref resolves.
+    where ``implied`` is either ``implied_value_key`` (state/constants lookup) or
+    ``implied_fn(state_pred, constants)``.  Provide **at most one** of the two.
 
-    Provide **at most one** of ``implied_value_key``, ``implied_fn``, and ``implied_balance_fn``.
+    Returns ``None`` when the configuration is incomplete, when any argument is
+    missing, or when the result is not broadcastable.  Element-wise on ``pred``,
+    so scalar / vector / tensor outputs all yield a residual of the same shape.
 
-    Returns None if implied is not configured, if any model arg is missing, if implied/balance is
-    missing, or if the result is not broadcastable.
-
-    Note: this is a thin wrapper around :func:`compute_implied_delta_with_debug`
-    that discards the debug sidecar.  Use the ``_with_debug`` variant when
-    visualisations need raw ``pred`` / ``implied`` / balance terms.
+    Note: this is a thin wrapper around
+    :func:`compute_implied_delta_with_debug` that discards the debug sidecar.
     """
     delta, _debug = compute_implied_delta_with_debug(
         fn=fn,
@@ -267,14 +216,11 @@ def compute_implied_delta(
         constants=constants,
         implied_value_key=implied_value_key,
         implied_fn=implied_fn,
-        implied_balance_fn=implied_balance_fn,
         output_key=output_key,
-        implied_delta_ref_key=implied_delta_ref_key,
     )
     return delta
 
 
-# Registry: name -> (callable, arg_names)
 MODEL_FNS: Dict[str, Tuple[Callable[..., Any], List[str]]] = {
     name: _fn_and_args(getattr(Models, name))
     for name in dir(Models)
@@ -302,4 +248,3 @@ def list_models() -> List[str]:
 
 def list_groups() -> List[str]:
     return sorted(GROUP_FNS.keys())
-

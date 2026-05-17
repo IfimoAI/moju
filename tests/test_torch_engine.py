@@ -6,7 +6,7 @@ Tests cover:
 - ``_derived``: eval_derived_expr_torch / apply_derived_state_chain_torch
 - ``_r_eff``: r_eff_scalar_torch / build_loss_torch
 - ``_path_b``: fill_path_b_derivatives_torch
-- ``_closure``: normalize_discrepancy_torch / compute_implied_delta_torch / compute_ref_delta_torch
+- ``_closure``: compute_implied_delta_torch / compute_ref_delta_torch
 - ``_implied_diagnostics``: implied functions + merge_law_implied_audit_specs_torch
 - ``TorchResidualEngine``: full pipeline, group inference, derived state, user_fns, loss
 """
@@ -23,7 +23,6 @@ from moju.torch._derived import eval_derived_expr_torch, apply_derived_state_cha
 from moju.torch._r_eff import r_eff_scalar_torch, build_loss_torch
 from moju.torch._path_b import fill_path_b_derivatives_torch
 from moju.torch._closure import (
-    normalize_discrepancy_torch,
     compute_implied_delta_torch,
     compute_ref_delta_torch,
 )
@@ -365,57 +364,12 @@ class TestFillPathBDerivativesTorch:
 # ===========================================================================
 
 
-class TestNormalizeDiscrepancyTorch:
-    def test_symmetric_normalization(self):
-        diff = _t(2.0)
-        pred = _t(3.0)
-        other = _t(1.0)
-        result = normalize_discrepancy_torch(diff, pred, other)
-        expected = 2.0 / (1e-30 + 3.0 + 1.0)
-        assert abs(float(result) - expected) < 1e-10
-
-    def test_ref_normalization(self):
-        diff = _t(2.0)
-        pred = _t(10.0)
-        other = _t(10.0)
-        ref = _t(4.0)
-        result = normalize_discrepancy_torch(diff, pred, other, ref=ref)
-        expected = 2.0 / (1e-30 + 4.0)
-        assert abs(float(result) - expected) < 1e-8
-
-
 class TestComputeImpliedDeltaTorch:
     def _identity_model(self, x: torch.Tensor) -> torch.Tensor:
         return x
 
-    def test_balance_mode_returns_tensor(self):
-        def balance_fn(state, constants, pred):
-            a = state.get("T_t")
-            b = state.get("T_laplacian")
-            if a is None or b is None:
-                return None
-            tt = torch.as_tensor(a, dtype=torch.float32)
-            lap = torch.as_tensor(b, dtype=torch.float32)
-            diffusive = pred * lap
-            return tt - diffusive, tt, diffusive
-
-        state = {
-            "k": _t(2.0),
-            "T_t": _t(4.0),
-            "T_laplacian": _t(5.0),
-        }
-        result = compute_implied_delta_torch(
-            fn_wrapped=self._identity_model,
-            arg_names=["k"],
-            state_map={"k": "k"},
-            state_pred=state,
-            constants={},
-            implied_balance_fn_torch=balance_fn,
-        )
-        assert result is not None
-        assert torch.isfinite(result)
-
-    def test_subtract_mode_returns_tensor(self):
+    def test_subtract_mode_fractional_value(self):
+        """delta = (pred - implied) / (|pred| + eps)."""
         state = {"k": _t(3.0), "k_implied": _t(2.0)}
         result = compute_implied_delta_torch(
             fn_wrapped=self._identity_model,
@@ -426,9 +380,26 @@ class TestComputeImpliedDeltaTorch:
             implied_fn_torch=lambda s, c: torch.as_tensor(s["k_implied"], dtype=torch.float32),
         )
         assert result is not None
-        # pred = 3, implied = 2, diff = 1, normalize by |3| + |2| = 5
-        expected = 1.0 / (1e-30 + 3.0 + 2.0)
+        expected = (3.0 - 2.0) / (3.0 + 1e-30)
         assert abs(float(result) - expected) < 1e-6
+
+    def test_subtract_mode_vector_pred_keeps_shape(self):
+        state = {
+            "k": torch.tensor([3.0, 4.0, 5.0], dtype=torch.float32),
+            "k_implied": torch.tensor([2.7, 4.4, 4.0], dtype=torch.float32),
+        }
+        result = compute_implied_delta_torch(
+            fn_wrapped=self._identity_model,
+            arg_names=["k"],
+            state_map={"k": "k"},
+            state_pred=state,
+            constants={},
+            implied_fn_torch=lambda s, c: s["k_implied"],
+        )
+        assert result is not None
+        assert result.shape == (3,)
+        expected = (state["k"] - state["k_implied"]) / (state["k"].abs() + 1e-30)
+        assert torch.allclose(result, expected, atol=1e-6)
 
     def test_returns_none_missing_key(self):
         state = {}  # no 'k'
@@ -441,18 +412,6 @@ class TestComputeImpliedDeltaTorch:
             implied_fn_torch=lambda s, c: _t(1.0),
         )
         assert result is None
-
-    def test_raises_with_both_modes(self):
-        with pytest.raises(ValueError, match="at most one"):
-            compute_implied_delta_torch(
-                fn_wrapped=self._identity_model,
-                arg_names=[],
-                state_map={},
-                state_pred={},
-                constants={},
-                implied_balance_fn_torch=lambda s, c, p: (_t(0.0), _t(1.0), _t(1.0)),
-                implied_fn_torch=lambda s, c: _t(0.0),
-            )
 
 
 # ===========================================================================
@@ -467,7 +426,6 @@ class TestMergeLawImpliedAuditSpecsTorch:
         assert len(specs) >= 1
         assert specs[0]["name"] == "thermal_diffusivity"
         assert "implied_fn_torch" in specs[0]
-        assert "implied_balance_fn_torch" not in specs[0]
 
     def test_disabled_returns_empty(self):
         laws = [{"name": "fourier_conduction"}]

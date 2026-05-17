@@ -2,45 +2,24 @@
 
 When you select a governing law in `ResidualEngine` or `MonitorConfig`, Moju can **automatically** add matching **constitutive** audit rows for supported laws. Each row uses the standard **`implied_delta`** closure.
 
-## Subtract mode (generic constitutive audits)
+## Residual fed to `R_eff` (model-normalised fractional residual)
 
-Let \(F\) be the catalog model output (`Models.*` from state) and \(\tilde F\) an alternate value from **`implied_value_key`** or **`implied_fn`**. The stored tensor is **always** the nondimensional discrepancy
-
-\[
-R^* = \frac{F - \tilde F}{\varepsilon + |F| + |\tilde F|}
-\]
-
-unless a reference field resolves (audit **`implied_delta_ref_key`**, or **`{output_key}_ref`** in merged state/constants), in which case
+Let \(F\) be the catalog model output (`Models.*` from state) and \(\tilde F\) an alternate value from **`implied_value_key`** or **`implied_fn`**. The residual fed into the same `R_eff / R_norm / admissibility` pipeline as governing laws is the **model-normalised fractional residual**
 
 \[
-R^* = \frac{F - \tilde F}{\varepsilon + |\text{ref}|}.
+\delta = \frac{F - \tilde F}{|F| + \varepsilon}, \qquad \varepsilon = 10^{-30}.
 \]
 
-## Direct implied-term mode (law-linked coefficient audits)
+It is element-wise, so scalar, vector and tensor predictions are all supported (the formula broadcasts over every component). The same array is what the constitutive **divergence** plot displays and what the **consistency** plot uses for its percentage bands — so what you see is what the engine scores. `closure_debug["delta"]` stores `δ`; `closure_debug["raw"]` keeps the dimensional difference `F − ˜F` for diagnostics.
 
-For supported law-linked rows, Moju now recovers a direct **implied constitutive term** from the governing-law fields and compares it to the catalog model output. For example, Fourier conduction compares:
+## `implied_fn` flavours
 
-\[
-\alpha_{\text{model}} = \mathrm{Models.thermal\_diffusivity}(k,\rho,c_p)
-\quad\text{vs}\quad
-\alpha_{\text{implied}} = \frac{T_t}{T_{\text{laplacian}}}.
-\]
+Two `implied_fn` styles cover all supported laws:
 
-The stored tensor is the standard subtract-mode nondimensional discrepancy:
+1. **Scalar-coefficient safe-division.** The law rearranges to solve for a single material property (e.g. Fourier: \(\alpha = T_t / T_{\text{laplacian}}\); Fick: \(D = \phi_t / \phi_{\text{laplacian}}\); wave: \(c = \sqrt{\phi_{tt}/\phi_{\text{laplacian}}}\)). The helper uses `_safe_ratio` to NaN-mask ill-conditioned regions, so points where the denominator vanishes appear as `NaN` rather than huge finite values; downstream reductions are nan-aware.
+2. **Approximate / direct-field reconstruction.** The constitutive term is vector or tensor valued and cannot be inverted to a single scalar coefficient by safe division. The helper returns the law-implied vector/tensor field directly so the engine can compute element-wise `F − ˜F`. Covers stress (Hooke's law), density (mass compressible), turbulent viscous acceleration (compressible / incompressible momentum balance), and μ rows (NS / Stokes / Burgers) which use `_project_scalar_coefficient` (a least-squares projection onto `u_laplacian`) to recover a per-point scalar from a vector balance.
 
-\[
-R^* = \frac{F - \tilde F}{\varepsilon + |F| + |\tilde F|}
-\]
-
-where **`a`** is the model/catalog term and **`ε = 1e-30`** guards against division by zero. This means the closure debug sidecar contains:
-
-- **`pred`**: the model constitutive term \(F\);
-- **`implied`**: the law-implied constitutive term \(\tilde F\);
-- **`mode`**: **`"subtract"`**.
-
-Divisions are masked: points with ill-conditioned denominators are stored as **`NaN`** instead of huge finite implied values. Downstream reductions use nan-aware statistics, and all-invalid rows become non-finite diagnostics.
-
-There is **no** raw SI-difference mode. **`Models.*`** still uses your physical state keys; the **monitor residual** is always normalized as above.
+Both flavours feed into the same fractional residual `δ = (F − ˜F) / (|F| + ε)`, producing an array of the same shape as `F`. **`Models.*`** still uses your physical state keys; the monitor residual is always model-normalised as above.
 
 This answers: *“Does the constitutive closure in the catalog agree with what the PDE fields imply locally?”* without requiring **`state_ref`**. It is **not** a claim that the closure matches experiment—only that it matches the **same predicted state** you pass to the law.
 These implied residual keys are included in normal category/overall admissibility scoring by default (same as other constitutive residual keys).
@@ -49,7 +28,7 @@ These implied residual keys are included in normal category/overall admissibilit
 
 When `visualize()` is called after training or eval, the constitutive row of the monitor dashboard shows two sub-panels:
 
-- **Constitutive Divergence** (heatmap or line): the normalised delta `(pred − implied) / (|pred| + ε)` across all spatial collocation points. The colour scale is diverging and centred on zero; values near zero indicate the model is consistent with the law-implied term at that location.
+- **Constitutive Divergence** (heatmap or line): the normalised delta `δ = (pred − implied) / (|pred| + ε)` across all spatial collocation points — the **same array** that feeds `R_eff`. The colour scale is diverging and centred on zero; values near zero indicate the model is consistent with the law-implied term at that location.
 - **Constitutive Consistency** (line plot): the model (`pred`) and law-implied (`implied`) constitutive values as separate lines for the last time slice (transient data) or the worst-divergence row (2D data). Spatially varying acceptability bands centred on the model curve show ±1 % (green, acceptable), ±1–5 % (amber, warning), and ±5–6 % (red, alarm) tolerance zones based on the local model magnitude. Faint dotted tier boundary lines at the ±1 % and ±5 % edges carry hover labels (`+1% Δ`, `−5% Δ`, etc.).
 
 In the README's minimal 1D slab-cooling example, the user supplies a Path B `state_pred`
@@ -86,7 +65,7 @@ Each auto row sets **`residual_basename`** so keys stay unique when multiple law
 
 - Example: `constitutive/thermal_diffusivity/law_fourier_conduction/implied_delta`
 
-If **`state_ref`** is passed and **`run_mode="eval"`**, **`ref_delta`** is computed for the same row **unless** the spec sets **`include_ref_delta: false`**. With **`run_mode="training"`**, **`state_ref`** is ignored for **`ref_delta`** (use an eval pass after training). Nondimensional rules match **`implied_delta`** (symmetric scale, or **`ref_delta_ref_key`** / **`{output_key}_ref`** for the \(|\text{ref}|\) denominator).
+If **`state_ref`** is passed and **`run_mode="eval"`**, **`ref_delta`** is computed for the same row **unless** the spec sets **`include_ref_delta: false`**. With **`run_mode="training"`**, **`state_ref`** is ignored for **`ref_delta`** (use an eval pass after training). `ref_delta` keeps its symmetric / reference normalisation (`raw / (ε + |F(pred)| + |F(ref)|)`, or `raw / (ε + |ref|)` when **`ref_delta_ref_key`** / **`{output_key}_ref`** resolves).
 
 ## Constitutive-only policy
 
@@ -123,7 +102,7 @@ Laws without an entry add **no** law-linked implied rows. These gaps are intenti
 - model-context-dependent closure choice (`darcy_flow`, `brinkman_extension`),
 - laws requiring domain-specific closure/model choices not yet encoded in the constitutive registry.
 
-If you still want implied constitutive checks for unsupported laws, add explicit rows under `constitutive_audit` (for example with `implied_fn` or a custom `implied_balance_fn` for advanced balance-style diagnostics).
+If you still want implied constitutive checks for unsupported laws, add explicit rows under `constitutive_audit` with a custom `implied_fn`. The residual will be normalised as `(F(pred) − implied) / (|F(pred)| + ε)`.
 
 ## Studio and dependency planning
 
@@ -155,4 +134,4 @@ Notes:
 
 ## Custom extensions
 
-Expert users can attach **`implied_fn`** on manual **`constitutive_audit`** dict rows (same subtract-style shape as law-linked rows). Advanced users may still attach **`implied_balance_fn`** directly to `ResidualEngine` specs for custom diagnostics, but law-linked built-ins use direct implied terms. Use **`residual_basename`** for unique log keys when reusing a `Models.*` name.
+Expert users can attach **`implied_fn`** on manual **`constitutive_audit`** dict rows (same model-normalised fractional shape as law-linked rows). Use **`residual_basename`** for unique log keys when reusing a `Models.*` name. Balance-style diagnostics (`implied_balance_fn`) are no longer supported; express them as an `implied_fn` returning the implied side directly so the engine can compute `(F − implied) / (|F| + ε)` element-wise.

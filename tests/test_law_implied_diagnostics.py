@@ -43,7 +43,6 @@ def test_merge_fourier_prepends_thermal_diffusivity():
     assert c[0]["name"] == "thermal_diffusivity"
     assert c[0]["residual_basename"] == "thermal_diffusivity/law_fourier_conduction"
     assert c[0]["implied_fn"] is not None
-    assert c[0].get("implied_balance_fn") is None
     assert s == []
 
 
@@ -183,12 +182,11 @@ def test_supported_rows_are_constitutive_only():
     assert s == []
 
 
-def test_law_linked_rows_use_implied_fn_not_balance_fn():
+def test_law_linked_rows_use_implied_fn():
     laws = [{"name": n, "state_map": {}} for n in list_laws_with_implied_diagnostics()]
     c, _ = merge_law_implied_audit_specs(laws, enabled=True)
     assert c
     assert all(row.get("implied_fn") is not None for row in c)
-    assert all(row.get("implied_balance_fn") is None for row in c)
 
 
 def test_unsupported_reasons_present_and_disjoint_from_supported():

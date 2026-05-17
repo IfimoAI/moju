@@ -373,7 +373,6 @@ def _studio_monitor_spatial_bundle() -> tuple[Optional[Dict[str, Any]], Optional
         first_rms=first_rms,
         r_ref=r_ref,
         log_step_index=log_idx,
-        normalize_spatial=False,
     )
     cs = str(st.session_state.get("sb_heatmap_cs", "Jet"))
     return law_panel, implied_panel, cs

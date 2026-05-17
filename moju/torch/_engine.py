@@ -372,10 +372,8 @@ class TorchResidualEngine:
                 state_map=state_map,
                 state_pred=merged,
                 constants=self._constants,
-                implied_balance_fn_torch=aspec.get("implied_balance_fn_torch"),
                 implied_fn_torch=aspec.get("implied_fn_torch"),
                 output_key=aspec.get("output_key"),
-                implied_delta_ref_key=aspec.get("implied_delta_ref_key"),
             )
             if result is not None:
                 r = _restore_device({"r": result}, orig_device)["r"]
