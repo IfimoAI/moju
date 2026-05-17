@@ -323,21 +323,15 @@ def test_worst_div_mean_abs_row_index_deterministic() -> None:
     assert worst_div_mean_abs_row_index(div) == 1
 
 
-def test_prepare_mi_vs_x_prefers_last_time_slice() -> None:
+def test_prepare_mi_vs_x_picks_worst_time_slice() -> None:
+    """Worst-divergence time slice is selected; title and t_value reflect it."""
     pytest.importorskip("plotly")
     from moju.monitor.visualize_constitutive import prepare_constitutive_model_implied_vs_x_embed
 
     nx, ny = 4, 3
-    rng = np.random.default_rng(42)
-    # Two time slices; slice 1 differs so last-t reduction is visible.
-    pred = np.stack(
-        [
-            rng.standard_normal((ny, nx)) * 0.01,
-            np.full((ny, nx), 999.0),
-        ],
-        axis=0,
-    )
-    implied = np.stack([np.full((ny, nx), 1.4), np.full((ny, nx), 1.4)], axis=0)
+    # t=0: pred == implied → zero divergence.  t=1: pred=3, implied=2 → worst.
+    pred = np.stack([np.ones((ny, nx)), np.full((ny, nx), 3.0)], axis=0)
+    implied = np.stack([np.ones((ny, nx)), np.full((ny, nx), 2.0)], axis=0)
     bundle = {
         "log": [
             {
@@ -370,10 +364,57 @@ def test_prepare_mi_vs_x_prefers_last_time_slice() -> None:
     }
     emb = prepare_constitutive_model_implied_vs_x_embed(bundle, prefer_last_t=True)
     assert emb is not None
-    assert emb["title"] == "Constitutive Consistency (max t, worst slice)"
-    assert emb["subtitle"] == "max t, worst slice"
-    # Last t slice has pred grid 999 → implied lines flat 1.4
-    # traces[-1] is the implied line (band fills are prepended)
+    # Worst-t is t_idx=1 (t_value=1.0); 2D spatial → also worst slice.
+    assert emb["title"] == "Constitutive Consistency (worst t ≈ 1, worst slice)"
+    assert emb["subtitle"] == "worst t ≈ 1, worst slice"
+    assert emb["t_value"] == pytest.approx(1.0)
+    # Implied line at worst t=1 is flat 2.0.
     y1 = np.asarray(emb["traces"][-1].y, dtype=float)
-    assert np.allclose(y1, 1.4)
+    assert np.allclose(y1, 2.0)
+
+
+def test_prepare_mi_vs_x_1d_transient_worst_slice() -> None:
+    """1-D transient: worst time slice is found, t_value appears in title, no 'worst slice'."""
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import prepare_constitutive_model_implied_vs_x_embed
+
+    nx = 5
+    # t=0: zero divergence. t=1: pred=2, implied=1 → worst.
+    pred = np.stack([np.ones(nx), np.full(nx, 2.0)], axis=0)
+    implied = np.ones((2, nx))
+    bundle = {
+        "log": [
+            {
+                "overall_admissibility_score": 0.5,
+                "coord_snapshot": {
+                    "t": [0.0, 1.0],
+                    "x": list(np.linspace(0, 1, nx)),
+                },
+            }
+        ],
+        "indices": [0],
+        "plot_keys": ["constitutive/c/law_x/implied_delta"],
+        "r_norm_mat": [[0.5]],
+        "spatial": {
+            "coords": {"x": np.linspace(0, 1, nx)},
+        },
+        "closure_debug": {
+            "c/law_x": {
+                "pred": pred,
+                "implied": implied,
+                "raw": pred - implied,
+                "delta": (pred - implied) / (np.abs(pred) + 1e-30),
+                "mode": "subtract",
+                "output_key": "x",
+                "law_name": "x",
+                "model_name": "c",
+            }
+        },
+    }
+    emb = prepare_constitutive_model_implied_vs_x_embed(bundle, prefer_last_t=True)
+    assert emb is not None
+    assert "worst t ≈" in emb["title"]
+    assert "worst slice" not in emb["title"]
+    assert emb["t_value"] == pytest.approx(1.0)
+    assert emb["title"] == "Constitutive Consistency (worst t ≈ 1)"
 

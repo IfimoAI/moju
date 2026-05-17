@@ -109,10 +109,13 @@ def divergence_y_quantity_label(debug_entry: Optional[Dict[str, Any]] = None) ->
     return constitutive_term_label(debug_entry)
 
 
-def _constitutive_dissonance_title(*, is_transient: bool, is_worst_slice: bool) -> str:
+def _constitutive_dissonance_title(
+    *, is_transient: bool, is_worst_slice: bool, t_value: Optional[float] = None
+) -> str:
     details: List[str] = []
     if is_transient:
-        details.append("max t")
+        t_str = f"worst t ≈ {t_value:.4g}" if t_value is not None else "worst t"
+        details.append(t_str)
     if is_worst_slice:
         details.append("worst slice")
     return "Constitutive Consistency" + (f" ({', '.join(details)})" if details else "")
@@ -377,6 +380,27 @@ def worst_div_mean_abs_row_index(div: np.ndarray) -> int:
     return int(np.nanargmax(row_means))
 
 
+def _worst_time_slice_index(a: np.ndarray, b: np.ndarray) -> int:
+    """Return the time-axis index (axis 0) that maximises mean ``|δ|`` over all spatial axes.
+
+    ``a`` is ``pred``, ``b`` is ``implied``, both shaped ``(n_t, ...)``.  Returns ``0``
+    when the arrays are empty or entirely NaN.
+    """
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    if a.ndim < 1 or a.shape[0] == 0:
+        return 0
+    div = _normalized_divergence(a, b)
+    if div.ndim == 1:
+        slice_means = np.abs(div)
+    else:
+        reduce_axes = tuple(range(1, div.ndim))
+        slice_means = np.nanmean(np.abs(div), axis=reduce_axes)
+    if not np.any(np.isfinite(slice_means)):
+        return 0
+    return int(np.nanargmax(slice_means))
+
+
 def _x_abscissa_0_to_L(cx: np.ndarray, bundle: Dict[str, Any]) -> Tuple[np.ndarray, float, str]:
     """
     Map physical sample positions ``cx`` to ``[0, L]`` where ``L`` is ``spatial.domain_length`` if set,
@@ -570,9 +594,16 @@ def prepare_constitutive_model_implied_vs_x_embed(
     theme: Any = MOJU_LIGHT,
 ) -> Optional[Dict[str, Any]]:
     """
-    Build two line traces (Model vs x, Implied vs x) for the monitor: last time slice when ``t`` aligns,
-    worst-|Δ| row for 2-D, abscissa on ``[0, L]``.
+    Build two line traces (Model vs x, Implied vs x) for the monitor: when a time axis is
+    present, selects the **worst-divergence time slice** (the slice whose mean |δ| over all
+    spatial axes is largest) rather than always using the last time step.  For 2-D/3-D data
+    the existing worst-y/z row pick is applied on top of the time slice.  Steady-state data
+    (no time axis) is unchanged.  Abscissa is mapped to ``[0, L]`` when possible.
+
     Returns ``None`` if nothing to plot.
+
+    ``prefer_last_t`` controls whether the time-axis reduction is attempted at all; when
+    ``False`` no time slicing is done (kept for call-site backward compatibility).
     """
     from moju.monitor.spatial_rnorm_panels import _reduce_spatial_array
 
@@ -596,8 +627,8 @@ def prepare_constitutive_model_implied_vs_x_embed(
         except ValueError:
             return None
 
-    # Reshape flattened meshgrid data (n_t*n_x,) → (n_t, n_x) so _reduce_spatial_array
-    # can take the last-t slice and produce a clean 1-D spatial profile.
+    # Reshape flattened meshgrid data (n_t*n_x,) → (n_t, n_x) so the time axis is
+    # explicit before we pick the worst-t slice.
     cs_last = ((bundle.get("log") or [{}])[-1] or {}).get("coord_snapshot") or {}
     gs = cs_last.get("grid_shape")
     if a_full.ndim == 1 and gs and int(gs[0]) * int(gs[1]) == a_full.size:
@@ -606,9 +637,30 @@ def prepare_constitutive_model_implied_vs_x_embed(
         b_full = b_full.reshape(nt, nx)
 
     coords_pred = _closure_coords_for_reduce(bundle)
+    label_model, label_implied = _user_constitutive_side_labels()
+    y_qty = divergence_y_quantity_label(entry)
+    hint_ax = bundle.get("spatial_coord_hint")
+    note_parts: List[str] = []
+    is_transient_slice = False
+    t_value: Optional[float] = None
+
+    # --- Worst-t slice: select the time index with the largest mean |δ| ---
+    if prefer_last_t and coords_pred.get("t") is not None and a_full.ndim >= 2:
+        t_vec = np.asarray(coords_pred["t"]).reshape(-1)
+        nt = int(t_vec.shape[0])
+        if a_full.shape[0] == nt:
+            t_idx = _worst_time_slice_index(a_full, b_full)
+            a_full = np.asarray(a_full[t_idx], dtype=float)
+            b_full = np.asarray(b_full[t_idx], dtype=float)
+            t_value = float(t_vec[t_idx])
+            is_transient_slice = True
+            note_parts.append(f"worst t ≈ {t_value:.4g}")
+
+    # After time slicing pass prefer_last_t=False so _reduce_spatial_array does not try to
+    # slice time again (the time dimension is already gone).
     try:
-        a = np.asarray(_reduce_spatial_array(a_full, coords_pred, prefer_last_t=prefer_last_t), dtype=float)
-        b = np.asarray(_reduce_spatial_array(b_full, coords_pred, prefer_last_t=prefer_last_t), dtype=float)
+        a = np.asarray(_reduce_spatial_array(a_full, coords_pred, prefer_last_t=False), dtype=float)
+        b = np.asarray(_reduce_spatial_array(b_full, coords_pred, prefer_last_t=False), dtype=float)
     except (TypeError, ValueError):
         return None
 
@@ -616,28 +668,15 @@ def prepare_constitutive_model_implied_vs_x_embed(
         a = a[0]
         b = b[0]
 
-    label_model, label_implied = _user_constitutive_side_labels()
-    y_qty = divergence_y_quantity_label(entry)
-    hint_ax = bundle.get("spatial_coord_hint")
-    note_parts: List[str] = []
-    is_transient_slice = False
-    if prefer_last_t and coords_pred.get("t") is not None and a_full.ndim >= 2:
-        nt = int(np.asarray(coords_pred["t"]).reshape(-1).shape[0])
-        if a_full.shape[0] == nt:
-            is_transient_slice = True
-            note_parts.append("max t")
-
     if a.ndim == 1 and b.ndim == 1:
         n = int(a.shape[0])
         xs, _ = infer_divergence_abscissa(bundle, n, hint_axis=str(hint_ax) if hint_ax else None)
         xs = np.asarray(xs, dtype=float).ravel()
         if xs.shape[0] != n:
             xs = np.arange(n, dtype=float)
-            x_title_use = "Sample index"
         x_plot, _L, x_ax_title = _x_abscissa_0_to_L(xs, bundle)
         band_traces, y_range = _build_dissonance_band_traces(x_plot, a, t)
         tier_lines = _build_dissonance_tier_lines(x_plot, a, t)
-        # Expand y_range to also cover the implied curve b
         y_range = [
             min(y_range[0], float(np.nanmin(b))),
             max(y_range[1], float(np.nanmax(b))),
@@ -670,11 +709,13 @@ def prepare_constitutive_model_implied_vs_x_embed(
             "title": _constitutive_dissonance_title(
                 is_transient=is_transient_slice,
                 is_worst_slice=False,
+                t_value=t_value,
             ),
             "subtitle": subtitle,
             "row_note": "1-D profile",
             "is_transient_slice": is_transient_slice,
             "is_worst_slice": False,
+            "t_value": t_value,
             "y_range": y_range,
             "max_delta_label": max_delta_label,
         }
@@ -711,7 +752,6 @@ def prepare_constitutive_model_implied_vs_x_embed(
                 cy_val = float(cyy[y_ix])
         band_traces_2d, y_range_2d = _build_dissonance_band_traces(x_plot, la, t)
         tier_lines_2d = _build_dissonance_tier_lines(x_plot, la, t)
-        # Expand y_range to also cover the implied curve lb
         y_range_2d = [
             min(y_range_2d[0], float(np.nanmin(lb))),
             max(y_range_2d[1], float(np.nanmax(lb))),
@@ -746,11 +786,13 @@ def prepare_constitutive_model_implied_vs_x_embed(
             "title": _constitutive_dissonance_title(
                 is_transient=is_transient_slice,
                 is_worst_slice=True,
+                t_value=t_value,
             ),
             "subtitle": subtitle,
             "row_note": row_note,
             "is_transient_slice": is_transient_slice,
             "is_worst_slice": True,
+            "t_value": t_value,
             "y_range": y_range_2d,
             "max_delta_label": max_delta_label_2d,
         }

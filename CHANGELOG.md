@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- **Constitutive Consistency plot now selects the worst-divergence time slice** instead of the last (max `t`) slice. The time index that maximises mean |δ| over all spatial axes is chosen, and the selected `t` value (no unit suffix) is shown in the panel title and subtitle (e.g. `Constitutive Consistency (worst t ≈ 12.34)`). For 2-D/3-D data the existing worst-y/z row pick is applied on top of the worst-t pick (e.g. `Constitutive Consistency (worst t ≈ 12.34, worst slice)`). Steady-state data is unchanged.
+
 - **`DEFAULT_NONDIM_R_NORM_SCALE_K`** set to `1.0×10⁻²`: the default `scale_k` for `R_norm = R_eff / scale_k` on laws and nondimensional **implied_delta** / **ref_delta** keys. Users relying on numeric admissibility thresholds or `r_ref` overrides should review their tolerances when upgrading.
 
 ### Breaking
