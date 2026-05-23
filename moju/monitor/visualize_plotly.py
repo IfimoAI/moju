@@ -12,7 +12,14 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
-from moju.monitor.auditor import ADM_HIGH_THRESHOLD, admissibility_level, is_high_admissibility
+from moju.monitor.auditor import (
+    ADM_HIGH_THRESHOLD,
+    ADM_LOW_THRESHOLD,
+    ADM_MODERATE_THRESHOLD,
+    admissibility_level,
+    is_high_admissibility,
+)
+from moju.monitor.constitutive_closure_summary import build_constitutive_closure_summary
 from moju.monitor.visualize_labels import (
     category_adm_bar_axis_range_percent_full,
     format_admissibility_pct,
@@ -341,9 +348,9 @@ def _adm_bar_color_plotly(score: float) -> str:
         return "#bdc3c7"
     if is_high_admissibility(score):
         return "#27ae60"
-    if score >= 0.75:
+    if score >= ADM_MODERATE_THRESHOLD:
         return "#F59E0B"
-    if score >= 0.5:
+    if score >= ADM_LOW_THRESHOLD:
         return LOW_ADM_COLOR
     return "#c0392b"
 
@@ -365,9 +372,9 @@ def _admissibility_status_bracket_plotly(score: float) -> str:
         return "N/A"
     if is_high_admissibility(score):
         return "HIGH"
-    if score >= 0.75:
+    if score >= ADM_MODERATE_THRESHOLD:
         return "MODERATE"
-    if score >= 0.5:
+    if score >= ADM_LOW_THRESHOLD:
         return "LOW"
     return "NON-ADM"
 
@@ -448,9 +455,9 @@ def _kpi_indicator_value_color(score: float, *, warn_color: str) -> str:
         return DISSONANCE_COLOR
     if is_high_admissibility(score):
         return ADMISSIBLE_COLOR
-    if score >= 0.75:
+    if score >= ADM_MODERATE_THRESHOLD:
         return warn_color
-    if score >= 0.5:
+    if score >= ADM_LOW_THRESHOLD:
         return LOW_ADM_COLOR
     return DISSONANCE_COLOR
 
@@ -2054,11 +2061,16 @@ def _build_plotly_monitor_figure_single(
             "Governing laws satisfied" if is_high_admissibility(laws_last) else "Governing-law violations detected"
         )
     if math.isfinite(const_last):
-        summary_lines.append(
-            "Constitutive consistency acceptable"
-            if is_high_admissibility(const_last)
-            else "Constitutive inconsistency detected"
-        )
+        per_key_last = (metrics[-1].get("per_key_report") if metrics else {}) or {}
+        closure_summary = build_constitutive_closure_summary(per_key_last)
+        if closure_summary:
+            summary_lines.append(closure_summary)
+        else:
+            summary_lines.append(
+                "Constitutive consistency acceptable"
+                if is_high_admissibility(const_last)
+                else "Constitutive inconsistency detected"
+            )
     if not is_eval and math.isfinite(last_ov) and math.isfinite(first_ov):
         summary_lines.append("Training trend improving" if last_ov >= first_ov else "Training trend degrading")
     if show_primary_issue:

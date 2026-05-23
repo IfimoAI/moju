@@ -3,8 +3,11 @@ ResidualEngine: residuals for governing laws, optional groups (dimensionless num
 
 - compute_residuals(..., state_ref=None, run_mode=\"training\"|\"eval\", ...)
 - build_loss: cascaded **R_eff** over laws only (training); **R_eff** matches logged ``rms`` (see below).
-- audit / visualize: same metrics (**R_eff**, R_norm, admissibility) for all residual keys;
-  visualize builds Plotly training/eval dashboards (optional spatial law panel for x slices).
+- audit / visualize: governing **laws/** use RMS **R_eff** for admissibility; nondimensional
+  **constitutive/.../implied_delta** and **ref_delta** use worst-point ``max |δ|`` (logged as ``r_max``)
+  for admissibility while ``rms`` stays RMS for training plots and ``build_loss``. Constitutive
+  category rolls up with **minimum**; laws with geometric mean. Overall training score is
+  ``min(laws, constitutive)``.
 
 Constitutive audits are tied to Models.* functions via
 **ref_delta** and **implied_delta**.
@@ -62,8 +65,10 @@ DEFAULT_VISUALIZE_TITLE_TRAINING = "Physics Admissibility Audit (model training)
 DEFAULT_VISUALIZE_TITLE_EVAL = "Physics Admissibility Audit (model evaluation)"
 DEFAULT_VISUALIZE_TITLE_TEST = DEFAULT_VISUALIZE_TITLE_EVAL
 
-# Admissibility score in [0, 1]; "High" is strictly above this threshold.
-ADM_HIGH_THRESHOLD = 0.95
+# Constitutive fractional band edges (fraction, not percent) aligned with Consistency plot tiers.
+CONSTITUTIVE_BAND_FRAC_HIGH = 0.001   # ±0.1%
+CONSTITUTIVE_BAND_FRAC_MOD = 0.005    # ±0.5%
+CONSTITUTIVE_BAND_FRAC_LOW = 0.01     # ±1%
 # Exponent on imbalance **Q** in **R_eff** = RMS_δ(r)·Q**p** (see :func:`_r_eff_scalar`, :func:`configure_r_eff`).
 # Default ``0``: **R_eff** reduces to plain **RMS_δ(r)** without computing **Q**.
 R_EFF_Q_POWER = 0.0
@@ -71,6 +76,19 @@ R_EFF_Q_POWER = 0.0
 R_EFF_RMS_JITTER_SQ = 1e-20
 # Logged ``scale_k`` for **laws/** and nondimensional **implied_delta** / **ref_delta** (R_norm denominator).
 DEFAULT_NONDIM_R_NORM_SCALE_K = 1e-2
+
+
+def _admissibility_at_fraction(
+    p: float, *, scale_k: float = DEFAULT_NONDIM_R_NORM_SCALE_K
+) -> float:
+    """Admissibility when uniform fractional RMS error equals ``p`` (``R_norm = p / scale_k``)."""
+    return 1.0 / (1.0 + p / scale_k)
+
+
+# Admissibility tier cutoffs derived from constitutive band fractions at default ``scale_k``.
+ADM_HIGH_THRESHOLD = _admissibility_at_fraction(CONSTITUTIVE_BAND_FRAC_HIGH)
+ADM_MODERATE_THRESHOLD = _admissibility_at_fraction(CONSTITUTIVE_BAND_FRAC_MOD)
+ADM_LOW_THRESHOLD = _admissibility_at_fraction(CONSTITUTIVE_BAND_FRAC_LOW)
 
 
 def configure_r_eff(*, q_power: float = 0.0) -> None:
@@ -244,6 +262,14 @@ def _rms_scalar(x: jnp.ndarray) -> jnp.ndarray:
     return jnp.sqrt(jnp.nanmean(jnp.square(a)))
 
 
+def _r_max_scalar(x: jnp.ndarray) -> jnp.ndarray:
+    """Worst-point magnitude ``max |r_i|`` over collocation points (NaN if empty)."""
+    a = jnp.asarray(x).ravel()
+    if a.size == 0:
+        return jnp.asarray(float("nan"))
+    return jnp.nanmax(jnp.abs(a))
+
+
 def _r_eff_scalar(x: jnp.ndarray) -> jnp.ndarray:
     """
     Effective residual scalar **R_eff** for collocation-point residuals.
@@ -278,24 +304,25 @@ def admissibility_level(score: float) -> str:
     """
     Map admissibility score in ``[0, 1]`` to a qualitative label (``Unknown`` if non-finite).
 
-    Bands: below 50% Non-Admissible; 50–75% Low; 75–95% Moderate; above 95% High.
-    Boundaries: ``0.5`` and ``0.75`` start Low and Moderate; ``0.95`` is still Moderate; High requires
-    ``score > 0.95``.
+    Tier cutoffs align with constitutive Consistency bands (±0.1% / ±0.5% / ±1%) at default
+    ``scale_k`` (:data:`ADM_HIGH_THRESHOLD`, :data:`ADM_MODERATE_THRESHOLD`,
+    :data:`ADM_LOW_THRESHOLD`). High requires ``score >= ADM_HIGH_THRESHOLD`` (~90.9% at ±0.1%
+    fractional RMS); Moderate and Low use inclusive lower bounds at ~66.7% and 50%.
     """
     if not math.isfinite(score):
         return "Unknown"
-    if score > ADM_HIGH_THRESHOLD:
+    if score >= ADM_HIGH_THRESHOLD:
         return "High Admissibility"
-    if score >= 0.75:
+    if score >= ADM_MODERATE_THRESHOLD:
         return "Moderate Admissibility"
-    if score >= 0.5:
+    if score >= ADM_LOW_THRESHOLD:
         return "Low Admissibility"
     return "Non-Admissible"
 
 
 def is_high_admissibility(score: float) -> bool:
-    """True if ``score`` is finite and above :data:`ADM_HIGH_THRESHOLD` (strictly greater)."""
-    return math.isfinite(score) and score > ADM_HIGH_THRESHOLD
+    """True if ``score`` is finite and ``>= :data:`ADM_HIGH_THRESHOLD```."""
+    return math.isfinite(score) and score >= ADM_HIGH_THRESHOLD
 
 
 def _geom_mean_admissibility(values: Sequence[float]) -> float:
@@ -349,6 +376,24 @@ def _rms_per_key(
     return out
 
 
+def _max_per_key(
+    residuals_flat: Dict[str, jnp.ndarray],
+    *,
+    to_python: bool = True,
+) -> Dict[str, Any]:
+    """Per-key worst-point ``max |r|`` for ND closure keys only (``r_max`` in the log)."""
+    out: Dict[str, Any] = {}
+    for key, arr in residuals_flat.items():
+        if not _key_uses_worst_point_admissibility(key):
+            continue
+        r = _r_max_scalar(arr)
+        if to_python:
+            out[key] = float(jax.device_get(r))
+        else:
+            out[key] = r
+    return out
+
+
 def _flatten_residual_dict(residuals: Dict[str, Any]) -> Dict[str, jnp.ndarray]:
     flat: Dict[str, jnp.ndarray] = {}
     for category, content in residuals.items():
@@ -385,6 +430,14 @@ def _suffix_is_nd_closure(rest: str) -> bool:
     """True if flat tail is implied_delta or ref_delta (nondimensional closure residual)."""
     parts = rest.split("/")
     return bool(parts) and parts[-1] in ("implied_delta", "ref_delta")
+
+
+def _key_uses_worst_point_admissibility(flat_key: str) -> bool:
+    """True when audit admissibility should use ``r_max`` (worst-point) instead of RMS."""
+    if "/" not in flat_key:
+        return False
+    prefix, rest = flat_key.split("/", 1)
+    return prefix == "constitutive" and _suffix_is_nd_closure(rest)
 
 
 def _state_derived_scale_per_key(
@@ -497,10 +550,17 @@ def _compute_log_step_metrics(
 
     Returns one dict per entry with keys: ``r_norm``, ``admissibility_score``,
     ``category_admissibility_score``, ``overall_admissibility_score``, and
-    ``per_key_report`` (flat key -> {rms, r_norm, admissibility_score, admissibility_level}).
-    Field ``rms`` is **R_eff** from :func:`compute_residuals` (see :func:`_r_eff_scalar`).
+    ``per_key_report`` (flat key -> {rms, r_norm, admissibility_score, admissibility_level,
+    admissibility_metric, score_for_admissibility, optional r_max}).
+
+    Field ``rms`` is **R_eff** (RMS) from :func:`compute_residuals`. For
+    ``constitutive/.../implied_delta`` and ``ref_delta``, admissibility uses worst-point
+    ``r_max`` when logged (fallback to ``rms`` for legacy logs). Other keys use ``rms``.
+
     Scale precedence per key: **r_ref** (if given) > entry ``scale`` > first-step RMS > 1.
     Category scores are **0** if any per-key admissibility in that category is non-finite.
+    **laws**, **data**, and **scaling** categories use geometric mean; **constitutive** uses
+    minimum when any worst-point keys are present, else geometric mean.
 
     **Overall admissibility:** for ``run_mode == \"training\"``, minimum of present **laws**
     and **constitutive** category scores. For ``run_mode == \"eval\"``, minimum finite present
@@ -514,6 +574,7 @@ def _compute_log_step_metrics(
     category_buckets = ("laws", "constitutive", "scaling", "data")
     for entry in log:
         rms = entry.get("rms", {})
+        r_max = entry.get("r_max") or {}
         entry_scale = entry.get("scale") or {}
         r_norm: Dict[str, float] = {}
         admissibility: Dict[str, float] = {}
@@ -530,24 +591,46 @@ def _compute_log_step_metrics(
             if scale_k <= 0 or not math.isfinite(float(scale_k)):
                 scale_k = 1.0
             try:
-                v_f = float(v)
+                rms_f = float(v)
             except (TypeError, ValueError):
-                v_f = float("nan")
-            if not math.isfinite(v_f):
+                rms_f = float("nan")
+            if _key_uses_worst_point_admissibility(k):
+                try:
+                    v_max = float(r_max.get(k, float("nan")))
+                except (TypeError, ValueError):
+                    v_max = float("nan")
+                if math.isfinite(v_max):
+                    v_eff = v_max
+                    metric = "max"
+                elif math.isfinite(rms_f):
+                    v_eff = rms_f
+                    metric = "max"
+                else:
+                    v_eff = float("nan")
+                    metric = "max"
+            else:
+                v_eff = rms_f
+                metric = "rms"
+            if not math.isfinite(v_eff):
                 r_norm[k] = float("nan")
                 admissibility[k] = float("nan")
             else:
-                r_norm[k] = v_f / scale_k
+                r_norm[k] = v_eff / scale_k
                 if not math.isfinite(r_norm[k]):
                     admissibility[k] = float("nan")
                 else:
                     admissibility[k] = 1.0 / (1.0 + r_norm[k])
-            per_key_report[k] = {
+            key_report: Dict[str, Any] = {
                 "rms": v,
                 "r_norm": r_norm[k],
                 "admissibility_score": admissibility[k],
                 "admissibility_level": admissibility_level(admissibility[k]),
+                "admissibility_metric": metric,
+                "score_for_admissibility": v_eff,
             }
+            if k in r_max:
+                key_report["r_max"] = r_max[k]
+            per_key_report[k] = key_report
         category_keys: Dict[str, List[str]] = {c: [] for c in category_buckets}
         for k in admissibility.keys():
             if "/" in k:
@@ -572,6 +655,10 @@ def _compute_log_step_metrics(
                 vals.append(vf)
             if category_failed:
                 category_scores[cat] = 0.0
+            elif cat == "constitutive" and any(
+                _key_uses_worst_point_admissibility(kk) for kk in keys
+            ):
+                category_scores[cat] = _min_admissibility(vals)
             else:
                 category_scores[cat] = _geom_mean_admissibility(vals)
         cats_present = list(category_scores.keys())
@@ -630,10 +717,11 @@ def audit(
     ``1 / (1 + R_norm)`` when finite.
 
     Reporting uses three levels (no extra aggregation API): (1) per residual key in
-    ``per_key``; (2) geometric mean within each category — ``per_category`` keys
-    ``laws``, ``constitutive``, ``scaling``, ``data`` — only when **every** per-key
-    admissibility in that category is finite; if any key is non-finite (NaN/Inf) or
-    non-numeric, the category score is **0** (inadmissible for that bucket); empty
+    ``per_key``; (2) category rollup — geometric mean for **laws**, **data**, and **scaling**;
+    **minimum** for **constitutive** when worst-point closure keys are present (else geometric
+    mean) — ``per_category`` keys ``laws``, ``constitutive``, ``scaling``, ``data`` — only when
+    **every** per-key admissibility in that category is finite; if any key is non-finite
+    (NaN/Inf) or non-numeric, the category score is **0** (inadmissible for that bucket); empty
     categories omitted; (3) **overall** score — for ``run_mode == \"training\"``, minimum of
     present **laws** and **constitutive** category scores; for ``run_mode == \"eval\"``, minimum
     finite present category score (missing categories excluded); for legacy entries without
@@ -659,6 +747,9 @@ def audit(
         "overall_admissibility_level": admissibility_level(overall),
         "monitor_run_mode": (log[-1].get("run_mode") if log else None),
     }
+    from moju.monitor.constitutive_closure_summary import build_constitutive_closure_summary
+
+    report["constitutive_closure_summary"] = build_constitutive_closure_summary(last_report_per_key)
 
     if export_dir:
         import zipfile
@@ -2251,6 +2342,7 @@ class ResidualEngine:
 
         flat = _flatten_residual_dict(residuals)
         rms_per_key = _rms_per_key(flat, to_python=log_to_python)
+        r_max_per_key = _max_per_key(flat, to_python=log_to_python)
         state_ref_built_for_scale = None
         if ref_for_audits is not None:
             state_ref_built_for_scale = self._state_builder(
@@ -2267,6 +2359,7 @@ class ResidualEngine:
         entry: Dict[str, Any] = {
             "index": self._index,
             "rms": rms_per_key,
+            "r_max": r_max_per_key,
             "scale": scale_per_key,
             "run_mode": run_mode,
         }

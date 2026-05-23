@@ -4,7 +4,7 @@ When you select a governing law in `ResidualEngine` or `MonitorConfig`, Moju can
 
 ## Residual fed to `R_eff` (model-normalised fractional residual)
 
-Let \(F\) be the catalog model output (`Models.*` from state) and \(\tilde F\) an alternate value from **`implied_value_key`** or **`implied_fn`**. The residual fed into the same `R_eff / R_norm / admissibility` pipeline as governing laws is the **model-normalised fractional residual**
+Let \(F\) be the catalog model output (`Models.*` from state) and \(\tilde F\) an alternate value from **`implied_value_key`** or **`implied_fn`**. The per-point fractional residual fed into logging and audit is
 
 \[
 \delta = \frac{F - \tilde F}{|F| + \varepsilon}, \qquad \varepsilon = 10^{-30}.
@@ -22,14 +22,15 @@ Two `implied_fn` styles cover all supported laws:
 Both flavours feed into the same fractional residual `δ = (F − ˜F) / (|F| + ε)`, producing an array of the same shape as `F`. **`Models.*`** still uses your physical state keys; the monitor residual is always model-normalised as above.
 
 This answers: *“Does the constitutive closure in the catalog agree with what the PDE fields imply locally?”* without requiring **`state_ref`**. It is **not** a claim that the closure matches experiment—only that it matches the **same predicted state** you pass to the law.
-These implied residual keys are included in normal category/overall admissibility scoring by default (same as other constitutive residual keys).
+
+These implied residual keys are **pointwise closure / cheat-detector** checks: admissibility uses **worst-point** `max |δ|` (logged as **`r_max`**), not RMS, so a single bad collocation point cannot hide behind average compliance. Logged **`rms`** remains RMS for training plots and loss. Category rollup for constitutive closure keys uses **minimum** admissibility.
 
 ### How `visualize()` renders constitutive results
 
 When `visualize()` is called after training or eval, the constitutive row of the monitor dashboard shows two sub-panels:
 
-- **Constitutive Divergence** (heatmap or line): the normalised delta `δ = (pred − implied) / (|pred| + ε)` across all spatial collocation points — the **same array** that feeds `R_eff`. The colour scale is diverging and centred on zero; values near zero indicate the model is consistent with the law-implied term at that location.
-- **Constitutive Consistency** (line plot): the model (`pred`) and law-implied (`implied`) constitutive values as separate lines for the worst-divergence time slice (transient data) and the worst-divergence y/z row (2D/3D), with the selected `t` value shown in the title (e.g. `worst t ≈ 12.34`). Steady-state 1-D data shows all spatial points without any row selection. Spatially varying acceptability bands centred on the model curve show ±1 % (green, acceptable), ±1–5 % (amber, warning), and ±5–6 % (red, alarm) tolerance zones based on the local model magnitude. Faint dotted tier boundary lines at the ±1 % and ±5 % edges carry hover labels (`+1% Δ`, `−5% Δ`, etc.).
+- **Constitutive Divergence** (heatmap or line): the normalised delta `δ = (pred − implied) / (|pred| + ε)` across all spatial collocation points — the **same array** that feeds logged **`rms`** (RMS) and audit **`r_max`** (worst-point). The colour scale is diverging and centred on zero; values near zero indicate the model is consistent with the law-implied term at that location.
+- **Constitutive Consistency** (line plot): the model (`pred`) and law-implied (`implied`) constitutive values as separate lines for the worst-divergence time slice (transient data) and the worst-divergence y/z row (2D/3D), with the selected `t` value shown in the title (e.g. `worst t ≈ 12.34`). Steady-state 1-D data shows all spatial points without any row selection. Spatially varying acceptability bands centred on the model curve show **±0.1 %** (green), **±0.1–0.5 %** (amber), and **±0.5–1 %** (red) tolerance zones based on the local model magnitude; these align with admissibility tier cutoffs at default `scale_k = 1e-2`. Faint dotted tier boundary lines at **±0.1 %**, **±0.5 %**, and **±1 %** carry hover labels (`+0.1% Δ`, `−0.5% Δ`, etc.).
 
 In the README's minimal 1D slab-cooling example, the user supplies a Path B `state_pred`
 with `T`, `T_t`, `T_laplacian`, coordinates, and material properties. Because those

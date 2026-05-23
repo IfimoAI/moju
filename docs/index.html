@@ -98,7 +98,7 @@ fig = visualize(engine.log, engine=engine)</code></pre>
       <li><strong>Groups</strong> - dimensionless quantities materialized into state.</li>
       <li><strong>Laws</strong> - governing-equation residuals.</li>
       <li><strong>ResidualEngine</strong> - runs laws, groups, constitutive audits, and optional data comparisons.</li>
-      <li><strong>audit</strong> - admissibility scoring from the log.</li>
+      <li><strong>audit</strong> - admissibility scoring from the log (RMS for laws, worst-point for constitutive closure).</li>
       <li><strong>visualize</strong> - Plotly dashboards for residuals, categories, spatial fields, and constitutive diagnostics.</li>
       <li><strong>moju.torch</strong> - PyTorch-facing residual engine, loss helpers, and JAX-law wrappers.</li>
     </ul>

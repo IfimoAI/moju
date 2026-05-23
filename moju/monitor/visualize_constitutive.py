@@ -28,7 +28,7 @@ Modes
 - ``"spatial"`` — three-panel heatmap row: model output, law-implied side,
   signed normalised divergence (diverging colormap centered on zero).
 - ``"scatter"`` — pred vs implied scatter with the y = x identity line,
-  colored by ``|divergence|``; reports % of points within ±1, ±5, ±10 %.
+  colored by ``|divergence|``; reports % of points within ±0.1, ±0.5, ±1 %.
 - ``"distribution"`` — histogram of normalised divergence with admissibility
   threshold bands (green / amber / red).
 - ``"hotspot"`` — top-k worst points by ``|divergence|``, plotted in 2-D /
@@ -48,6 +48,11 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
+from moju.monitor.auditor import (
+    CONSTITUTIVE_BAND_FRAC_HIGH,
+    CONSTITUTIVE_BAND_FRAC_LOW,
+    CONSTITUTIVE_BAND_FRAC_MOD,
+)
 from moju.monitor.visualize_theme import (
     MOJU_LIGHT,
     apply_theme,
@@ -483,7 +488,7 @@ def _build_dissonance_band_traces(
         All have ``showlegend=False`` and blank names so they are invisible to
         ``_add_dissonance_inline_legend``.
     y_range : [float, float]
-        ``[y_lo, y_hi]`` covering at least the ±6 % alarm envelope of ``a``.
+        ``[y_lo, y_hi]`` covering at least the ±1 % alarm envelope of ``a``.
         Callers should expand this further to also encompass the implied ``b``.
     """
     import plotly.graph_objects as go
@@ -493,9 +498,9 @@ def _build_dissonance_band_traces(
     xs = np.asarray(x_plot, dtype=float).ravel()
 
     # Element-wise half-widths: model value a(x) is the reference/normaliser
-    w1 = 0.01 * (np.abs(a) + _DIVERGENCE_EPS)   # ±1%  acceptable
-    w5 = 0.05 * (np.abs(a) + _DIVERGENCE_EPS)   # ±5%  warning boundary
-    w6 = 0.06 * (np.abs(a) + _DIVERGENCE_EPS)   # ±6%  alarm / axis floor
+    w01 = CONSTITUTIVE_BAND_FRAC_HIGH * (np.abs(a) + _DIVERGENCE_EPS)  # ±0.1% green
+    w05 = CONSTITUTIVE_BAND_FRAC_MOD * (np.abs(a) + _DIVERGENCE_EPS)   # ±0.5% amber
+    w1 = CONSTITUTIVE_BAND_FRAC_LOW * (np.abs(a) + _DIVERGENCE_EPS)    # ±1% red / outer
 
     xs_rev = xs[::-1]
 
@@ -524,16 +529,16 @@ def _build_dissonance_band_traces(
         )
 
     band_traces = [
-        _fill(*_poly(a - w5, a - w6), c_alarm),   # alarm lower
-        _fill(*_poly(a + w6, a + w5), c_alarm),   # alarm upper
-        _fill(*_poly(a - w1, a - w5), c_warn),    # warning lower
-        _fill(*_poly(a + w5, a + w1), c_warn),    # warning upper
-        _fill(*_poly(a + w1, a - w1), c_ok),      # acceptable centre
+        _fill(*_poly(a - w05, a - w1), c_alarm),   # red lower
+        _fill(*_poly(a + w1, a + w05), c_alarm),   # red upper
+        _fill(*_poly(a - w01, a - w05), c_warn),   # amber lower
+        _fill(*_poly(a + w05, a + w01), c_warn),   # amber upper
+        _fill(*_poly(a + w01, a - w01), c_ok),     # green centre
     ]
 
-    # Y-axis range: cover the full ±6 % alarm envelope of the model curve
-    y_lo = float(np.nanmin(a - w6))
-    y_hi = float(np.nanmax(a + w6))
+    # Y-axis range: cover the full ±1 % envelope of the model curve
+    y_lo = float(np.nanmin(a - w1))
+    y_hi = float(np.nanmax(a + w1))
     a_mean = float(np.nanmean(a)) if a.size > 0 else 0.0
     margin = (y_hi - y_lo) * 0.05
     if margin == 0.0:
@@ -548,11 +553,11 @@ def _build_dissonance_tier_lines(
     a_1d: np.ndarray,
     theme: Any,
 ) -> List[Any]:
-    """Four faint dotted boundary curves at the ±1 % and ±5 % tier edges.
+    """Six faint dotted boundary curves at the ±0.1 %, ±0.5 %, and ±1 % tier edges.
 
     Rendered behind the band fills so they serve as visible tick-marks at
     the acceptability/warning and warning/alarm boundaries.  Each trace
-    carries a hover label (``"+1% Δ"``, ``"−5% Δ"`` etc.) and has
+    carries a hover label (``"+0.1% Δ"``, ``"−0.5% Δ"`` etc.) and has
     ``showlegend=False`` so it does not pollute the inline legend.
     """
     import plotly.graph_objects as go
@@ -561,8 +566,9 @@ def _build_dissonance_tier_lines(
     a = np.asarray(a_1d, dtype=float).ravel()
     xs = np.asarray(x_plot, dtype=float).ravel()
 
-    w1 = 0.01 * (np.abs(a) + _DIVERGENCE_EPS)
-    w5 = 0.05 * (np.abs(a) + _DIVERGENCE_EPS)
+    w01 = CONSTITUTIVE_BAND_FRAC_HIGH * (np.abs(a) + _DIVERGENCE_EPS)
+    w05 = CONSTITUTIVE_BAND_FRAC_MOD * (np.abs(a) + _DIVERGENCE_EPS)
+    w1 = CONSTITUTIVE_BAND_FRAC_LOW * (np.abs(a) + _DIVERGENCE_EPS)
 
     muted = t.palette.muted
 
@@ -579,10 +585,12 @@ def _build_dissonance_tier_lines(
         )
 
     return [
-        _boundary(a - w5, "\u22125% \u0394"),
         _boundary(a - w1, "\u22121% \u0394"),
+        _boundary(a - w05, "\u22120.5% \u0394"),
+        _boundary(a - w01, "\u22120.1% \u0394"),
+        _boundary(a + w01, "+0.1% \u0394"),
+        _boundary(a + w05, "+0.5% \u0394"),
         _boundary(a + w1, "+1% \u0394"),
-        _boundary(a + w5, "+5% \u0394"),
     ]
 
 
@@ -1234,9 +1242,9 @@ def build_scatter_divergence_panel(
     pad = 0.05 * (hi - lo)
 
     # Tolerance band statistics
-    pct_1 = float(np.mean(abs_div <= 0.01) * 100.0)
-    pct_5 = float(np.mean(abs_div <= 0.05) * 100.0)
-    pct_10 = float(np.mean(abs_div <= 0.10) * 100.0)
+    pct_01 = float(np.mean(abs_div <= CONSTITUTIVE_BAND_FRAC_HIGH) * 100.0)
+    pct_05 = float(np.mean(abs_div <= CONSTITUTIVE_BAND_FRAC_MOD) * 100.0)
+    pct_1 = float(np.mean(abs_div <= CONSTITUTIVE_BAND_FRAC_LOW) * 100.0)
     cx, cy, cz, ct = _coords_for_points(bundle, af.size)
     custom = np.column_stack([
         cx if cx is not None else np.full(af.size, np.nan),
@@ -1285,9 +1293,9 @@ def build_scatter_divergence_panel(
         )
     )
     annot = (
-        f"Within ±1%: {pct_1:.1f}%<br>"
-        f"Within ±5%: {pct_5:.1f}%<br>"
-        f"Within ±10%: {pct_10:.1f}%"
+        f"Within ±0.1%: {pct_01:.1f}%<br>"
+        f"Within ±0.5%: {pct_05:.1f}%<br>"
+        f"Within ±1%: {pct_1:.1f}%"
     )
     fig.add_annotation(
         text=annot,
@@ -1348,13 +1356,16 @@ def build_distribution_divergence_panel(
             hovertemplate="bin %{x:.3g}<br>count: %{y}<extra></extra>",
         )
     )
-    # Threshold bands (mirrors admissibility green/amber/red zones)
+    # Threshold bands aligned with admissibility tiers (±0.1% / ±0.5% / ±1%)
+    fh = CONSTITUTIVE_BAND_FRAC_HIGH
+    fm = CONSTITUTIVE_BAND_FRAC_MOD
+    fl = CONSTITUTIVE_BAND_FRAC_LOW
     band_specs = [
-        (-0.01, 0.01, t.palette.adm_high, "±1%"),
-        (-0.05, -0.01, t.palette.adm_med, ""),
-        (0.01, 0.05, t.palette.adm_med, "±5%"),
-        (-0.10, -0.05, t.palette.adm_low, ""),
-        (0.05, 0.10, t.palette.adm_low, "±10%"),
+        (-fh, fh, t.palette.adm_high, "±0.1%"),
+        (-fm, -fh, t.palette.adm_med, ""),
+        (fh, fm, t.palette.adm_med, "±0.5%"),
+        (-fl, -fm, t.palette.adm_low, ""),
+        (fm, fl, t.palette.adm_low, "±1%"),
     ]
     for x0, x1, color, _label in band_specs:
         fig.add_vrect(x0=x0, x1=x1, fillcolor=color, opacity=0.08, line_width=0)
@@ -1362,9 +1373,9 @@ def build_distribution_divergence_panel(
 
     pct_band = lambda thresh: float(np.mean(np.abs(div) <= thresh) * 100.0)
     annot = (
-        f"|Δ| ≤ 1%: {pct_band(0.01):.1f}%<br>"
-        f"|Δ| ≤ 5%: {pct_band(0.05):.1f}%<br>"
-        f"|Δ| ≤ 10%: {pct_band(0.10):.1f}%"
+        f"|Δ| ≤ 0.1%: {pct_band(fh):.1f}%<br>"
+        f"|Δ| ≤ 0.5%: {pct_band(fm):.1f}%<br>"
+        f"|Δ| ≤ 1%: {pct_band(fl):.1f}%"
     )
     fig.add_annotation(
         text=annot,

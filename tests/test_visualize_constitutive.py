@@ -225,7 +225,7 @@ def test_spatial_normalized_accepts_scalar_model_with_field_implied() -> None:
     emb = prepare_constitutive_model_implied_vs_x_embed(bundle)
     assert emb is not None
     # 4 tier-boundary + 5 band-fill + 2 named line traces (model + implied)
-    assert len(emb["traces"]) == 11
+    assert len(emb["traces"]) == 13
     # y_range must be present and well-formed
     assert "y_range" in emb
     assert len(emb["y_range"]) == 2
@@ -271,7 +271,7 @@ def test_prepare_mi_vs_x_embed_2d_subtract() -> None:
     emb = prepare_constitutive_model_implied_vs_x_embed(_twod_bundle())
     assert emb is not None
     # 4 tier-boundary + 5 band-fill + 2 named line traces (model + implied)
-    assert len(emb["traces"]) == 11
+    assert len(emb["traces"]) == 13
     assert "y_range" in emb
     assert emb["y_range"][0] < emb["y_range"][1]
     # last two traces are the model/implied line traces
@@ -299,7 +299,7 @@ def test_prepare_mi_vs_x_embed_1d_subtract() -> None:
     emb = prepare_constitutive_model_implied_vs_x_embed(_subtract_bundle())
     assert emb is not None
     # 4 tier-boundary + 5 band-fill + 2 named line traces (model + implied)
-    assert len(emb["traces"]) == 11
+    assert len(emb["traces"]) == 13
     assert "y_range" in emb
     assert emb["y_range"][0] < emb["y_range"][1]
     from moju.monitor.visualize_theme import MOJU_LIGHT

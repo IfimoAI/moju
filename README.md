@@ -86,7 +86,7 @@ What happens here:
 - `moju.piratio.Operators` - JAX autodiff helpers such as gradients, divergence, Laplacian, curl, and time derivatives.
 - `moju.monitor.ResidualEngine` - runs laws, groups, constitutive audits, optional data comparisons, and records audit logs.
 - `moju.monitor.audit` - converts logs into R_norm, admissibility scores, category summaries, and report data.
-- `moju.monitor.visualize` - Plotly dashboards for training/eval residuals, category scores, spatial fields, and constitutive diagnostics. The constitutive row shows a **Divergence** heatmap (normalised as `(model − implied) / (|model| + ε)`) alongside a **Constitutive Consistency** line plot with spatially varying ±1 % / ±5 % acceptability bands and tier boundary markers centred on the model prediction.
+- `moju.monitor.visualize` - Plotly dashboards for training/eval residuals, category scores, spatial fields, and constitutive diagnostics. The constitutive row shows a **Divergence** heatmap (normalised as `(model − implied) / (|model| + ε)`) alongside a **Constitutive Consistency** line plot with spatially varying **±0.1 % / ±0.5 % / ±1 %** acceptability bands and tier boundary markers centred on the model prediction.
 
 ## Training vs Eval
 
@@ -94,7 +94,11 @@ What happens here:
 
 Use `run_mode="eval"` when you want reference comparisons. In eval mode, `state_ref` enables constitutive `ref_delta` and `data/` residuals.
 
-Overall admissibility is the minimum of the finite category scores participating in the current run mode. Training rolls up laws and constitutive categories. Eval also includes `data` when present. Legacy logs may still contain a historical `scaling` category.
+Overall admissibility is the **minimum** of the finite category scores participating in the current run mode. Training rolls up **laws** and **constitutive** categories. Eval also includes `data` when present. Legacy logs may still contain a historical `scaling` category.
+
+### Why two admissibility metrics?
+
+Governing **laws** are scored with **RMS `R_eff`** (average compliance across collocation points). Constitutive **`implied_delta`** / **`ref_delta`** closure keys use **worst-point** `max |δ|` for admissibility — a PINN can satisfy the PDE on average while cheating closure at a few hotspots. Logged **`rms`** and **`build_loss`** stay RMS everywhere; audit/reporting uses the split. Constitutive category rolls up with **minimum** (not geometric mean). See **Admissibility metrics** in [`docs/monitor_training_vs_eval.md`](docs/monitor_training_vs_eval.md).
 
 Details: [`docs/monitor_training_vs_eval.md`](docs/monitor_training_vs_eval.md).
 

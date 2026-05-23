@@ -16,6 +16,8 @@ from moju.monitor import (
 )
 from moju.monitor.auditor import (
     ADM_HIGH_THRESHOLD,
+    ADM_LOW_THRESHOLD,
+    ADM_MODERATE_THRESHOLD,
     DEFAULT_VISUALIZE_TITLE_EVAL,
     DEFAULT_VISUALIZE_TITLE_TEST,
     DEFAULT_VISUALIZE_TITLE_TRAINING,
@@ -32,11 +34,11 @@ class TestAdmissibilityLevel:
     def test_four_levels(self):
         assert admissibility_level(0.0) == "Non-Admissible"
         assert admissibility_level(0.49) == "Non-Admissible"
-        assert admissibility_level(0.5) == "Low Admissibility"
-        assert admissibility_level(0.74) == "Low Admissibility"
-        assert admissibility_level(0.75) == "Moderate Admissibility"
-        assert admissibility_level(0.95) == "Moderate Admissibility"
-        assert admissibility_level(0.9500001) == "High Admissibility"
+        assert admissibility_level(ADM_LOW_THRESHOLD) == "Low Admissibility"
+        assert admissibility_level(ADM_MODERATE_THRESHOLD - 0.001) == "Low Admissibility"
+        assert admissibility_level(ADM_MODERATE_THRESHOLD) == "Moderate Admissibility"
+        assert admissibility_level(ADM_HIGH_THRESHOLD - 0.001) == "Moderate Admissibility"
+        assert admissibility_level(ADM_HIGH_THRESHOLD) == "High Admissibility"
         assert admissibility_level(1.0) == "High Admissibility"
 
     def test_non_finite_unknown(self):

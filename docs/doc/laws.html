@@ -133,7 +133,7 @@
     <div class="api-block">
       <div class="name">Laws.schrodinger_steady(psi_laplacian, V, E, psi, sch_kin_l2)</div>
       <div class="sig">−L²∇²ψ + K(V − E)ψ = 0, K = 2mL²/ℏ² (Groups.schrodinger_kinetic_length_squared)</div>
-      <div class="desc">psi_laplacian = L²∇²ψ. Law-FD multiplies grid Laplacian by L² when L is in state. Breaking vs m,h_bar API.</div>
+      <div class="desc">psi_laplacian = L²∇²ψ. Law-FD multiplies grid Laplacian by L² when L is in state. Replaces the previous (…, m, h_bar=…) signature.</div>
     </div>
     <div class="api-block">
       <div class="name">Laws.laplace_beltrami(phi_laplacian_g)</div>
