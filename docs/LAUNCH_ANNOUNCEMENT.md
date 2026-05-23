@@ -8,7 +8,7 @@ Moju provides physics supervision and audit tools for SciML models, with JAX-nat
 
 ## Short Description
 
-Moju turns predicted state fields into governing-law residuals, physics losses, constitutive consistency checks, and audit reports. It is useful for PINNs, CFD surrogates, neural operators, digital twins, and other workflows where model outputs can be represented as state dictionaries.
+Moju turns predicted state fields into governing-law residuals, physics losses, constitutive consistency checks, and audit reports. It separates **average law compliance** (RMS) from **worst-point constitutive integrity** (max |δ|) so PINNs cannot hide closure cheats behind smooth PDE residuals. It is useful for PINNs, CFD surrogates, neural operators, digital twins, and other workflows where model outputs can be represented as state dictionaries.
 
 The core is JAX-native. The `moju.torch` subpackage provides a PyTorch-facing residual engine, R_eff loss helpers, nondimensionalization utilities, and wrappers for using Moju laws with Torch tensors.
 

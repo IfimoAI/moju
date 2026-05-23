@@ -4,6 +4,19 @@
 
 Per flat residual key, the log's **`rms`** field is **R_eff** by default — **sqrt(mean(r^2)+δ^2)** with **δ²** = **`R_EFF_RMS_JITTER_SQ`** in `moju.monitor.auditor` (smooth RMS at zero residual). Optionally **R_eff** = RMS_δ **· Q^p**, **Q** = RMS(m)/mean(m), **m_i** = sqrt(r_i^2 + ε²) over collocation values; set **`p`** globally with **`configure_r_eff(q_power=…)`** (default **p** = **0**, so **Q** is omitted). Typical hotspot-sensitive monitoring uses **`configure_r_eff(q_power=2.0)`**. **R_norm** = **R_eff**/scale_k as elsewhere in the monitor. Default **`scale_k`** for **laws/** and nondimensional **implied_delta** / **ref_delta** is **1.0×10⁻²** (`DEFAULT_NONDIM_R_NORM_SCALE_K` in `moju.monitor.auditor`). Optional **`audit` / `visualize`** argument **`r_ref`** overrides **`scale_k`** per key.
 
+## Admissibility metrics
+
+| What | Governing **laws/** | Constitutive **`implied_delta`** / **`ref_delta`** |
+|------|---------------------|-----------------------------------------------------|
+| **Training loss / logged `rms`** | RMS **R_eff** | RMS **R_eff** (unchanged) |
+| **Audit admissibility scalar** | RMS **R_eff** | **Worst-point** **`r_max = max \|δ\|`** |
+| **Category rollup** | Geometric mean | **Minimum** |
+| **Overall (training)** | `min(laws, constitutive)` | (same) |
+
+**Why:** a model can satisfy governing laws on average while violating constitutive closure at isolated collocation points. Worst-point scoring on **`implied_delta`** / **`ref_delta`** catches that cheat; RMS on laws reflects typical PDE compliance.
+
+Each **`compute_residuals`** log entry stores **`rms`** (RMS per key, used by training plots and **`build_loss`**) and a sparse **`r_max`** dict (worst-point magnitudes for ND closure keys only). **`audit()`** / **`per_key_report`** add **`admissibility_metric`** (`"rms"` or `"max"`), **`score_for_admissibility`**, and optional **`r_max`**. Legacy logs without **`r_max`** fall back to RMS for closure admissibility. The dashboard **Summary** box and audit PDF **constitutive closure summary** lead with worst-point error and list RMS as a diagnostic.
+
 For minimal workflows, `build_minimal_residual_engine(law_names=[...], coord_dimension=1|2|3)` can auto-wire identity law specs plus inferred `Groups.*` rows and run in best-effort partial mode (skips unresolved rows and logs `unresolved_dependencies`). The configured `coord_dimension` is reused only when you explicitly ask for Path B finite-difference inference with `compute_residuals(..., auto_path_b_derivatives=True)`.
 
 ## Minimal inputs by dimension (quick helper)
@@ -30,7 +43,7 @@ Use inside optimization loops.
 
 Each log entry stores **`run_mode`**. **`audit()`** / **`_compute_log_step_metrics`** compute **overall admissibility** as the minimum of the present **laws** and **constitutive** category scores for **training** entries. Legacy entries **without** **`run_mode`** use the minimum finite score across all present categories (including **`data`** or legacy **`scaling/`** keys if present in old logs).
 
-**Plotly `visualize(..., mode="training")`** shows **two** KPI cards: Governing and Constitutive. The Governing and Constitutive per-key residual time-series panels now plot **`R_eff`** (the raw effective residual that the training loss minimises) — y-axis label `Effective residual (R_eff)` (linear) or `log10(R_eff + ε)` (log). Hovertemplates read `R_eff=…`. The worst-violation marker within each category ranks keys by terminal `R_eff` rather than `R_norm`. When closure debug data is present, the dashboard also renders a constitutive row with a **Divergence** heatmap (the model-normalised fractional residual `δ = (model − implied) / (|model| + ε)`) and a **Constitutive Consistency** line plot with spatially varying ±1 % / ±5 % acceptability bands centred on the model prediction.
+**Plotly `visualize(..., mode="training")`** shows **two** KPI cards: Governing and Constitutive. The Governing and Constitutive per-key residual time-series panels now plot **`R_eff`** (the raw effective residual that the training loss minimises) — y-axis label `Effective residual (R_eff)` (linear) or `log10(R_eff + ε)` (log). Hovertemplates read `R_eff=…`. The worst-violation marker within each category ranks keys by terminal `R_eff` rather than `R_norm`. When closure debug data is present, the dashboard also renders a constitutive row with a **Divergence** heatmap (the model-normalised fractional residual `δ = (model − implied) / (|model| + ε)`) and a **Constitutive Consistency** line plot with spatially varying **±0.1 % / ±0.5 % / ±1 %** acceptability bands centred on the model prediction. The dashboard **Summary** box and audit PDF include a one-line **constitutive closure summary** (worst-point fractional error, band, RMS diagnostic, worst-point admissibility) when `implied_delta` keys are present. **Category admissibility** on the Constitutive KPI card reflects **minimum** worst-point scores across closure keys.
 
 ### Spatial residual heatmaps (training + eval)
 

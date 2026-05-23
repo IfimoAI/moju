@@ -236,10 +236,17 @@ def write_audit_pdf(
         story.append(t)
         story.append(
             Paragraph(
-                "<i>Category scores are geometric means of the per-metric admissibility scores in that section.</i>",
+                "<i>Category scores: geometric mean for Governing and Data; "
+                "minimum worst-point admissibility for Constitutive when closure keys are present.</i>",
                 body_style,
             )
         )
+        story.append(Spacer(1, 16))
+
+    closure_summary = report.get("constitutive_closure_summary")
+    if closure_summary:
+        story.append(Paragraph("Constitutive closure summary", heading_style))
+        story.append(Paragraph(str(closure_summary), body_style))
         story.append(Spacer(1, 16))
 
     # Per-key metrics by category
