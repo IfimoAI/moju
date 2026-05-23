@@ -68,6 +68,8 @@ from moju.monitor.visualize_labels import (
 
 
 _DIVERGENCE_EPS: float = 1e-30
+_SLICE_MIN_FINITE_FRACTION: float = 0.01
+_SLICE_SPIKE_RATIO: float = 10.0
 
 # User-facing divergence panel wording (distinct from closure_debug JSON keys ``pred`` / ``implied``).
 USER_CONSTIT_MODEL: str = "Model"
@@ -115,14 +117,25 @@ def divergence_y_quantity_label(debug_entry: Optional[Dict[str, Any]] = None) ->
 
 
 def _constitutive_dissonance_title(
-    *, is_transient: bool, is_worst_slice: bool, t_value: Optional[float] = None
+    *,
+    is_transient: bool,
+    is_worst_slice: bool,
+    t_value: Optional[float] = None,
+    time_slice_criterion: Optional[str] = None,
+    spatial_slice_criterion: Optional[str] = None,
 ) -> str:
     details: List[str] = []
     if is_transient:
-        t_str = f"worst t ≈ {t_value:.4g}" if t_value is not None else "worst t"
+        if time_slice_criterion == "mean":
+            t_str = f"t ≈ {t_value:.4g}, mean t slice (max degenerate)" if t_value is not None else "mean t slice (max degenerate)"
+        else:
+            t_str = f"worst t ≈ {t_value:.4g}" if t_value is not None else "worst t"
         details.append(t_str)
     if is_worst_slice:
-        details.append("worst slice")
+        if spatial_slice_criterion == "mean":
+            details.append("mean slice (max degenerate)")
+        else:
+            details.append("worst slice")
     return "Constitutive Consistency" + (f" ({', '.join(details)})" if details else "")
 
 
@@ -385,6 +398,15 @@ def worst_div_mean_abs_row_index(div: np.ndarray) -> int:
     return int(np.nanargmax(row_means))
 
 
+def worst_div_max_abs_row_index(div: np.ndarray) -> int:
+    """Pick row ``y`` index maximizing max ``|Δ_norm|`` over ``x`` (worst-point row)."""
+    d = np.asarray(div, dtype=float)
+    if d.ndim != 2 or d.shape[0] < 1:
+        return 0
+    row_maxes = np.nanmax(np.abs(d), axis=1)
+    return int(np.nanargmax(row_maxes))
+
+
 def _worst_time_slice_index(a: np.ndarray, b: np.ndarray) -> int:
     """Return the time-axis index (axis 0) that maximises mean ``|δ|`` over all spatial axes.
 
@@ -404,6 +426,64 @@ def _worst_time_slice_index(a: np.ndarray, b: np.ndarray) -> int:
     if not np.any(np.isfinite(slice_means)):
         return 0
     return int(np.nanargmax(slice_means))
+
+
+def _worst_time_slice_index_max(a: np.ndarray, b: np.ndarray) -> int:
+    """Return the time-axis index (axis 0) that maximises max ``|δ|`` over all spatial axes."""
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    if a.ndim < 1 or a.shape[0] == 0:
+        return 0
+    div = _normalized_divergence(a, b)
+    if div.ndim == 1:
+        slice_maxes = np.abs(div)
+    else:
+        reduce_axes = tuple(range(1, div.ndim))
+        slice_maxes = np.nanmax(np.abs(div), axis=reduce_axes)
+    if not np.any(np.isfinite(slice_maxes)):
+        return 0
+    return int(np.nanargmax(slice_maxes))
+
+
+def _is_degenerate_worst_slice(abs_div: np.ndarray) -> bool:
+    """True when a max-|δ| slice pick would be driven by sparse NaNs or a lone spike."""
+    vals = np.abs(np.asarray(abs_div, dtype=float)).ravel()
+    finite = vals[np.isfinite(vals)]
+    if finite.size == 0:
+        return True
+    if finite.size / max(vals.size, 1) < _SLICE_MIN_FINITE_FRACTION:
+        return True
+    if finite.size < 2:
+        return False
+    peak = float(np.max(finite))
+    rest = np.delete(finite, int(np.argmax(finite)))
+    if rest.size == 0:
+        return False
+    rest_max = float(np.nanmax(rest))
+    if rest_max >= CONSTITUTIVE_BAND_FRAC_HIGH:
+        return False
+    return peak >= _SLICE_SPIKE_RATIO * max(rest_max, CONSTITUTIVE_BAND_FRAC_HIGH)
+
+
+def _select_worst_time_slice_index(a: np.ndarray, b: np.ndarray) -> Tuple[int, str]:
+    """Pick worst time slice by max |δ|, falling back to mean |δ| when degenerate."""
+    t_max = _worst_time_slice_index_max(a, b)
+    div = _normalized_divergence(a, b)
+    if div.ndim >= 1 and 0 <= t_max < div.shape[0]:
+        div_at_t = np.abs(div[t_max])
+    else:
+        div_at_t = np.abs(div)
+    if _is_degenerate_worst_slice(div_at_t):
+        return _worst_time_slice_index(a, b), "mean"
+    return t_max, "max"
+
+
+def _select_worst_row_index(div: np.ndarray) -> Tuple[int, str]:
+    """Pick worst spatial row by max |δ|, falling back to mean |δ| when degenerate."""
+    y_max = worst_div_max_abs_row_index(div)
+    if _is_degenerate_worst_slice(div[y_max]):
+        return worst_div_mean_abs_row_index(div), "mean"
+    return y_max, "max"
 
 
 def _x_abscissa_0_to_L(cx: np.ndarray, bundle: Dict[str, Any]) -> Tuple[np.ndarray, float, str]:
@@ -603,10 +683,11 @@ def prepare_constitutive_model_implied_vs_x_embed(
 ) -> Optional[Dict[str, Any]]:
     """
     Build two line traces (Model vs x, Implied vs x) for the monitor: when a time axis is
-    present, selects the **worst-divergence time slice** (the slice whose mean |δ| over all
-    spatial axes is largest) rather than always using the last time step.  For 2-D/3-D data
-    the existing worst-y/z row pick is applied on top of the time slice.  Steady-state data
-    (no time axis) is unchanged.  Abscissa is mapped to ``[0, L]`` when possible.
+    present, selects the **worst-divergence time slice** (the slice whose max |δ| over all
+    spatial axes is largest, falling back to mean |δ| when that slice is degenerate) rather
+    than always using the last time step.  For 2-D/3-D data the worst-y/z row pick uses the
+    same max-with-mean-fallback rule on top of the time slice.  Steady-state data (no time
+    axis) is unchanged.  Abscissa is mapped to ``[0, L]`` when possible.
 
     Returns ``None`` if nothing to plot.
 
@@ -651,18 +732,23 @@ def prepare_constitutive_model_implied_vs_x_embed(
     note_parts: List[str] = []
     is_transient_slice = False
     t_value: Optional[float] = None
+    time_slice_criterion: Optional[str] = None
+    spatial_slice_criterion: Optional[str] = None
 
-    # --- Worst-t slice: select the time index with the largest mean |δ| ---
+    # --- Worst-t slice: max |δ| with mean fallback when degenerate ---
     if prefer_last_t and coords_pred.get("t") is not None and a_full.ndim >= 2:
         t_vec = np.asarray(coords_pred["t"]).reshape(-1)
         nt = int(t_vec.shape[0])
         if a_full.shape[0] == nt:
-            t_idx = _worst_time_slice_index(a_full, b_full)
+            t_idx, time_slice_criterion = _select_worst_time_slice_index(a_full, b_full)
             a_full = np.asarray(a_full[t_idx], dtype=float)
             b_full = np.asarray(b_full[t_idx], dtype=float)
             t_value = float(t_vec[t_idx])
             is_transient_slice = True
-            note_parts.append(f"worst t ≈ {t_value:.4g}")
+            if time_slice_criterion == "mean":
+                note_parts.append(f"t ≈ {t_value:.4g}, mean t slice (max degenerate)")
+            else:
+                note_parts.append(f"worst t ≈ {t_value:.4g}")
 
     # After time slicing pass prefer_last_t=False so _reduce_spatial_array does not try to
     # slice time again (the time dimension is already gone).
@@ -718,19 +804,23 @@ def prepare_constitutive_model_implied_vs_x_embed(
                 is_transient=is_transient_slice,
                 is_worst_slice=False,
                 t_value=t_value,
+                time_slice_criterion=time_slice_criterion,
+                spatial_slice_criterion=spatial_slice_criterion,
             ),
             "subtitle": subtitle,
             "row_note": "1-D profile",
             "is_transient_slice": is_transient_slice,
             "is_worst_slice": False,
             "t_value": t_value,
+            "time_slice_criterion": time_slice_criterion,
+            "spatial_slice_criterion": spatial_slice_criterion,
             "y_range": y_range,
             "max_delta_label": max_delta_label,
         }
 
     if a.ndim == 2 and b.ndim == 2:
         div = _normalized_divergence(a, b)
-        y_ix = worst_div_mean_abs_row_index(div)
+        y_ix, spatial_slice_criterion = _select_worst_row_index(div)
         la = np.asarray(a[y_ix], dtype=float).ravel()
         lb = np.asarray(b[y_ix], dtype=float).ravel()
         nx = la.shape[0]
@@ -750,7 +840,10 @@ def prepare_constitutive_model_implied_vs_x_embed(
             if cxx.size != nx:
                 cxx = np.linspace(0.0, 1.0, nx, dtype=float)
         x_plot, _L, x_ax_title = _x_abscissa_0_to_L(cxx, bundle)
-        note_parts.append("worst slice")
+        if spatial_slice_criterion == "mean":
+            note_parts.append("mean slice (max degenerate)")
+        else:
+            note_parts.append("worst slice")
         subtitle = ", ".join(note_parts)
         cy_val = None
         cy_src = cds_raw.get("y") if cds_raw else coords.get("y")
@@ -795,12 +888,16 @@ def prepare_constitutive_model_implied_vs_x_embed(
                 is_transient=is_transient_slice,
                 is_worst_slice=True,
                 t_value=t_value,
+                time_slice_criterion=time_slice_criterion,
+                spatial_slice_criterion=spatial_slice_criterion,
             ),
             "subtitle": subtitle,
             "row_note": row_note,
             "is_transient_slice": is_transient_slice,
             "is_worst_slice": True,
             "t_value": t_value,
+            "time_slice_criterion": time_slice_criterion,
+            "spatial_slice_criterion": spatial_slice_criterion,
             "y_range": y_range_2d,
             "max_delta_label": max_delta_label_2d,
         }
@@ -1700,5 +1797,6 @@ __all__ = [
     "list_constitutive_basenames",
     "prepare_constitutive_model_implied_vs_x_embed",
     "primary_closure_debug_field_length",
+    "worst_div_max_abs_row_index",
     "worst_div_mean_abs_row_index",
 ]

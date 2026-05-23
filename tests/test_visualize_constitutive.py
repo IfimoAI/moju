@@ -368,6 +368,8 @@ def test_prepare_mi_vs_x_picks_worst_time_slice() -> None:
     assert emb["title"] == "Constitutive Consistency (worst t ≈ 1, worst slice)"
     assert emb["subtitle"] == "worst t ≈ 1, worst slice"
     assert emb["t_value"] == pytest.approx(1.0)
+    assert emb["time_slice_criterion"] == "max"
+    assert emb["spatial_slice_criterion"] == "max"
     # Implied line at worst t=1 is flat 2.0.
     y1 = np.asarray(emb["traces"][-1].y, dtype=float)
     assert np.allclose(y1, 2.0)
@@ -417,4 +419,184 @@ def test_prepare_mi_vs_x_1d_transient_worst_slice() -> None:
     assert "worst slice" not in emb["title"]
     assert emb["t_value"] == pytest.approx(1.0)
     assert emb["title"] == "Constitutive Consistency (worst t ≈ 1)"
+    assert emb["time_slice_criterion"] == "max"
+
+
+def test_worst_div_max_abs_row_index_spike_vs_mean() -> None:
+    from moju.monitor.visualize_constitutive import (
+        _select_worst_row_index,
+        worst_div_max_abs_row_index,
+        worst_div_mean_abs_row_index,
+    )
+
+    div = np.full((2, 100), 0.0005, dtype=float)
+    div[0, 50] = 0.5
+    div[1, :] = 0.05
+    assert worst_div_max_abs_row_index(div) == 0
+    assert worst_div_mean_abs_row_index(div) == 1
+    y_ix, crit = _select_worst_row_index(div)
+    assert y_ix == 1
+    assert crit == "mean"
+
+
+def test_worst_time_slice_max_vs_mean() -> None:
+    from moju.monitor.visualize_constitutive import (
+        _select_worst_time_slice_index,
+        _worst_time_slice_index,
+        _worst_time_slice_index_max,
+    )
+
+    nx = 50
+    pred = np.stack([np.ones(nx), np.full(nx, 2.0)], axis=0)
+    implied = np.ones((2, nx))
+    implied[1] = 1.96
+    pred[0, 25] = 10.0
+    implied[0, 25] = 1.0
+    assert _worst_time_slice_index_max(pred, implied) == 0
+    assert _worst_time_slice_index(pred, implied) == 1
+    t_idx, crit = _select_worst_time_slice_index(pred, implied)
+    assert t_idx == 1
+    assert crit == "mean"
+
+
+def test_is_degenerate_worst_slice_sparse_nan() -> None:
+    from moju.monitor.visualize_constitutive import _is_degenerate_worst_slice
+
+    vals = np.full(200, np.nan)
+    vals[0] = 1.0
+    assert _is_degenerate_worst_slice(vals) is True
+
+
+def test_prepare_mi_vs_x_max_slice_default() -> None:
+    """Uniform worst field uses max-based slice selection."""
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import prepare_constitutive_model_implied_vs_x_embed
+
+    nx, ny = 4, 3
+    pred = np.stack([np.ones((ny, nx)), np.full((ny, nx), 3.0)], axis=0)
+    implied = np.stack([np.ones((ny, nx)), np.full((ny, nx), 2.0)], axis=0)
+    bundle = {
+        "log": [
+            {
+                "overall_admissibility_score": 0.5,
+                "coord_snapshot": {
+                    "t": [0.0, 1.0],
+                    "x": list(np.linspace(0, 1, nx * ny * 2)),
+                    "y": list(np.linspace(0, 1, nx * ny * 2)),
+                },
+            }
+        ],
+        "indices": [0],
+        "plot_keys": ["constitutive/c/law_x/implied_delta"],
+        "r_norm_mat": [[0.99]],
+        "spatial": {
+            "coords": {"x": np.linspace(0, 1, nx), "y": np.linspace(0, 1, ny)},
+        },
+        "closure_debug": {
+            "c/law_x": {
+                "pred": pred,
+                "implied": implied,
+                "raw": pred - implied,
+                "delta": (pred - implied) / (np.abs(pred) + 1e-30),
+                "mode": "subtract",
+                "output_key": "x",
+                "law_name": "x",
+                "model_name": "c",
+            }
+        },
+    }
+    emb = prepare_constitutive_model_implied_vs_x_embed(bundle, prefer_last_t=True)
+    assert emb is not None
+    assert emb["time_slice_criterion"] == "max"
+    assert emb["spatial_slice_criterion"] == "max"
+    assert emb["title"] == "Constitutive Consistency (worst t ≈ 1, worst slice)"
+
+
+def test_prepare_mi_vs_x_mean_fallback_spike() -> None:
+    """Spike-dominated max row falls back to mean-based spatial slice."""
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import prepare_constitutive_model_implied_vs_x_embed
+
+    nx, ny = 50, 2
+    alpha_pred = np.full((ny, nx), 1.5e-5)
+    alpha_implied = alpha_pred.copy()
+    alpha_pred[0, nx // 2] = alpha_pred[0, nx // 2] * 2.0
+    alpha_implied[1, :] = alpha_pred[1, :] * 1.05
+    bundle = {
+        "log": [
+            {
+                "overall_admissibility_score": 0.5,
+                "coord_snapshot": {
+                    "x": list(np.linspace(0, 1, nx * ny)),
+                    "y": list(np.linspace(0, 1, nx * ny)),
+                },
+            }
+        ],
+        "indices": [0],
+        "plot_keys": ["constitutive/thermal_diffusivity/law_fourier_conduction/implied_delta"],
+        "r_norm_mat": [[0.42]],
+        "spatial": {"coords": {"x": np.linspace(0, 1, nx), "y": np.linspace(0, 1, ny)}},
+        "closure_debug": {
+            "thermal_diffusivity/law_fourier_conduction": {
+                "pred": alpha_pred,
+                "implied": alpha_implied,
+                "raw": alpha_pred - alpha_implied,
+                "delta": (alpha_pred - alpha_implied) / (np.abs(alpha_pred) + 1e-30),
+                "mode": "subtract",
+                "output_key": "alpha",
+                "law_name": "fourier_conduction",
+                "model_name": "thermal_diffusivity",
+            },
+        },
+    }
+    emb = prepare_constitutive_model_implied_vs_x_embed(bundle)
+    assert emb is not None
+    assert emb["spatial_slice_criterion"] == "mean"
+    assert "mean slice (max degenerate)" in emb["subtitle"]
+    assert "mean slice (max degenerate)" in emb["title"]
+
+
+def test_prepare_mi_vs_x_mean_fallback_sparse_nan() -> None:
+    """Mostly-NaN max time slice falls back to mean-based time selection."""
+    pytest.importorskip("plotly")
+    from moju.monitor.visualize_constitutive import prepare_constitutive_model_implied_vs_x_embed
+
+    nx = 200
+    pred = np.stack([np.full(nx, np.nan), np.full(nx, 2.0)], axis=0)
+    implied = np.stack([np.full(nx, np.nan), np.full(nx, 1.96)], axis=0)
+    pred[0, 0] = 100.0
+    implied[0, 0] = 1.0
+    bundle = {
+        "log": [
+            {
+                "overall_admissibility_score": 0.5,
+                "coord_snapshot": {
+                    "t": [0.0, 1.0],
+                    "x": list(np.linspace(0, 1, nx)),
+                },
+            }
+        ],
+        "indices": [0],
+        "plot_keys": ["constitutive/c/law_x/implied_delta"],
+        "r_norm_mat": [[0.5]],
+        "spatial": {"coords": {"x": np.linspace(0, 1, nx)}},
+        "closure_debug": {
+            "c/law_x": {
+                "pred": pred,
+                "implied": implied,
+                "raw": pred - implied,
+                "delta": (pred - implied) / (np.abs(pred) + 1e-30),
+                "mode": "subtract",
+                "output_key": "x",
+                "law_name": "x",
+                "model_name": "c",
+            }
+        },
+    }
+    emb = prepare_constitutive_model_implied_vs_x_embed(bundle, prefer_last_t=True)
+    assert emb is not None
+    assert emb["time_slice_criterion"] == "mean"
+    assert emb["t_value"] == pytest.approx(0.0)
+    assert "mean t slice (max degenerate)" in emb["subtitle"]
+    assert "mean t slice (max degenerate)" in emb["title"]
 
