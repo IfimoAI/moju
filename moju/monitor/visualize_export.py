@@ -49,7 +49,7 @@ def _ensure_path(path: PathLike, *, suffix: Optional[str] = None) -> Path:
 def _kaleido_install_hint() -> str:
     return (
         "PNG/SVG export requires kaleido.  Install with `pip install -U kaleido` "
-        "(included in `pip install moju[viz]`)."
+        "(included in core `pip install moju`)."
     )
 
 
@@ -286,14 +286,14 @@ def export_dashboard_pdf(
     rendered Plotly card is embedded after the standard report tables for a
     fully visual brief.
 
-    Requires ``moju[report]`` (ReportLab).
+    Requires ReportLab (included in core ``moju``).
     """
     out = _ensure_path(path, suffix=".pdf")
     try:
         from moju.monitor.report import write_audit_pdf
     except ImportError as exc:
         raise ImportError(
-            "moju.monitor.report.write_audit_pdf requires ReportLab; install via `pip install moju[report]`."
+            "moju.monitor.report.write_audit_pdf requires ReportLab; install via `pip install moju`."
         ) from exc
 
     # 1. Always write the textual PDF first via the existing pipeline.

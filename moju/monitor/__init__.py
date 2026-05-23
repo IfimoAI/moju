@@ -1,5 +1,6 @@
 """Monitor: ResidualEngine, build_loss, audit, visualize for residuals and training monitoring."""
 
+from moju.monitor.audit_meta import audit_meta, build_audit_meta, format_audit_meta_plain_summary
 from moju.monitor.auditor import (
     ResidualEngine,
     admissibility_level,
@@ -46,6 +47,9 @@ from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivat
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
 
 __all__ = [
+    "audit_meta",
+    "build_audit_meta",
+    "format_audit_meta_plain_summary",
     "ResidualEngine",
     "admissibility_level",
     "configure_r_eff",

@@ -40,7 +40,7 @@ class XarrayRefSpec:
 def _require_xarray() -> Any:
     if xr is None:  # pragma: no cover
         raise ImportError(
-            "xarray is required for this loader. Install with: pip install moju[ref]"
+            "xarray is required for this loader. Install with: pip install moju[io]"
         )
     return xr
 
@@ -200,8 +200,7 @@ def from_meshio(
         import meshio  # type: ignore
     except Exception as e:  # pragma: no cover
         raise ImportError(
-            "meshio is required for this loader. Install with: pip install moju[ref_vtk] "
-            "or pip install moju[ref_foam]"
+            "meshio is required for this loader. Install with: pip install moju[io]"
         ) from e
 
     mesh = meshio.read(path)
@@ -273,7 +272,7 @@ def from_hdf5(
         import h5py  # type: ignore
     except Exception as e:  # pragma: no cover
         raise ImportError(
-            "h5py is required for this loader. Install with: pip install moju[ref_hdf5]"
+            "h5py is required for this loader. Install with: pip install moju[io]"
         ) from e
 
     out: Dict[str, Any] = {}

@@ -2,7 +2,7 @@
 Demo: ingest CFD-like reference data (xarray) into state_ref and audit.
 
 Run:
-  pip install moju[ref] moju[report]
+  pip install "moju[io]"
   python examples/monitor_state_ref_from_xarray_demo.py
 """
 

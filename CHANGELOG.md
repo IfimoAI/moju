@@ -12,7 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Path B dimensional ND.** `state_units="dimensional"` infers **`NondimScales`**, runs groups on physical state, then **`dimensional_to_nd`** before laws/FD. **`MonitorConfig`**: `law_scale_mode`, `state_units`, `nondim_scales`. Studio Run tab: **State in physical units (SI)** checkbox.
 
+- **`audit_meta(log)`** — plain-language explainer for scaling and nondimensionalization (`build_audit_meta`, `format_audit_meta_plain_summary`). Attached as **`report["audit_meta"]`** from **`audit()`**; log entries include **`monitor_settings`**. Moju Studio Dashboard expander **How scoring was calibrated**; audit PDF section **Scoring calibration**.
+
 ### Changed
+
+- **Install profiles simplified.** Core **`pip install moju`** now includes **Plotly** (`visualize()`) and **ReportLab** (PDF export). Optional extras: **`moju[io]`** (science file loaders for `state_ref`), **`moju[studio]`** (Streamlit app), **`moju[torch]`** (PyTorch). Legacy extras (`viz`, `report`, `ref_*`, `standard`, `studio-science`, `units`) removed. **optax** is not bundled — install separately for training demos.
 
 - **Constitutive Consistency plot now selects the worst-divergence time slice** instead of the last (max `t`) slice. The time index that maximises mean |δ| over all spatial axes is chosen, and the selected `t` value (no unit suffix) is shown in the panel title and subtitle (e.g. `Constitutive Consistency (worst t ≈ 12.34)`). For 2-D/3-D data the existing worst-y/z row pick is applied on top of the worst-t pick (e.g. `Constitutive Consistency (worst t ≈ 12.34, worst slice)`). Steady-state data is unchanged.
 

@@ -27,22 +27,27 @@ classifiers = [
 dependencies = [
     "jax>=0.4.0",
     "jaxlib>=0.4.0",
-    "numpy>=1.20.0"
+    "numpy>=1.20.0",
+    "plotly>=5.18.0",
+    "reportlab>=4.0",
 ]
 
 [project.optional-dependencies]
-units = ["pint>=0.20"]
-viz = ["plotly>=5.18.0"]
-studio = ["streamlit>=1.33.0", "plotly>=5.18.0"]
-studio-science = ["h5py>=3.8.0", "xarray>=2023.1.0", "netCDF4>=1.6.0"]
-dev = ["pytest", "black", "ruff"]
+io = [
+    "xarray>=2023.1.0",
+    "h5py>=3.8.0",
+    "meshio>=5.3.0",
+    "netCDF4>=1.6.0",
+    "scipy>=1.10.0",
+]
+studio = [
+    "streamlit>=1.33.0",
+    "xarray>=2023.1.0",
+    "h5py>=3.8.0",
+    "netCDF4>=1.6.0",
+]
 torch = ["torch>=2.0.0", "jax2torch>=0.0.7"]
-report = ["reportlab>=4.0", "optax>=0.2.0"]
-ref = ["xarray>=2023.1.0"]
-ref_vtk = ["meshio>=5.3.0"]
-ref_foam = ["meshio>=5.3.0"]
-ref_hdf5 = ["h5py>=3.8.0"]
-ref_all = ["xarray>=2023.1.0", "meshio>=5.3.0", "h5py>=3.8.0", "scipy>=1.10.0"]
+dev = ["pytest", "black", "ruff"]
 
 [project.urls]
 Homepage = "https://ifimoai.github.io/moju/"

@@ -4,7 +4,7 @@ Interactive Plotly dashboard for :func:`moju.monitor.auditor.visualize`.
 Admissibility colors and status bands follow :func:`moju.monitor.auditor.admissibility_level` /
 :data:`moju.monitor.auditor.ADM_HIGH_THRESHOLD`.
 
-Requires ``pip install plotly`` (optional extra ``moju[viz]``).
+Requires Plotly (included in core ``moju``).
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 Demo template: ingest an HDF5 snapshot into state_ref.
 
 Run:
-  pip install moju[ref_hdf5]
+  pip install "moju[io]"
   python examples/monitor_state_ref_from_hdf5_demo.py /path/to/data.h5
 """
 

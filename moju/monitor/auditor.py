@@ -794,6 +794,10 @@ def audit(
 
     report["constitutive_closure_summary"] = build_constitutive_closure_summary(last_report_per_key)
 
+    from moju.monitor.audit_meta import audit_meta
+
+    report["audit_meta"] = audit_meta(log, r_ref=r_ref)
+
     if export_dir:
         import zipfile
         from pathlib import Path
@@ -813,7 +817,7 @@ def audit(
                     zf.write(f, f"{session_name}/{f.name}")
         except ImportError as e:
             raise ImportError(
-                "PDF export requires reportlab. Install with: pip install moju[report] or pip install reportlab"
+                "PDF export requires reportlab. Install with: pip install moju or pip install reportlab"
             ) from e
 
     return report
@@ -1448,7 +1452,7 @@ def visualize(
 
     **Backends**
 
-    - ``plotly`` (default) — interactive figure (requires ``pip install plotly`` or ``moju[viz]``).
+    - ``plotly`` (default) — interactive figure (included in core ``moju``).
     - ``none`` — returns ``None``.
 
     ``backend="matplotlib"`` is **not supported** (raises ``ValueError``); use ``plotly``.
@@ -1547,7 +1551,7 @@ def visualize(
     if backend == "matplotlib":
         raise ValueError(
             'visualize(..., backend="matplotlib") is no longer supported; '
-            'use backend="plotly" (default) and pip install plotly or moju[viz].'
+            'use backend="plotly" (default); Plotly is included in pip install moju.'
         )
     if backend != "plotly":
         raise ValueError(f"Unknown visualize backend {backend!r}; use 'plotly' or 'none'.")
@@ -2505,6 +2509,10 @@ class ResidualEngine:
             "scale": scale_per_key,
             "scale_source": scale_source_per_key,
             "run_mode": run_mode,
+            "monitor_settings": {
+                "law_scale_mode": eff_law_scale_mode,
+                "state_units": eff_state_units,
+            },
         }
         if nondim_scale_source:
             entry["nondim_scale_source"] = nondim_scale_source

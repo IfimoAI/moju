@@ -16,8 +16,8 @@ Install:
 
 ```bash
 pip install moju
-pip install "moju[viz]"
-pip install "moju[torch]"
+pip install "moju[io]"
+pip install "moju[torch,io]"
 ```
 
 Links:

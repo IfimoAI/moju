@@ -8,7 +8,7 @@ Shows:
   - Law-linked implied audit: ``thermal_diffusivity`` balance T_t − α_model·T_laplacian (automatic)
   - Optional chain audits on ``fo`` / ``bi`` (spatial/temporal consistency)
   - Required keys introspection
-  - audit() PDF export when moju[report] installed
+  - audit() PDF export (included in core moju)
 """
 
 import jax
