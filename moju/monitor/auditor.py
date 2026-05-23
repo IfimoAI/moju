@@ -21,9 +21,10 @@ With default **p** = :data:`R_EFF_Q_POWER` (**0**, plain smooth RMS), **Q** is n
 Nonzero **p** multiplies **RMS_δ** by **Q^p**, **Q** = RMS(m)/mean(m), **m_i** = sqrt(r_i²+ε²); **Q=1** when magnitudes are
 uniform across collocation points or for a single point. Set globally via :func:`configure_r_eff`.
 **R_norm** = **R_eff**/scale_k.
-For **R_norm**, default **scale_k** is **1.0×10⁻²** (plus ``_SCALE_EPS``) for **laws/** and for nondimensional closure keys;
-other **constitutive/** residuals and **data/** use state- or reference-derived scales. Optional ``audit(..., r_ref=...)`` overrides
-**scale_k** per key. Per-key **admissibility_score** is ``1 / (1 + R_norm)`` when finite.
+Default **law_scale_mode="auto"** sets governing **laws/** **scale_k** from term-balance RMS (floor :data:`DEFAULT_NONDIM_R_NORM_SCALE_K`);
+closure **implied_delta** / **ref_delta** stay fixed **≈ 1e-2**. Path B **state_units="dimensional"** runs groups on SI state then
+:func:`moju.piratio.nondim.dimensional_to_nd`. Other **constitutive/** residuals and **data/** use state-derived scales.
+Optional ``audit(..., r_ref=...)`` overrides **scale_k** per key. Log entries include **scale_source** and optional **nondim_scale_source**.
 :func:`admissibility_level` maps scores in ``[0, 1]`` to four bands (see its docstring). Metrics are
 consistency indicators, not certification.
 """
@@ -32,7 +33,7 @@ from __future__ import annotations
 
 import datetime
 import math
-from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Set, Union
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
 import inspect
 
 import jax
@@ -40,6 +41,7 @@ import jax.numpy as jnp
 
 from moju.piratio.groups import Groups
 from moju.piratio.laws import Laws
+from moju.piratio.nondim import NondimScales, dimensional_to_nd
 from moju.monitor.closure_registry import (
     MODEL_FNS,
     compute_implied_delta,
@@ -57,6 +59,15 @@ from moju.monitor.law_group_inference import (
     build_law_spec_identity,
     implied_group_specs_for_laws,
     merge_implied_groups_first,
+)
+from moju.monitor.law_scale_recipes import characteristic_law_scale_k
+from moju.monitor.nondim_inference import infer_nondim_scales
+from moju.monitor.nondim_scales_parse import (
+    merge_nondim_scales,
+    nondim_scales_from_dict,
+    nondim_scales_to_dict,
+    validate_law_scale_mode,
+    validate_state_units,
 )
 from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
@@ -443,34 +454,57 @@ def _key_uses_worst_point_admissibility(flat_key: str) -> bool:
 def _state_derived_scale_per_key(
     flat_keys: Iterable[str],
     merged: Dict[str, Any],
-    _laws_spec: List[Dict[str, Any]],
+    laws_spec: List[Dict[str, Any]],
     constitutive_audit: List[Dict[str, Any]],
     state_ref_built: Optional[Dict[str, Any]] = None,
     *,
     to_python: bool = True,
-) -> Dict[str, float]:
+    law_scale_mode: str = "auto",
+    nondim_scales: Optional[NondimScales] = None,
+    constants: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, float], Dict[str, str]]:
     """
     Per-key scale for ``R_norm = R_eff / scale_k`` (``R_eff`` in ``entry["rms"]``) stored on each log entry (``entry["scale"]``).
 
-    Default **scale_k** is **≈ 1.0×10⁻²** (plus ε) for governing **laws/** and for nondimensional
-    **implied_delta** / **ref_delta** under **constitutive/**. Other audit keys and
-    **data/** use RMS of relevant state (or reference) fields. Optional ``r_ref`` in
-    :func:`audit` overrides per key after logging.
+    Governing **laws/** use ``law_scale_mode`` (**``auto``** term-balance by default, or **``fixed``** ≈ 1e-2).
+    Nondimensional **implied_delta** / **ref_delta** under **constitutive/** stay fixed ≈ 1e-2.
+    Other audit keys and **data/** use RMS of relevant state (or reference) fields.
+    Optional ``r_ref`` in :func:`audit` overrides per key after logging.
     """
     out: Dict[str, float] = {}
+    sources: Dict[str, str] = {}
     ref = state_ref_built if state_ref_built is not None else merged
+    const = constants or {}
+    mode = validate_law_scale_mode(law_scale_mode)
+    law_spec_by_name = {str(s["name"]): s for s in laws_spec if "name" in s}
 
     for k in flat_keys:
         if "/" not in k:
             out[k] = _default_unit_scale_k(to_python=to_python)
+            sources[k] = "fixed"
             continue
         prefix, rest = k.split("/", 1)
         if prefix == "laws":
-            out[k] = _default_unit_scale_k(to_python=to_python)
+            law_name = rest
+            if mode == "fixed":
+                out[k] = _default_unit_scale_k(to_python=to_python)
+                sources[k] = "fixed"
+            else:
+                spec = law_spec_by_name.get(law_name, {"name": law_name, "state_map": {}})
+                sk, src = characteristic_law_scale_k(
+                    law_name,
+                    merged=merged,
+                    constants=const,
+                    law_spec=spec,
+                    nondim_scales=nondim_scales,
+                )
+                out[k] = float(sk)
+                sources[k] = src
             continue
         if prefix == "constitutive":
             if _suffix_is_nd_closure(rest):
                 out[k] = _default_unit_scale_k(to_python=to_python)
+                sources[k] = "fixed"
                 continue
             name = rest.split("/")[0]
             spec = next(
@@ -502,10 +536,11 @@ def _state_derived_scale_per_key(
                 else:
                     scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
             out[k] = float(jax.device_get(scale)) if to_python else float(scale)
+            sources[k] = "state_derived"
             continue
         if prefix == "scaling":
-            # Legacy logs only (scaling audit removed from engine). Same default as unknown keys.
             out[k] = _default_unit_scale_k(to_python=to_python)
+            sources[k] = "fixed"
             continue
         if prefix == "data":
             state_key = rest
@@ -515,9 +550,11 @@ def _state_derived_scale_per_key(
             else:
                 scale = _SCALE_EPS + _rms_scalar(jnp.asarray(1.0))
             out[k] = float(jax.device_get(scale)) if to_python else float(scale)
+            sources[k] = "state_derived"
             continue
         out[k] = _default_unit_scale_k(to_python=to_python)
-    return out
+        sources[k] = "fixed"
+    return out, sources
 
 
 def build_loss(
@@ -576,18 +613,23 @@ def _compute_log_step_metrics(
         rms = entry.get("rms", {})
         r_max = entry.get("r_max") or {}
         entry_scale = entry.get("scale") or {}
+        entry_scale_source = entry.get("scale_source") or {}
         r_norm: Dict[str, float] = {}
         admissibility: Dict[str, float] = {}
         per_key_report: Dict[str, Any] = {}
         for k, v in rms.items():
+            scale_src = entry_scale_source.get(k, "fixed")
             if r_ref is not None and k in r_ref and r_ref[k] is not None and r_ref[k] > 0:
                 scale_k = r_ref[k]
+                scale_src = "r_ref"
             elif k in entry_scale and entry_scale[k] is not None and entry_scale[k] > 0:
                 scale_k = entry_scale[k]
             elif k in first_rms and first_rms[k] is not None and first_rms[k] > 0:
                 scale_k = first_rms[k]
+                scale_src = "first_rms_fallback"
             else:
                 scale_k = 1.0
+                scale_src = "fallback"
             if scale_k <= 0 or not math.isfinite(float(scale_k)):
                 scale_k = 1.0
             try:
@@ -627,6 +669,7 @@ def _compute_log_step_metrics(
                 "admissibility_level": admissibility_level(admissibility[k]),
                 "admissibility_metric": metric,
                 "score_for_admissibility": v_eff,
+                "scale_source": scale_src,
             }
             if k in r_max:
                 key_report["r_max"] = r_max[k]
@@ -1686,6 +1729,10 @@ def build_minimal_residual_engine(
     enable_omit_messages: bool = True,
     best_effort_partial: bool = True,
     coord_dimension: int = 1,
+    law_scale_mode: str = "auto",
+    state_units: str = "nondimensional",
+    nondim_scales: Optional[NondimScales] = None,
+    nondim_scales_overrides: Optional[Dict[str, Any]] = None,
 ) -> "ResidualEngine":
     """
     Build a law-first :class:`ResidualEngine` for minimal-input workflows.
@@ -1717,6 +1764,10 @@ def build_minimal_residual_engine(
         law_implied_audits=law_implied_audits,
         best_effort_partial=best_effort_partial,
         default_coord_dimension=coord_dimension,
+        law_scale_mode=law_scale_mode,
+        state_units=state_units,
+        nondim_scales=nondim_scales,
+        nondim_scales_overrides=nondim_scales_overrides,
     )
 
 
@@ -1778,8 +1829,15 @@ class ResidualEngine:
         law_implied_audits: bool = True,
         best_effort_partial: bool = False,
         default_coord_dimension: int = 1,
+        law_scale_mode: str = "auto",
+        state_units: str = "nondimensional",
+        nondim_scales: Optional[NondimScales] = None,
+        nondim_scales_overrides: Optional[Dict[str, Any]] = None,
     ):
         law_implied_enabled = bool(law_implied_audits)
+        cfg_law_scale_mode: Optional[str] = None
+        cfg_state_units: Optional[str] = None
+        cfg_nondim_overrides: Optional[Dict[str, Any]] = None
         # MonitorConfig convenience
         if config is not None:
             from moju.monitor.config import MonitorConfig, audit_spec_to_engine_dict
@@ -1793,6 +1851,9 @@ class ResidualEngine:
                 derived_state_chain = list(config.derived_state_chain or [])
                 primary_fields = list(config.primary_fields)
                 law_implied_enabled = bool(config.law_implied_audits)
+                cfg_law_scale_mode = config.law_scale_mode
+                cfg_state_units = config.state_units
+                cfg_nondim_overrides = config.nondim_scales
                 if config.state_builder is not None and state_builder is None:
                     state_builder = config.state_builder
             else:
@@ -1820,6 +1881,22 @@ class ResidualEngine:
         if default_coord_dimension not in (1, 2, 3):
             raise ValueError("default_coord_dimension must be one of {1, 2, 3}")
         self.default_coord_dimension = int(default_coord_dimension)
+        self.law_scale_mode = validate_law_scale_mode(
+            cfg_law_scale_mode if cfg_law_scale_mode is not None else law_scale_mode
+        )
+        self.state_units = validate_state_units(
+            cfg_state_units if cfg_state_units is not None else state_units
+        )
+        _nd_ov = cfg_nondim_overrides if cfg_nondim_overrides is not None else nondim_scales_overrides
+        self.nondim_scales_overrides: Optional[Dict[str, Any]] = (
+            dict(_nd_ov) if _nd_ov else None
+        )
+        if nondim_scales is not None:
+            self.nondim_scales = nondim_scales
+        elif self.nondim_scales_overrides and "L_ref" in self.nondim_scales_overrides:
+            self.nondim_scales = nondim_scales_from_dict(self.nondim_scales_overrides)
+        else:
+            self.nondim_scales = None
 
         # Config-time validation (low effort)
         def _validate_specs(
@@ -1907,6 +1984,9 @@ class ResidualEngine:
         auto_path_b_derivatives: Any = False,
         fill_law_fd: bool = False,
         run_mode: str = "training",
+        law_scale_mode: Optional[str] = None,
+        state_units: Optional[str] = None,
+        nondim_scales: Any = None,
     ) -> Dict[str, Any]:
         """
         Compute residuals.
@@ -1918,6 +1998,13 @@ class ResidualEngine:
           - ``\"training\"`` (default): **ref_delta** and ``data/`` pred−ref are skipped even if
             ``state_ref`` is passed (use for the optimization loop).
           - ``\"eval\"``: reference **ref_delta** and ``data/`` run when configured.
+
+        ``law_scale_mode``: ``\"auto\"`` (default) term-balance ``scale_k`` for **laws/**, or
+        ``\"fixed\"`` (≈1e-2 gauge). Per-call kw overrides the engine default.
+
+        ``state_units``: ``\"nondimensional\"`` (default) or ``\"dimensional\"`` (SI Path B).
+        When ``\"dimensional\"``, groups run on physical state, then fields are converted via
+        :func:`moju.piratio.nondim.dimensional_to_nd` before laws (see ``nondim_inference``).
 
         If ``auto_path_b_derivatives`` is True, uses default ``PathBGridConfig``; if a
         ``PathBGridConfig`` instance, uses that layout. When ``fill_law_fd`` is also True, missing
@@ -1964,6 +2051,50 @@ class ResidualEngine:
             _maybe_log_omit(
                 "state_ref ignored until run_mode='eval' (ref_delta and data/ are eval-only)"
             )
+
+        eff_law_scale_mode = validate_law_scale_mode(
+            law_scale_mode if law_scale_mode is not None else self.law_scale_mode
+        )
+        eff_state_units = validate_state_units(
+            state_units if state_units is not None else self.state_units
+        )
+        effective_nd_scales: Optional[NondimScales] = None
+        nondim_scale_source: Dict[str, str] = {}
+        if eff_state_units == "dimensional":
+            law_names = [str(s["name"]) for s in self.laws_spec if "name" in s]
+            nd_overrides: Dict[str, Any] = dict(self.nondim_scales_overrides or {})
+            if isinstance(nondim_scales, dict):
+                nd_overrides.update(nondim_scales)
+            inferred, nd_src = infer_nondim_scales(
+                law_names,
+                state_pred,
+                self.constants,
+                nd_overrides,
+            )
+            effective_nd_scales = inferred
+            nondim_scale_source = dict(nd_src)
+            if self.nondim_scales is not None:
+                effective_nd_scales = merge_nondim_scales(
+                    effective_nd_scales,
+                    nondim_scales_to_dict(self.nondim_scales),
+                )
+            elif isinstance(nondim_scales, NondimScales):
+                effective_nd_scales = merge_nondim_scales(
+                    effective_nd_scales,
+                    nondim_scales_to_dict(nondim_scales),
+                )
+            for fld, src in nd_src.items():
+                _maybe_log_infer(f"nondim_scales.{fld}: {src}")
+            _maybe_log_infer(
+                f"state_units=dimensional: inferred NondimScales (time_scale={effective_nd_scales.time_scale!r})"
+            )
+
+        def _maybe_nd_convert(state_built: Dict[str, Any]) -> Dict[str, Any]:
+            if eff_state_units == "dimensional" and effective_nd_scales is not None:
+                return dimensional_to_nd(
+                    state_built, effective_nd_scales, warn_unknown=False
+                )
+            return state_built
 
         state_for_groups = dict(state_pred)
 
@@ -2089,7 +2220,10 @@ class ResidualEngine:
             return s0
 
         def _merge_state_ref(sr: Dict[str, Any]) -> Dict[str, Any]:
-            return {**self._state_builder(_state_ref_raw_after_derived(sr)), **self.constants}
+            built = _maybe_nd_convert(
+                self._state_builder(_state_ref_raw_after_derived(sr))
+            )
+            return {**built, **self.constants}
 
         # Materialize keys needed to run groups (inputs only).
         group_needed: Set[str] = set()
@@ -2111,6 +2245,9 @@ class ResidualEngine:
             )
         else:
             state_pred_built = self._state_builder(state_for_groups)
+        merged = {**self.constants, **state_pred_built}
+
+        state_pred_built = _maybe_nd_convert(state_pred_built)
         merged = {**self.constants, **state_pred_built}
 
         if fill_law_fd and not auto_path_b_derivatives:
@@ -2333,7 +2470,9 @@ class ResidualEngine:
             residuals["closure_debug"] = closure_debug
 
         if ref_for_audits is not None:
-            state_ref_built = self._state_builder(_state_ref_raw_after_derived(ref_for_audits))
+            state_ref_built = _maybe_nd_convert(
+                self._state_builder(_state_ref_raw_after_derived(ref_for_audits))
+            )
             common = set(state_pred_built.keys()) & set(state_ref_built.keys())
             residuals["data"] = {
                 k: jnp.asarray(state_ref_built[k]) - jnp.asarray(state_pred_built[k])
@@ -2345,24 +2484,32 @@ class ResidualEngine:
         r_max_per_key = _max_per_key(flat, to_python=log_to_python)
         state_ref_built_for_scale = None
         if ref_for_audits is not None:
-            state_ref_built_for_scale = self._state_builder(
-                _state_ref_raw_after_derived(ref_for_audits)
+            state_ref_built_for_scale = _maybe_nd_convert(
+                self._state_builder(_state_ref_raw_after_derived(ref_for_audits))
             )
-        scale_per_key = _state_derived_scale_per_key(
+        scale_per_key, scale_source_per_key = _state_derived_scale_per_key(
             flat.keys(),
             merged,
             self.laws_spec,
             self.constitutive_audit,
             state_ref_built_for_scale,
             to_python=log_to_python,
+            law_scale_mode=eff_law_scale_mode,
+            nondim_scales=effective_nd_scales or self.nondim_scales,
+            constants=self.constants,
         )
         entry: Dict[str, Any] = {
             "index": self._index,
             "rms": rms_per_key,
             "r_max": r_max_per_key,
             "scale": scale_per_key,
+            "scale_source": scale_source_per_key,
             "run_mode": run_mode,
         }
+        if nondim_scale_source:
+            entry["nondim_scale_source"] = nondim_scale_source
+        if effective_nd_scales is not None:
+            entry["nondim_scales"] = nondim_scales_to_dict(effective_nd_scales)
         if omitted_msgs:
             entry["omitted"] = omitted_msgs
         if inferred_msgs:

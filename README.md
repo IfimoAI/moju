@@ -100,6 +100,8 @@ Overall admissibility is the **minimum** of the finite category scores participa
 
 Governing **laws** are scored with **RMS `R_eff`** (average compliance across collocation points). Constitutive **`implied_delta`** / **`ref_delta`** closure keys use **worst-point** `max |δ|` for admissibility — a PINN can satisfy the PDE on average while cheating closure at a few hotspots. Logged **`rms`** and **`build_loss`** stay RMS everywhere; audit/reporting uses the split. Constitutive category rolls up with **minimum** (not geometric mean). See **Admissibility metrics** in [`docs/monitor_training_vs_eval.md`](docs/monitor_training_vs_eval.md).
 
+For **multi-scale or high-Re** problems, governing laws use **auto term-balance `scale_k`** by default (floored at **`≈ 1e-2`**). Use **`law_scale_mode="fixed"`** or per-key **`audit(..., r_ref={...})`** when you want a fixed gauge — see **Calibrating scale_k** in that doc. Path B SI uploads: **`state_units="dimensional"`** (Studio checkbox **State in physical units (SI)**).
+
 Details: [`docs/monitor_training_vs_eval.md`](docs/monitor_training_vs_eval.md).
 
 ## PyTorch Support

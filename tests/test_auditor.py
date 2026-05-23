@@ -472,6 +472,7 @@ class TestAudit:
         rho = Models.ideal_gas_rho(P, R, T)
         core = ResidualEngine(
             laws=[{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_xx"}}],
+            law_scale_mode="fixed",
             constitutive_audit=[
                 {
                     "name": "ideal_gas_rho",
