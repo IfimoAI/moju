@@ -67,6 +67,9 @@ def test_monitor_module_has_all():
     import moju.monitor as monitor
     assert hasattr(monitor, "__all__")
     assert set(monitor.__all__) == {
+        "audit_meta",
+        "build_audit_meta",
+        "format_audit_meta_plain_summary",
         "ResidualEngine",
         "admissibility_level",
         "configure_r_eff",

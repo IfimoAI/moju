@@ -21,7 +21,7 @@ Transient cooling of an aluminum slab (1D).
     :math:`T=T_\\infty+(T_i-T_\\infty)\\theta`. The interior PDE residual is scaled so the loss is
     :math:`O(1)` at initialization.
 
-Run: pip install moju[report] && python examples/slab_cooling_demo.py
+Run: pip install moju optax && python examples/slab_cooling_demo.py
 """
 
 import jax

@@ -5,7 +5,7 @@ Many OpenFOAM workflows export to VTK/VTU first (e.g. via foamToVTK) and then us
 This script shows both options conceptually.
 
 Run:
-  pip install moju[ref_foam]
+  pip install "moju[io]"
   python examples/monitor_state_ref_from_openfoam_demo.py /path/to/case_or_export
 """
 

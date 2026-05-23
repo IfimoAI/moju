@@ -2,7 +2,7 @@
 """
 Generate a sample Physics Admissibility Report PDF for review.
 
-Run from repo root after: pip install moju[report] or pip install reportlab
+Run from repo root after: pip install moju
   python scripts/generate_sample_audit_pdf.py
 
 Output: examples/sample_physics_admissibility_report.pdf

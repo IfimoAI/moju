@@ -26,10 +26,10 @@ st.markdown(
 ### 1. Install (from repo root)
 
 ```bash
-pip install -e ".[studio,viz]"
+pip install -e ".[studio]"
 ```
 
-For PDF export: `pip install -e ".[studio,viz,report]"`.
+PDF export is included in core `moju` (ReportLab); Studio adds Streamlit and HDF5/NetCDF upload support.
 
 ### 2. Run
 
@@ -42,7 +42,7 @@ Theme and server options load from **`.streamlit/config.toml`** at the repositor
 ### 3. Minimal audit (Path B)
 
 1. Open **Audit** in the sidebar.
-2. **Data** tab: upload state as `.npz`, `.npy`, or (with `pip install -e ".[studio-science]"`) HDF5 / NetCDF — use keys that match Moju argument names (e.g. `phi_laplacian` for `laplace_equation`; include grid coords `x`, … for FD).
+2. **Data** tab: upload state as `.npz`, `.npy`, or (with `pip install -e ".[studio]"`) HDF5 / NetCDF — use keys that match Moju argument names (e.g. `phi_laplacian` for `laplace_equation`; include grid coords `x`, … for FD).
 3. **Config** tab: set **Constants JSON** if needed; under **Laws** pick e.g. `laplace_equation`. Add **Models** / **Groups** if you want constitutive or scaling audits (each Group creates both a dimensionless helper and a scaling audit). Use **Expert** only if you need full JSON control.
 4. **Run** tab: submit (**Path B**). **Finite differences** default **on**; turn off only if you supply all `d_*` derivatives yourself.  
    Results and Plotly dashboard stay visible after the run (not only on submit frame).

@@ -121,18 +121,17 @@ pip install "moju[torch]"
 
 Start with [`scripts/torch_laws_jax2torch_example.py`](scripts/torch_laws_jax2torch_example.py). The implementation is covered by `tests/test_torch_engine.py` and `tests/test_torch_interop.py`.
 
-## Installation Extras
+## Installation profiles
 
-- `moju[viz]` - Plotly dashboards.
-- `moju[report]` - PDF report export.
-- `moju[ref]` - xarray-based reference loaders.
-- `moju[ref_vtk]` - VTK/VTU reference loaders.
-- `moju[ref_foam]` - OpenFOAM snapshot loaders.
-- `moju[ref_hdf5]` - HDF5 reference loaders.
-- `moju[studio]` - Streamlit-based Moju Studio.
-- `moju[studio-science]` - HDF5/NetCDF upload support for Studio.
-- `moju[torch]` - PyTorch and `jax2torch` integration.
-- `moju[dev]` - test and formatting tools.
+| Install | Use when |
+|---------|----------|
+| `pip install moju` | Default: residuals, audit, Plotly `visualize()`, PDF export |
+| `pip install "moju[io]"` | Science file I/O for `state_ref` loaders (xarray, HDF5, VTK, NetCDF, …) |
+| `pip install "moju[studio]"` | Moju Studio Streamlit app (+ HDF5/NetCDF uploads) |
+| `pip install "moju[torch,io]"` | PyTorch training + file loaders |
+| `pip install "moju[dev]"` | Development (pytest, black, ruff) |
+
+Training demos that use **optax** (e.g. [`examples/slab_cooling_demo.py`](examples/slab_cooling_demo.py)) require `pip install optax` in addition to `moju`.
 
 ## Documentation
 

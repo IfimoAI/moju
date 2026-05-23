@@ -2,7 +2,7 @@
 Demo template: ingest a VTU snapshot into state_ref using meshio.
 
 Run:
-  pip install moju[ref_vtk]
+  pip install "moju[io]"
   python examples/monitor_state_ref_from_vtu_demo.py /path/to/snapshot.vtu
 """
 

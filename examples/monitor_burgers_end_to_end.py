@@ -8,7 +8,7 @@ Shows:
   - Laws.burgers_equation residual
   - Law-linked implied ``re``: catalog Groups.re vs Re from momentum-balance rearrangement (needs rho, mu in state)
   - Required keys introspection
-  - audit() PDF export when moju[report] installed
+  - audit() PDF export (included in core moju)
 """
 
 import jax

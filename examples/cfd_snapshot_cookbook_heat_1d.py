@@ -5,7 +5,7 @@ Workflow:
   xarray/NetCDF → regrid → optional smoothing → eval audit (data residual vs reference field) → interpret score
 
 Run (recommended):
-  pip install moju[ref] moju[report]
+  pip install "moju[io]"
   # Optional for better smoothing:
   pip install scipy
   python examples/cfd_snapshot_cookbook_heat_1d.py
@@ -39,7 +39,7 @@ def _smooth_1d(y: np.ndarray, *, window: int = 7) -> np.ndarray:
 
 
 def main(n: int = 200, noise: float = 0.05, smooth_window: int = 9, export_dir: str = "exports"):
-    import xarray as xr  # requires moju[ref] (xarray + pandas)
+    import xarray as xr  # requires moju[io]
 
     # 1) Pretend we loaded a CFD scalar field T(t,x) from NetCDF.
     t = np.array([0.0], dtype=float)

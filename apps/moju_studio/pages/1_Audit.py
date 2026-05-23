@@ -580,7 +580,7 @@ with tab_data:
     st.caption(_fd_expected_field_one_liner())
     st.caption(
         "Formats: **.npz** (multi-key), **.npy** (single array — set key name below), "
-        "**.h5** / **.hdf5**, **.nc** / **.nc4** (install `moju[studio-science]` for HDF5/NetCDF)."
+        "**.h5** / **.hdf5**, **.nc** / **.nc4** (included in `moju[studio]`)."
     )
     pred_npy_key = st.text_input(
         "NPY array key name (used only for `.npy` uploads)",
@@ -1092,6 +1092,34 @@ with tab_dash:
             st.caption(
                 f"Overall admissibility (final): {pct_hdr} - {format_admissibility_status_label(ov_hdr)}"
             )
+        _audit_meta = rep.get("audit_meta") or {}
+        if _audit_meta:
+            with st.expander("How scoring was calibrated", expanded=False):
+                _plain = _audit_meta.get("plain_summary")
+                if _plain:
+                    st.markdown(_plain)
+                _sections = _audit_meta.get("plain_sections") or {}
+                for _sec_key in ("nondim", "pipeline"):
+                    _block = _sections.get(_sec_key)
+                    if _block and str(_block).strip():
+                        st.markdown(f"**{_sec_key.title()}**")
+                        st.markdown(_block)
+                _cal_rows = (_audit_meta.get("scale_calibration") or {}).get("per_key") or []
+                if _cal_rows:
+                    import pandas as pd
+
+                    _df_cal = pd.DataFrame(
+                        [
+                            {
+                                "key": r.get("key"),
+                                "scale_k": r.get("scale_k"),
+                                "scale_source": r.get("scale_source"),
+                                "plain": r.get("plain"),
+                            }
+                            for r in _cal_rows
+                        ]
+                    )
+                    st.dataframe(_df_cal, use_container_width=True, hide_index=True)
         _law_panel_main, _rnorm_panel_main, _hm_cs_main = _studio_monitor_spatial_bundle()
         _pref_t_dash = st.session_state.get("studio_fd_time_label", "Steady") != "Steady"
         _sax_dash = str(st.session_state.get("sb_spatial_axis", "x"))
@@ -1368,7 +1396,7 @@ with tab_export:
             st.code(generate_python_snippet(cfg, path_b=path_b), language="python")
 
         st.subheader("PDF report (optional)")
-        st.caption("Requires `pip install moju[report]` (reportlab). Produces a ZIP with PDF (+ optional residuals JSON).")
+        st.caption("Requires `pip install moju` or `pip install moju[studio]` (ReportLab included in core). Produces a ZIP with PDF (+ optional residuals JSON).")
         mn = st.text_input("model_name (PDF metadata)", value="")
         mid = st.text_input("model_id (PDF metadata)", value="")
         if st.button("Generate PDF bundle"):

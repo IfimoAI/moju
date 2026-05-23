@@ -3,7 +3,7 @@ Minimal example: using moju JAX laws from PyTorch via jax2torch.
 
 Run (after installing extras):
 
-    pip install moju[torch]  # installs torch + jax2torch
+    pip install "moju[torch,io]"
     python scripts/torch_laws_jax2torch_example.py
 """
 

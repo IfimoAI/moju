@@ -91,6 +91,24 @@ fig = visualize(engine.log, last_residuals=engine.last_residuals, r_ref=r_ref, m
 
 Moju Studio exposes optional **`r_ref`** JSON for the next dashboard run (see **`apps/moju_studio/README.md`**).
 
+## Explain this audit (`audit_meta`)
+
+Use **`audit_meta(log)`** (or **`build_audit_meta`**) for a plain-language summary of how **`scale_k`** and nondimensional conversion were chosen for a logged step — without parsing raw **`scale_source`** / **`nondim_scales`** dicts.
+
+```python
+from moju.monitor import audit, audit_meta
+
+engine.compute_residuals(state_pred, run_mode="training")
+report = audit(engine.log)
+print(report["audit_meta"]["plain_summary"])
+
+# Standalone on any log entry (default: last step)
+meta = audit_meta(engine.log, r_ref={"laws/fourier_conduction": 0.05})
+print(meta["plain_sections"]["scaling"])
+```
+
+Each **`compute_residuals`** entry now stores **`monitor_settings`**: **`law_scale_mode`**, **`state_units`**. Legacy logs without **`scale_source`** degrade gracefully (`"unknown (legacy log)"`). **`audit(..., r_ref=...)`** attaches **`report["audit_meta"]`** with **`r_ref`** precedence matching **`per_key_report`**. Moju Studio **Dashboard** expander **How scoring was calibrated** and audit PDF section **Scoring calibration** render the same metadata.
+
 For minimal workflows, `build_minimal_residual_engine(law_names=[...], coord_dimension=1|2|3)` can auto-wire identity law specs plus inferred `Groups.*` rows and run in best-effort partial mode (skips unresolved rows and logs `unresolved_dependencies`). The configured `coord_dimension` is reused only when you explicitly ask for Path B finite-difference inference with `compute_residuals(..., auto_path_b_derivatives=True)`.
 
 ## Minimal inputs by dimension (quick helper)

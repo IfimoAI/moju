@@ -1,4 +1,4 @@
-"""PDF export for Physics Admissibility Report. Requires reportlab (pip install moju[report])."""
+"""PDF export for Physics Admissibility Report. Requires reportlab (included in core moju)."""
 
 from __future__ import annotations
 
@@ -117,7 +117,7 @@ def write_audit_pdf(
     """
     if not _REPORTLAB_AVAILABLE:
         raise ImportError(
-            "reportlab is required for PDF export. Install with: pip install moju[report] or pip install reportlab"
+            "reportlab is required for PDF export. Install with: pip install moju or pip install reportlab"
         )
 
     per_key = report.get("per_key", {})
@@ -204,6 +204,58 @@ def write_audit_pdf(
                 body_style,
             )
         )
+        story.append(Spacer(1, 16))
+
+    audit_meta = report.get("audit_meta") or {}
+    if audit_meta:
+        story.append(Paragraph("Scoring calibration", heading_style))
+        plain_summary = audit_meta.get("plain_summary")
+        if plain_summary:
+            story.append(Paragraph(str(plain_summary), body_style))
+        plain_sections = audit_meta.get("plain_sections") or {}
+        for section_key in ("scaling", "nondim", "pipeline"):
+            block = plain_sections.get(section_key)
+            if block and block.strip():
+                story.append(Spacer(1, 6))
+                story.append(Paragraph(f"<b>{section_key.title()}</b>", body_style))
+                for line in str(block).splitlines():
+                    line = line.strip()
+                    if line.startswith("- "):
+                        story.append(Paragraph(line, body_style))
+                    elif line:
+                        story.append(Paragraph(line, body_style))
+        sc = audit_meta.get("scale_calibration") or {}
+        per_key_cal = sc.get("per_key") or []
+        law_rows = [r for r in per_key_cal if str(r.get("key", "")).startswith("laws/")]
+        table_rows = law_rows[:12] if law_rows else per_key_cal[:12]
+        if table_rows:
+            story.append(Spacer(1, 8))
+            table_data = [["Metric", "scale_k", "Calibration"]]
+            for row in table_rows:
+                key = str(row.get("key", ""))
+                try:
+                    sk = float(row.get("scale_k", float("nan")))
+                    sk_s = f"{sk:.4g}" if math.isfinite(sk) else "N/A"
+                except (TypeError, ValueError):
+                    sk_s = "N/A"
+                cal = str(row.get("plain") or row.get("scale_source") or "")
+                table_data.append([key, sk_s, cal])
+            t = Table(table_data, colWidths=[2.2 * inch, 0.9 * inch, 3.4 * inch])
+            t.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e0e0e0")),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTSIZE", (0, 0), (-1, -1), 9),
+                        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                        ("TOPPADDING", (0, 0), (-1, 0), 6),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ]
+                )
+            )
+            story.append(t)
         story.append(Spacer(1, 16))
 
     if per_category:

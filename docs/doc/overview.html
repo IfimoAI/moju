@@ -29,15 +29,10 @@
     </p>
 
     <h2>Installation</h2>
-    <pre><code>pip install moju
-pip install "moju[viz]"      # Plotly dashboards
-pip install "moju[torch]"    # PyTorch + jax2torch support</code></pre>
-    <p>
-      Optional reference loaders are available with <code>moju[ref]</code>,
-      <code>moju[ref_vtk]</code>, <code>moju[ref_foam]</code>, and <code>moju[ref_hdf5]</code>.
-      PDF reports use <code>moju[report]</code>. Moju Studio uses <code>moju[studio]</code>
-      and, for HDF5/NetCDF uploads, <code>moju[studio-science]</code>.
-    </p>
+    <pre><code>pip install moju                 # residuals, audit, visualize, PDF
+pip install "moju[io]"           # + state_ref file loaders
+pip install "moju[studio]"       # Streamlit Moju Studio
+pip install "moju[torch,io]"     # PyTorch + file loaders</code></pre>
 
     <h2>API at a glance</h2>
     <ul>

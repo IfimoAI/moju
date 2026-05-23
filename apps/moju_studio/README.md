@@ -7,20 +7,12 @@ Interactive **Streamlit** app to upload `state_pred` (and optional `state_ref`) 
 From the repository root:
 
 ```bash
-pip install -e ".[studio,viz]"
+pip install -e ".[studio]"
 ```
 
-(`viz` adds Plotly for the multi-panel dashboard; `studio` adds Streamlit **>= 1.33** + Plotly.)
+(`studio` includes Streamlit **>= 1.33**, Plotly, ReportLab, and HDF5/NetCDF loaders for the Data tab. **NumPy `.npy`** and **`.npz`** work out of the box.)
 
-For **HDF5** (`.h5` / `.hdf5`) and **NetCDF** (`.nc` / `.nc4`) uploads on the Data tab, also install:
-
-```bash
-pip install -e ".[studio-science]"
-```
-
-(`studio-science` adds `h5py`, `xarray`, and `netCDF4`. **NumPy `.npy`** and **`.npz`** work with the base `studio` extra only.)
-
-**Import issues:** If `h5py` or `xarray` fails to import (missing extra vs. broken NumPy/wheel ABI), see **Troubleshooting import errors** in the repository root [`README.md`](../../README.md). Typical fixes: install `moju[studio-science]`, or use a fresh venv and reinstall `numpy` plus the failing package.
+**Import issues:** If `h5py` or `xarray` fails to import (missing extra vs. broken NumPy/wheel ABI), see **Troubleshooting import errors** in the repository root [`README.md`](../../README.md). Typical fixes: reinstall with `pip install "moju[studio]"`, or use a fresh venv and reinstall `numpy` plus the failing package.
 
 ## Run
 
@@ -37,8 +29,8 @@ Use the **Audit** page to:
 - **Run tab** — checkbox **State in physical units (SI)** sets Path B **`state_units="dimensional"`** (groups on physical state, then auto ND conversion).
 - **Path B** — pass uploaded tensors directly; optional **PathBGridConfig** when customizing the FD grid.
 - **Path A (shim)** — same upload, but the engine uses a `state_builder` that returns your NPZ tensors (constants are **not** applied to those tensors in the shim). Use Path A when you want Studio to exercise the same state-building boundary as Python code; use Path B when uploaded arrays are already the full state.
-- **Dashboard** — card-based Plotly charts (law/category bars, spatial **R_norm** heatmaps, and constitutive diagnostics when `closure_debug` is available); optional `r_ref` / weights / `max_legend_keys` for the **next** run. Full **single-figure** `visualize(..., mode="training"|"eval")` uses **two** KPI cards (Governing / Constitutive), with category breakdowns listing available categories such as `data` in eval. **Governing** category admissibility uses RMS; **Constitutive** uses **minimum worst-point** scores on `implied_delta` / `ref_delta` (tier cutoffs ~0.909 / ~0.667 / 0.50 at default `scale_k`). Eval overall admissibility follows the current `audit()` roll-up rules; see **`docs/monitor_training_vs_eval.md`** and **`run_mode`** on `compute_residuals`. Sidebar **heatmap colorscale** and **spatial axis** (`x` / `y` / `z`) apply to spatial heatmaps; session log append (sidebar) for multi-step runs; redraw expander with a subset of keys. The Python API documents `visualize(..., mode="training"|"eval")`; **`test`** remains a silent alias for **`eval`**. The Audit page caption uses **`format_admissibility_status_label`** for finite overall scores (four bands on the score in `[0, 1]`; see root **README**).
-- **Export** — JSON reports, optional **PDF ZIP** if `moju[report]` is installed.
+- **Dashboard** — card-based Plotly charts (law/category bars, spatial **R_norm** heatmaps, and constitutive diagnostics when `closure_debug` is available); optional `r_ref` / weights / `max_legend_keys` for the **next** run. Expander **How scoring was calibrated** shows **`audit_meta`** plain summary and per-key **`scale_k`** / **`scale_source`** table. Full **single-figure** `visualize(..., mode="training"|"eval")` uses **two** KPI cards (Governing / Constitutive), with category breakdowns listing available categories such as `data` in eval. **Governing** category admissibility uses RMS; **Constitutive** uses **minimum worst-point** scores on `implied_delta` / `ref_delta` (tier cutoffs ~0.909 / ~0.667 / 0.50 at default `scale_k`). Eval overall admissibility follows the current `audit()` roll-up rules; see **`docs/monitor_training_vs_eval.md`** and **`run_mode`** on `compute_residuals`. Sidebar **heatmap colorscale** and **spatial axis** (`x` / `y` / `z`) apply to spatial heatmaps; session log append (sidebar) for multi-step runs; redraw expander with a subset of keys. The Python API documents `visualize(..., mode="training"|"eval")`; **`test`** remains a silent alias for **`eval`**. The Audit page caption uses **`format_admissibility_status_label`** for finite overall scores (four bands on the score in `[0, 1]`; see root **README**).
+- **Export** — JSON reports and optional **PDF ZIP** (ReportLab is included in core `moju`).
 
 ## Model-derived derived-state steps (auto)
 

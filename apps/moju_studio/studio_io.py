@@ -50,7 +50,7 @@ def _import_h5py():
         import h5py  # noqa: PLC0415
     except ImportError as e:
         raise ImportError(
-            "HDF5 support requires h5py. Install with: pip install 'moju[studio-science]'"
+            "HDF5 support requires h5py. Install with: pip install 'moju[studio]'"
         ) from e
     return h5py
 
@@ -61,7 +61,7 @@ def _import_xarray():
     except ImportError as e:
         raise ImportError(
             "NetCDF support requires xarray (and netCDF4). "
-            "Install with: pip install 'moju[studio-science]'"
+            "Install with: pip install 'moju[studio]'"
         ) from e
     return xr
 
