@@ -117,6 +117,8 @@ def merge_simple_config_with_json_override(
         "primary_fields": list(simple.get("primary_fields") or []),
         "derived_state_chain": list(simple.get("derived_state_chain") or []),
         "law_implied_audits": bool(simple.get("law_implied_audits", True)),
+        "law_scale_mode": str(simple.get("law_scale_mode", "auto")),
+        "state_units": str(simple.get("state_units", "nondimensional")),
     }
     raw = (override_json or "").strip()
     if not raw:
@@ -139,6 +141,15 @@ def merge_simple_config_with_json_override(
 
     if "law_implied_audits" in j and j["law_implied_audits"] is not None:
         out["law_implied_audits"] = bool(j["law_implied_audits"])
+
+    if "law_scale_mode" in j and j["law_scale_mode"] is not None:
+        out["law_scale_mode"] = str(j["law_scale_mode"])
+
+    if "state_units" in j and j["state_units"] is not None:
+        out["state_units"] = str(j["state_units"])
+
+    if "nondim_scales" in j and isinstance(j["nondim_scales"], dict):
+        out["nondim_scales"] = dict(j["nondim_scales"])
 
     return out
 

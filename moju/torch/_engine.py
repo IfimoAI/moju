@@ -149,10 +149,16 @@ class TorchResidualEngine:
         law_implied_audits: bool = True,
         path_b_fill: bool = False,
         best_effort: bool = True,
+        law_scale_mode: str = "auto",
+        state_units: str = "nondimensional",
+        nondim_scales_overrides: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._laws_spec: List[Dict[str, Any]] = list(laws)
         self._constants: Dict[str, Any] = dict(constants or {})
         self._scales = scales
+        self._law_scale_mode = law_scale_mode
+        self._state_units = state_units
+        self._nondim_scales_overrides = dict(nondim_scales_overrides or {})
         self._derived_state_chain: List[Dict[str, Any]] = list(derived_state_chain or [])
         self._user_fns: Dict[str, Callable[..., Any]] = dict(user_fns or {})
         self._path_b_fill = path_b_fill
@@ -276,18 +282,10 @@ class TorchResidualEngine:
         # Move to CPU for JAX-bridged computations
         state = _to_cpu(dict(state))
 
-        # 1. Optional nondim
-        if apply_nondim:
-            if self._scales is None:
-                raise ValueError(
-                    "scales must be provided on TorchResidualEngine to use apply_nondim=True"
-                )
-            state = dimensional_to_nd_torch(state, self._scales, warn_unknown=False)
-
-        # 2. user_fns materialisation
+        # 1. user_fns materialisation (physical state)
         state = self._materialise_user_fns(state)
 
-        # 3. Derived state chain
+        # 2. Derived state chain
         if self._derived_state_chain:
             state, chain_warns = apply_derived_state_chain_torch(
                 state, self._constants, self._derived_state_chain
@@ -295,7 +293,7 @@ class TorchResidualEngine:
             for w in chain_warns:
                 warnings.warn(f"TorchResidualEngine derived_state: {w}", UserWarning, stacklevel=2)
 
-        # 4. Group inference (compute Re, Pr, fo, etc.)
+        # 3. Group inference on physical state (before ND conversion)
         merged = {**self._constants, **state}
         for plan in self._group_compute_plan:
             out_key = plan["output_key"]
@@ -318,6 +316,23 @@ class TorchResidualEngine:
                 warnings.warn(
                     f"TorchResidualEngine group {out_key}: {exc}", UserWarning, stacklevel=2
                 )
+
+        # 4. Optional nondim (after groups on physical state)
+        if apply_nondim:
+            from moju.monitor.nondim_inference import infer_nondim_scales
+
+            law_names = [str(s["name"]) for s in self._laws_spec]
+            if self._scales is not None:
+                nd_scales = self._scales
+            else:
+                nd_scales, _ = infer_nondim_scales(
+                    law_names,
+                    state,
+                    self._constants,
+                    self._nondim_scales_overrides,
+                )
+            state = dimensional_to_nd_torch(state, nd_scales, warn_unknown=False)
+            merged = {**self._constants, **state}
 
         # 5. Path-B FD fill
         if self._path_b_fill:
@@ -509,21 +524,25 @@ class TorchResidualEngine:
             return out
 
         state_np = _to_numpy(state)
-        if apply_nondim and self._scales is not None:
-            from moju.piratio.nondim import dimensional_to_nd
-            state_np = dimensional_to_nd(state_np, self._scales, warn_unknown=False)
-
         state_ref_np = _to_numpy(state_ref) if state_ref is not None else None
+
+        eff_state_units = "dimensional" if apply_nondim else self._state_units
 
         jax_engine = ResidualEngine(
             laws=self._laws_spec,
             constants=self._constants,
             derived_state_chain=self._derived_state_chain if self._derived_state_chain else None,
+            law_scale_mode=self._law_scale_mode,
+            state_units=eff_state_units,
+            nondim_scales=self._scales,
+            nondim_scales_overrides=self._nondim_scales_overrides or None,
         )
         residual_dict = jax_engine.compute_residuals(
             state_pred=state_np,
             state_ref=state_ref_np,
             run_mode="eval",
+            state_units=eff_state_units,
+            law_scale_mode=self._law_scale_mode,
         )
         log = jax_engine.log
         report = jax_audit(

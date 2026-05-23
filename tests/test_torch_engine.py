@@ -585,13 +585,13 @@ class TestComputeResidualsTorch:
         with pytest.raises(Exception):
             engine.compute_residuals_torch(state)
 
-    def test_apply_nondim_requires_scales(self):
+    def test_apply_nondim_infers_or_requires_refs(self):
         engine = TorchResidualEngine(
             laws=[{"name": "mass_incompressible"}],
             constants={},
             law_implied_audits=False,
         )
-        with pytest.raises(ValueError, match="scales must be provided"):
+        with pytest.raises(ValueError, match="L_ref|nondim scales"):
             engine.compute_residuals_torch(
                 {"u_grad": torch.randn(10, 2, 2)}, apply_nondim=True
             )

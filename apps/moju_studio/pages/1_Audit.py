@@ -842,6 +842,12 @@ with tab_run:
                 help="Requires state derivatives above; fills registered Laws.* inputs (e.g. Laplacians) on the grid. "
                 "API: fill_law_fd.",
             )
+        state_si = st.checkbox(
+            "State in physical units (SI)",
+            value=False,
+            help="Path B: convert uploaded state from SI to nondimensional form before laws "
+            "(groups run on physical state first). Set MonitorConfig state_units or nondim_scales in Expert JSON for overrides.",
+        )
         st.caption(
             "**Spatial data**, **Time**, and **Grid layout** are in the **sidebar** (*Path B — FD grid*). "
             "Example: **1D + Steady + Meshgrid** → NPZ needs `x` (and fields like `T`); `y`/`z`/`t` not required for spatial FD hints. "
@@ -922,6 +928,10 @@ with tab_run:
                         frag_d, {"constants": st.session_state.get("constants_dict") or {}}
                     )
                     frag_d = enrich_fragment_from_model_audits(frag_d)
+                    if path_b and state_si:
+                        frag_d = merge_monitor_config_fragment(
+                            frag_d, {"state_units": "dimensional"}
+                        )
                     sb = None
                     if not path_b:
                         custom_sb = st.session_state.get("studio_recomputing_state_builder")
@@ -978,6 +988,7 @@ with tab_run:
                             auto_path_b_derivatives=fd_arg,
                             fill_law_fd=fill_law,
                             run_mode=run_mode,
+                            state_units="dimensional" if state_si else None,
                         )
                     else:
                         residuals = engine.compute_residuals(

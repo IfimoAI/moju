@@ -118,8 +118,15 @@ class MonitorConfig:
     # Optional Path A state builder (callable is not JSON-serializable; excluded from to_dict)
     state_builder: Optional[Callable[..., Dict[str, Any]]] = None
 
+    # Governing-law R_norm scale: "auto" (term-balance, default) or "fixed" (1e-2 gauge).
+    law_scale_mode: str = "auto"
+    # Path B state convention: "nondimensional" (default) or "dimensional" (SI → auto ND).
+    state_units: str = "nondimensional"
+    # Partial overrides for :class:`~moju.piratio.nondim.NondimScales` (JSON-serializable).
+    nondim_scales: Optional[Dict[str, Any]] = None
+
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d: Dict[str, Any] = {
             "constants": dict(self.constants),
             "laws": list(self.laws),
             "groups": list(self.groups),
@@ -128,7 +135,12 @@ class MonitorConfig:
             "constitutive_custom": list(self.constitutive_custom),
             "derived_state_chain": list(self.derived_state_chain),
             "primary_fields": list(self.primary_fields),
+            "law_scale_mode": str(self.law_scale_mode),
+            "state_units": str(self.state_units),
         }
+        if self.nondim_scales:
+            d["nondim_scales"] = dict(self.nondim_scales)
+        return d
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "MonitorConfig":
@@ -160,6 +172,8 @@ class MonitorConfig:
                 "MonitorConfig no longer supports π-constant law defaults "
                 f"({pi_keys}). Remove these keys from your config."
             )
+        from moju.monitor.nondim_scales_parse import validate_law_scale_mode, validate_state_units
+
         return MonitorConfig(
             constants=dict(d.get("constants") or {}),
             laws=list(d.get("laws") or []),
@@ -169,4 +183,7 @@ class MonitorConfig:
             constitutive_custom=list(d.get("constitutive_custom") or []),
             derived_state_chain=list(d.get("derived_state_chain") or []),
             primary_fields=list(d.get("primary_fields") or ["T", "u", "v", "w", "p", "rho"]),
+            law_scale_mode=validate_law_scale_mode(d.get("law_scale_mode", "auto")),
+            state_units=validate_state_units(d.get("state_units", "nondimensional")),
+            nondim_scales=(dict(d["nondim_scales"]) if d.get("nondim_scales") else None),
         )

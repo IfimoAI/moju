@@ -2,7 +2,22 @@
 
 `ResidualEngine.compute_residuals` supports **`run_mode="training"`** (default) and **`run_mode="eval"`**.
 
-Per flat residual key, the log's **`rms`** field is **R_eff** by default — **sqrt(mean(r^2)+δ^2)** with **δ²** = **`R_EFF_RMS_JITTER_SQ`** in `moju.monitor.auditor` (smooth RMS at zero residual). Optionally **R_eff** = RMS_δ **· Q^p**, **Q** = RMS(m)/mean(m), **m_i** = sqrt(r_i^2 + ε²) over collocation values; set **`p`** globally with **`configure_r_eff(q_power=…)`** (default **p** = **0**, so **Q** is omitted). Typical hotspot-sensitive monitoring uses **`configure_r_eff(q_power=2.0)`**. **R_norm** = **R_eff**/scale_k as elsewhere in the monitor. Default **`scale_k`** for **laws/** and nondimensional **implied_delta** / **ref_delta** is **1.0×10⁻²** (`DEFAULT_NONDIM_R_NORM_SCALE_K` in `moju.monitor.auditor`). Optional **`audit` / `visualize`** argument **`r_ref`** overrides **`scale_k`** per key.
+Per flat residual key, the log's **`rms`** field is **R_eff** by default — **sqrt(mean(r^2)+δ^2)** with **δ²** = **`R_EFF_RMS_JITTER_SQ`** in `moju.monitor.auditor` (smooth RMS at zero residual). Optionally **R_eff** = RMS_δ **· Q^p**, **Q** = RMS(m)/mean(m), **m_i** = sqrt(r_i^2 + ε²) over collocation values; set **`p`** globally with **`configure_r_eff(q_power=…)`** (default **p** = **0**, so **Q** is omitted). Typical hotspot-sensitive monitoring uses **`configure_r_eff(q_power=2.0)`**. **R_norm** = **R_eff**/scale_k as elsewhere in the monitor. Default **`law_scale_mode="auto"`** sets governing **laws/** **`scale_k`** from term-balance RMS in merged state (floored at **`DEFAULT_NONDIM_R_NORM_SCALE_K ≈ 1e-2`**). Closure **`implied_delta` / `ref_delta`** stay fixed **`≈ 1e-2`**. Set **`law_scale_mode="fixed"`** for the legacy gauge on all laws. Each log entry stores **`scale_source`** per key (`auto`, `auto_fallback`, `fixed`, `state_derived`). Optional **`audit` / `visualize`** argument **`r_ref`** overrides **`scale_k`** per key.
+
+## Path B state units (`state_units`)
+
+Default **`state_units="nondimensional"`** — uploaded arrays are already in the scaling **`Laws.*`** expect.
+
+Opt in with **`state_units="dimensional"`** (SI Path B) on **`ResidualEngine`** or per **`compute_residuals(...)`** call:
+
+1. **Infer** **`NondimScales`** from selected laws + state (`infer_nondim_scales` in `moju.monitor.nondim_inference`).
+2. Run **groups** on **physical** state (Re, Fo, … need dimensional inputs).
+3. **`dimensional_to_nd`** on field variables (derivatives scaled consistently).
+4. Optional Path B FD, then laws and auto **`scale_k`**.
+
+Partial overrides: **`nondim_scales={"L_ref": 0.05, "T0": 300.0}`** on engine, **`MonitorConfig`**, or the compute call. Logged: **`nondim_scale_source`**, **`nondim_scales`**. **`state_ref`** gets the same conversion in **`run_mode="eval"`**. Moju Studio: checkbox **State in physical units (SI)** on the Run tab.
+
+Do **not** rely on magnitude heuristics to detect SI vs ND — declare **`state_units`** explicitly.
 
 ## Admissibility metrics
 
@@ -16,6 +31,65 @@ Per flat residual key, the log's **`rms`** field is **R_eff** by default — **s
 **Why:** a model can satisfy governing laws on average while violating constitutive closure at isolated collocation points. Worst-point scoring on **`implied_delta`** / **`ref_delta`** catches that cheat; RMS on laws reflects typical PDE compliance.
 
 Each **`compute_residuals`** log entry stores **`rms`** (RMS per key, used by training plots and **`build_loss`**) and a sparse **`r_max`** dict (worst-point magnitudes for ND closure keys only). **`audit()`** / **`per_key_report`** add **`admissibility_metric`** (`"rms"` or `"max"`), **`score_for_admissibility`**, and optional **`r_max`**. Legacy logs without **`r_max`** fall back to RMS for closure admissibility. The dashboard **Summary** box and audit PDF **constitutive closure summary** lead with worst-point error and list RMS as a diagnostic.
+
+## Calibrating `scale_k` (`law_scale_mode`, `r_ref`)
+
+**`R_norm = R_eff / scale_k`** (or **`r_max / scale_k`** for closure admissibility). Admissibility is **`1 / (1 + R_norm)`**.
+
+### `law_scale_mode` (governing laws)
+
+| Mode | Behavior |
+|------|----------|
+| **`"auto"`** (default) | Term-balance RMS from merged state per law (`moju.monitor.law_scale_recipes`); floor at **`≈ 1e-2`** |
+| **`"fixed"`** | **`scale_k ≈ 1e-2`** for all **laws/** (pedagogical / tier-aligned demos) |
+
+Closure **`implied_delta` / `ref_delta`** always use fixed **`≈ 1e-2`** (fractional δ; tiers match Consistency bands).
+
+Pass **`r_ref`** (flat key → positive float) to **`audit(log, r_ref=...)`** and **`visualize(..., r_ref=...)`** to override **`scale_k`** per key after logging. Precedence: **`r_ref`** > logged **`entry["scale"]`** > first-step RMS fallback > 1.
+
+### Which keys use which default
+
+| Key family | Default `scale_k` | Notes |
+|------------|-------------------|--------|
+| **`laws/*`** | **Auto** term-balance (fallback **`≈ 1e-2`**) | Set **`law_scale_mode="fixed"`** for legacy gauge |
+| **`constitutive/.../implied_delta`**, **`ref_delta`** | Fixed **`≈ 1e-2`** | Fractional δ; tiers stable |
+| **Other `constitutive/*`**, **`data/*`** | State- or reference-derived RMS | Unchanged |
+
+### When to override
+
+Consider per-key **`r_ref`** or **`law_scale_mode="fixed"`** when:
+
+1. You want governing-law tier numbers aligned to the **`1e-2`** closure gauge (tutorials).
+2. You have a **baseline** and want **`R_norm ≈ 1`** at that baseline for specific laws.
+3. Auto term-balance is misleading for your custom nondimensionalization.
+
+Usually **keep defaults** for **`implied_delta` / `ref_delta`**: interpret closure via **Consistency bands** and the **worst-point summary**; those bands are pure fractions and do not depend on **`r_ref`**.
+
+### How to choose a value
+
+Pick **`scale_k`** = the violation magnitude you treat as **1× reference error** for that flat key (e.g. `"laws/momentum_navier_stokes"`):
+
+- **From a trusted baseline:** set **`r_ref[key] = rms_baseline`** from a reference run’s logged **`rms`**. A model matching that baseline then lands near **50% admissibility** under **`A = 1/(1 + r/scale_k)`**.
+- **From an explicit tolerance:** if you accept law RMS up to **`τ`** in your units, use **`r_ref[key] = τ`**.
+- **Same dict for audit and visualize** so KPI cards, PDF, and plots stay consistent.
+
+Example:
+
+```python
+r_ref = {
+    "laws/momentum_navier_stokes": 0.05,  # τ or baseline RMS for this law
+}
+report = audit(engine.log, r_ref=r_ref)
+fig = visualize(engine.log, last_residuals=engine.last_residuals, r_ref=r_ref, mode="training")
+```
+
+### Caveats
+
+- **`r_ref`** retunes **admissibility percentages and tier labels** for the keys you override; it does **not** change constitutive **±0.1 / 0.5 / 1% plot bands** (those stay fractional).
+- Global tier cutoffs (**`ADM_HIGH_THRESHOLD`**, etc.) assume fixed **`scale_k`** for **closure** keys. Under **`law_scale_mode="auto"`**, treat **High / Moderate / Low** on **laws** as calibration-dependent; use **`scale_source`** in logs and **`per_key_report`**.
+- **`build_loss`** and logged **`rms`** are **unchanged** by **`r_ref`**; overrides affect **audit / visualize scoring only**.
+
+Moju Studio exposes optional **`r_ref`** JSON for the next dashboard run (see **`apps/moju_studio/README.md`**).
 
 For minimal workflows, `build_minimal_residual_engine(law_names=[...], coord_dimension=1|2|3)` can auto-wire identity law specs plus inferred `Groups.*` rows and run in best-effort partial mode (skips unresolved rows and logs `unresolved_dependencies`). The configured `coord_dimension` is reused only when you explicitly ask for Path B finite-difference inference with `compute_residuals(..., auto_path_b_derivatives=True)`.
 

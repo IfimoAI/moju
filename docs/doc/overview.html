@@ -114,7 +114,7 @@ flowchart TB
     <ul>
       <li><strong>compute_residuals</strong> - runs laws, groups, constitutive audits, and optional eval data comparisons.</li>
       <li><strong>build_loss</strong> - cascades over law residuals only, using the same robust R_eff reduction family as the monitor log.</li>
-      <li><strong>audit</strong> - reports R_norm = R_eff / scale_k, per-key scores, category scores, and overall admissibility. Governing laws use RMS R_eff; constitutive implied_delta / ref_delta use worst-point r_max for admissibility (logged rms stays RMS for training).</li>
+      <li><strong>audit</strong> - reports R_norm = R_eff / scale_k, per-key scores, category scores, and overall admissibility. Governing laws use RMS R_eff with <code>law_scale_mode="auto"</code> term-balance scale_k by default; constitutive implied_delta / ref_delta use worst-point r_max for admissibility (logged rms stays RMS for training). Path B: <code>state_units="dimensional"</code> for SI uploads.</li>
       <li><strong>visualize</strong> - Plotly dashboard for residuals, category scores, spatial fields, and constitutive divergence and consistency when closure debug data is available. The constitutive row includes a Divergence heatmap (normalised as <code>(model &minus; implied) / (|model| + &epsilon;)</code>) and a Constitutive Consistency line plot with spatially varying &plusmn;0.1&thinsp;%&thinsp;/&thinsp;&plusmn;0.5&thinsp;%&thinsp;/&thinsp;&plusmn;1&thinsp;% acceptability bands and tier boundary markers centred on the model prediction.</li>
     </ul>
     <p>

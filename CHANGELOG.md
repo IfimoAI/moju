@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Auto law `scale_k` (default).** `law_scale_mode="auto"` (default) sets governing **laws/** `scale_k` from term-balance RMS (`moju.monitor.law_scale_recipes`); `"fixed"` keeps **`≈ 1e-2`**. Log **`scale_source`** per key. Closure **`implied_delta` / `ref_delta`** stay fixed **`≈ 1e-2`**.
+
+- **Path B dimensional ND.** `state_units="dimensional"` infers **`NondimScales`**, runs groups on physical state, then **`dimensional_to_nd`** before laws/FD. **`MonitorConfig`**: `law_scale_mode`, `state_units`, `nondim_scales`. Studio Run tab: **State in physical units (SI)** checkbox.
+
 ### Changed
 
 - **Constitutive Consistency plot now selects the worst-divergence time slice** instead of the last (max `t`) slice. The time index that maximises mean |δ| over all spatial axes is chosen, and the selected `t` value (no unit suffix) is shown in the panel title and subtitle (e.g. `Constitutive Consistency (worst t ≈ 12.34)`). For 2-D/3-D data the existing worst-y/z row pick is applied on top of the worst-t pick (e.g. `Constitutive Consistency (worst t ≈ 12.34, worst slice)`). Steady-state data is unchanged.
