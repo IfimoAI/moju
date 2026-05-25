@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Install profiles simplified.** Core **`pip install moju`** now includes **Plotly** (`visualize()`) and **ReportLab** (PDF export). Optional extras: **`moju[io]`** (science file loaders for `state_ref`), **`moju[studio]`** (Streamlit app), **`moju[torch]`** (PyTorch). Legacy extras (`viz`, `report`, `ref_*`, `standard`, `studio-science`, `units`) removed. **optax** is not bundled — install separately for training demos.
 
+- **Constitutive Consistency plot max-delta annotation** uses two decimal places for percent (e.g. `max 0.05% Δ @ x=0.1`).
+
 - **Constitutive Consistency plot y-axis shows at least ±1.5% around the model curve** (was ±1%), with expansion when the implied line exceeds that window so violations remain visible. Acceptability band fills stay at ±0.1/0.5/1%.
 
 - **Constitutive Consistency plot slice selection aligned with worst-point audit.** Time and spatial row picks now default to the slice that maximises **max |δ|** (same fractional error as audit **`r_max`**), with automatic fallback to **mean |δ|** when the max slice is degenerate (mostly NaN or dominated by a single collocation spike). Subtitle/title note mean fallback when it occurs (e.g. `mean slice (max degenerate)`). Steady-state 1-D data unchanged. Replaces the prior mean-only worst-slice rule; still selects worst time rather than last `t` for transient data.

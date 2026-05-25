@@ -520,7 +520,7 @@ def _max_delta_label(
     a_1d: np.ndarray,
     b_1d: np.ndarray,
 ) -> str:
-    """Return a formatted string 'max X.X% \u0394 @ x=Y.YY' for the plotted slice.
+    """Return a formatted string 'max X.XX% \u0394 @ x=Y.YY' for the plotted slice.
 
     Uses the same normalisation as the divergence formula: (|a-b|)/(|a|+\u03b5).
     Returns an empty string if the arrays are empty or all-NaN.
@@ -538,8 +538,8 @@ def _max_delta_label(
     max_pct = float(delta_pct[idx])
     x_at = float(xs[idx]) if xs.size > idx else float("nan")
     if np.isfinite(x_at):
-        return f"max {max_pct:.1f}% \u0394 @ x={x_at:.3g}"
-    return f"max {max_pct:.1f}% \u0394"
+        return f"max {max_pct:.2f}% \u0394 @ x={x_at:.3g}"
+    return f"max {max_pct:.2f}% \u0394"
 
 
 def _dissonance_y_range(

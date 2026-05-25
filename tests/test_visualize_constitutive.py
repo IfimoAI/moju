@@ -601,6 +601,16 @@ def test_prepare_mi_vs_x_mean_fallback_sparse_nan() -> None:
     assert "mean t slice (max degenerate)" in emb["title"]
 
 
+def test_max_delta_label_two_decimal_places() -> None:
+    from moju.monitor.visualize_constitutive import _max_delta_label
+
+    a = np.array([100.0, 100.0])
+    b = np.array([100.0, 100.05])
+    xs = np.array([0.05, 0.1])
+    lbl = _max_delta_label(xs, a, b)
+    assert lbl == "max 0.05% \u0394 @ x=0.1"
+
+
 def test_dissonance_y_range_minimum_1p5_percent() -> None:
     from moju.monitor.auditor import CONSTITUTIVE_AXIS_PAD_FRAC
     from moju.monitor.visualize_constitutive import _dissonance_y_range
