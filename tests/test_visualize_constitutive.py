@@ -600,3 +600,38 @@ def test_prepare_mi_vs_x_mean_fallback_sparse_nan() -> None:
     assert "mean t slice (max degenerate)" in emb["subtitle"]
     assert "mean t slice (max degenerate)" in emb["title"]
 
+
+def test_dissonance_y_range_minimum_1p5_percent() -> None:
+    from moju.monitor.auditor import CONSTITUTIVE_AXIS_PAD_FRAC
+    from moju.monitor.visualize_constitutive import _dissonance_y_range
+
+    a = np.full(8, 100.0)
+    y_lo, y_hi = _dissonance_y_range(a)
+    min_core = 2.0 * CONSTITUTIVE_AXIS_PAD_FRAC * 100.0
+    assert y_hi - y_lo >= min_core * 0.99
+
+
+def test_dissonance_y_range_expands_for_implied() -> None:
+    from moju.monitor.visualize_constitutive import _dissonance_y_range
+
+    a = np.full(8, 100.0)
+    b = a.copy()
+    b[4] = 103.0
+    y_lo, y_hi = _dissonance_y_range(a, b)
+    assert y_lo <= 100.0 - 1.5
+    assert y_hi >= 103.0
+
+
+def test_prepare_mi_vs_x_y_range_at_least_1p5() -> None:
+    pytest.importorskip("plotly")
+    from moju.monitor.auditor import CONSTITUTIVE_AXIS_PAD_FRAC
+    from moju.monitor.visualize_constitutive import prepare_constitutive_model_implied_vs_x_embed
+
+    emb = prepare_constitutive_model_implied_vs_x_embed(_twod_bundle())
+    assert emb is not None
+    y_lo, y_hi = emb["y_range"]
+    model_y = np.asarray(emb["traces"][-2].y, dtype=float)
+    mean_model = float(np.nanmean(model_y))
+    min_core = 2.0 * CONSTITUTIVE_AXIS_PAD_FRAC * abs(mean_model)
+    assert y_hi - y_lo >= min_core * 0.99
+
