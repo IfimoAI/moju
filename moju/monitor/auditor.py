@@ -80,6 +80,7 @@ DEFAULT_VISUALIZE_TITLE_TEST = DEFAULT_VISUALIZE_TITLE_EVAL
 CONSTITUTIVE_BAND_FRAC_HIGH = 0.001   # ±0.1%
 CONSTITUTIVE_BAND_FRAC_MOD = 0.005    # ±0.5%
 CONSTITUTIVE_BAND_FRAC_LOW = 0.01     # ±1%
+CONSTITUTIVE_AXIS_PAD_FRAC = 0.015    # ±1.5% minimum Consistency plot y-axis half-width
 # Exponent on imbalance **Q** in **R_eff** = RMS_δ(r)·Q**p** (see :func:`_r_eff_scalar`, :func:`configure_r_eff`).
 # Default ``0``: **R_eff** reduces to plain **RMS_δ(r)** without computing **Q**.
 R_EFF_Q_POWER = 0.0

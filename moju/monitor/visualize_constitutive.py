@@ -49,6 +49,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 import numpy as np
 
 from moju.monitor.auditor import (
+    CONSTITUTIVE_AXIS_PAD_FRAC,
     CONSTITUTIVE_BAND_FRAC_HIGH,
     CONSTITUTIVE_BAND_FRAC_LOW,
     CONSTITUTIVE_BAND_FRAC_MOD,
@@ -541,6 +542,24 @@ def _max_delta_label(
     return f"max {max_pct:.1f}% \u0394"
 
 
+def _dissonance_y_range(
+    model_a: np.ndarray,
+    implied_b: Optional[np.ndarray] = None,
+) -> List[float]:
+    """Y-axis limits for Constitutive Consistency: at least model ±1.5%, expand for implied outliers."""
+    a = np.asarray(model_a, dtype=float).ravel()
+    w_pad = CONSTITUTIVE_AXIS_PAD_FRAC * (np.abs(a) + _DIVERGENCE_EPS)
+    y_lo = float(np.nanmin(a - w_pad))
+    y_hi = float(np.nanmax(a + w_pad))
+    if implied_b is not None:
+        b = np.asarray(implied_b, dtype=float).ravel()
+        y_lo = min(y_lo, float(np.nanmin(b)))
+        y_hi = max(y_hi, float(np.nanmax(b)))
+    span = y_hi - y_lo
+    margin = span * 0.05 if span > 0 else abs(float(np.nanmean(a))) * CONSTITUTIVE_AXIS_PAD_FRAC or 0.1
+    return [y_lo - margin, y_hi + margin]
+
+
 def _build_dissonance_band_traces(
     x_plot: np.ndarray,
     a_1d: np.ndarray,
@@ -568,8 +587,8 @@ def _build_dissonance_band_traces(
         All have ``showlegend=False`` and blank names so they are invisible to
         ``_add_dissonance_inline_legend``.
     y_range : [float, float]
-        ``[y_lo, y_hi]`` covering at least the ±1 % alarm envelope of ``a``.
-        Callers should expand this further to also encompass the implied ``b``.
+        ``[y_lo, y_hi]`` covering at least model ±1.5 % (``CONSTITUTIVE_AXIS_PAD_FRAC``).
+        Callers with an implied slice should prefer :func:`_dissonance_y_range`.
     """
     import plotly.graph_objects as go
 
@@ -616,14 +635,7 @@ def _build_dissonance_band_traces(
         _fill(*_poly(a + w01, a - w01), c_ok),     # green centre
     ]
 
-    # Y-axis range: cover the full ±1 % envelope of the model curve
-    y_lo = float(np.nanmin(a - w1))
-    y_hi = float(np.nanmax(a + w1))
-    a_mean = float(np.nanmean(a)) if a.size > 0 else 0.0
-    margin = (y_hi - y_lo) * 0.05
-    if margin == 0.0:
-        margin = abs(a_mean) * 0.07 or 0.1
-    y_range = [y_lo - margin, y_hi + margin]
+    y_range = _dissonance_y_range(a)
 
     return band_traces, y_range
 
@@ -769,12 +781,9 @@ def prepare_constitutive_model_implied_vs_x_embed(
         if xs.shape[0] != n:
             xs = np.arange(n, dtype=float)
         x_plot, _L, x_ax_title = _x_abscissa_0_to_L(xs, bundle)
-        band_traces, y_range = _build_dissonance_band_traces(x_plot, a, t)
+        band_traces, _ = _build_dissonance_band_traces(x_plot, a, t)
         tier_lines = _build_dissonance_tier_lines(x_plot, a, t)
-        y_range = [
-            min(y_range[0], float(np.nanmin(b))),
-            max(y_range[1], float(np.nanmax(b))),
-        ]
+        y_range = _dissonance_y_range(a, b)
         line_traces = [
             go.Scatter(
                 x=x_plot,
@@ -851,12 +860,9 @@ def prepare_constitutive_model_implied_vs_x_embed(
             cyy = np.asarray(cy_src, dtype=float).ravel()
             if cyy.size > y_ix:
                 cy_val = float(cyy[y_ix])
-        band_traces_2d, y_range_2d = _build_dissonance_band_traces(x_plot, la, t)
+        band_traces_2d, _ = _build_dissonance_band_traces(x_plot, la, t)
         tier_lines_2d = _build_dissonance_tier_lines(x_plot, la, t)
-        y_range_2d = [
-            min(y_range_2d[0], float(np.nanmin(lb))),
-            max(y_range_2d[1], float(np.nanmax(lb))),
-        ]
+        y_range_2d = _dissonance_y_range(la, lb)
         line_traces_2d = [
             go.Scatter(
                 x=x_plot,
