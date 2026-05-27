@@ -18,6 +18,12 @@ from moju.monitor.law_group_inference import (
     implied_group_specs_for_laws,
     merge_implied_groups_first,
 )
+from moju.monitor.monitor_log_export import (
+    export_monitor_log,
+    get_monitor_log_export,
+    monitor_log_export_to_bundle,
+    monitor_log_export_to_jsonable,
+)
 from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
 from moju.monitor.config import AuditSpec, MonitorConfig, audit_spec_to_engine_dict
 from moju.monitor.derived_state_chain import (
@@ -57,6 +63,10 @@ __all__ = [
     "build_minimal_residual_engine",
     "audit",
     "build_monitor_visualize_bundle",
+    "export_monitor_log",
+    "get_monitor_log_export",
+    "monitor_log_export_to_bundle",
+    "monitor_log_export_to_jsonable",
     "visualize",
     "list_constitutive_models",
     "list_scaling_closure_ids",

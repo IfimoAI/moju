@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **`export_monitor_log()`** — standalone export for monitor logs with **`scope="visualize"`** (plot bundle matching `visualize()` training/eval rules), **`scope="audit"`** (full-log `steps` / `series` / audit-compatible `summary`), or **`scope="both"`**. Helpers: **`get_monitor_log_export()`**, **`monitor_log_export_to_jsonable()`**, **`monitor_log_export_to_bundle()`** (rehydrate numpy for Plotly). Optional **`enrich_log=True`** writes per-step scores onto log entries. Does not change **`audit()`** or **`visualize()`**.
+
 - **Auto law `scale_k` (default).** `law_scale_mode="auto"` (default) sets governing **laws/** `scale_k` from term-balance RMS (`moju.monitor.law_scale_recipes`); `"fixed"` keeps **`≈ 1e-2`**. Log **`scale_source`** per key. Closure **`implied_delta` / `ref_delta`** stay fixed **`≈ 1e-2`**.
 
 - **Path B dimensional ND.** `state_units="dimensional"` infers **`NondimScales`**, runs groups on physical state, then **`dimensional_to_nd`** before laws/FD. **`MonitorConfig`**: `law_scale_mode`, `state_units`, `nondim_scales`. Studio Run tab: **State in physical units (SI)** checkbox.
