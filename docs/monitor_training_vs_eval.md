@@ -150,6 +150,54 @@ Use when you have a reference state or want **`ref_delta`** / **`data/`** compar
 
 **`visualize(..., mode="eval")`** uses **two** KPI cards (Governing, Constitutive), matching training layout. The eval **combined bar chart** (row 3, last column) stays on **`R_norm`** — keys are scale-normalised so different residual families can be compared at a glance. Category breakdowns still list whatever categories exist in the log. **`mode="test"`** is accepted as an alias for **`eval`** (no deprecation warning).
 
+## Exporting monitor log data
+
+Use **`export_monitor_log(log, ...)`** when you need monitor data outside Moju without changing **`audit()`** or **`visualize()`**. Choose **`scope`**:
+
+| `scope` | Contents | Typical use |
+|---------|----------|-------------|
+| **`"visualize"`** (default) | Plot-ready **`bundle`** + **`plot_options`** | Recreate Plotly dashboards |
+| **`"audit"`** | Full-log **`steps`**, **`series`**, audit-compatible **`summary`** | pandas / CSV / custom analytics |
+| **`"both"`** | Visualize bundle and audit blocks together | One file for plots + history |
+
+**Visualize export** follows the same training vs eval rules as **`visualize()`**:
+
+- **`mode="training"`** — full log; **`bundle["overall_adm"]`** has one score per step.
+- **`mode="eval"`** — when **`len(log) > 1`**, the bundle uses only the **last** log entry (matches the eval dashboard). Audit export always covers **every** step.
+
+Pass **`residuals`** and **`state_pred`** when you need spatial panels or constitutive consistency data in the bundle. Optional **`enrich_log=True`** writes per-step scores onto log entries (same fields **`audit()`** writes); it does **not** replace **`audit()`** for PDF export.
+
+```python
+from moju.monitor import (
+    export_monitor_log,
+    monitor_log_export_to_bundle,
+    monitor_log_export_to_jsonable,
+)
+from moju.monitor.visualize_plotly import build_plotly_monitor_figure
+
+# Plot recreation
+export = export_monitor_log(
+    engine.log,
+    scope="visualize",
+    mode="eval",
+    residuals=engine.last_residuals,
+    state_pred=state_pred,
+)
+bundle = monitor_log_export_to_bundle(export)
+fig = build_plotly_monitor_figure(bundle, **export["plot_options"])
+
+# Full training history + final audit summary
+export = export_monitor_log(engine.log, scope="audit", r_ref=r_ref)
+overall_vs_step = export["series"]["overall_adm"]
+report = export["summary"]  # same shape as audit() minus PDF side effects
+
+# JSON file
+import json
+json.dump(monitor_log_export_to_jsonable(export), f)
+```
+
+Helpers: **`get_monitor_log_export(log)`** reads a cached export from **`log[-1]["monitor_log_export"]`**; **`monitor_log_export_to_jsonable(export)`** strips numpy for JSON.
+
 ## PDF reports
 
 `write_audit_pdf` omits **data** sections when `report["monitor_run_mode"] == "training"` (set by `audit()` from the last log entry).
