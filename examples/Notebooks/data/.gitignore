@@ -1,6 +1,0 @@
-# Large raw JSON state dumps — do not commit
-*.json
-
-# Other JSON zip archives stay local; wide2* demo states are versioned
-*.json.zip
-!wide2*.json.zip
