@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-30
+
 ### Added
 
 - **`export_monitor_log()`** — standalone export for monitor logs with **`scope="visualize"`** (plot bundle matching `visualize()` training/eval rules), **`scope="audit"`** (full-log `steps` / `series` / audit-compatible `summary`), or **`scope="both"`**. Helpers: **`get_monitor_log_export()`**, **`monitor_log_export_to_jsonable()`**, **`monitor_log_export_to_bundle()`** (rehydrate numpy for Plotly). Optional **`enrich_log=True`** writes per-step scores onto log entries. Does not change **`audit()`** or **`visualize()`**.
@@ -15,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Path B dimensional ND.** `state_units="dimensional"` infers **`NondimScales`**, runs groups on physical state, then **`dimensional_to_nd`** before laws/FD. **`MonitorConfig`**: `law_scale_mode`, `state_units`, `nondim_scales`. Studio Run tab: **State in physical units (SI)** checkbox.
 
 - **`audit_meta(log)`** — plain-language explainer for scaling and nondimensionalization (`build_audit_meta`, `format_audit_meta_plain_summary`). Attached as **`report["audit_meta"]`** from **`audit()`**; log entries include **`monitor_settings`**. Moju Studio Dashboard expander **How scoring was calibrated**; audit PDF section **Scoring calibration**.
+
+- **Paper and demo notebooks (repo).** Path A arXiv slab-cooling notebook (`examples/Notebooks/moju_slab_cooling_arxiv.ipynb`), Path B instant-audit notebook (`examples/Notebooks/media/moju_slab_cooling_path_b.ipynb`), Open in Colab badges, generic **`export_state_bundle()`** helper for state JSON zips, bundled wide2 demo zips, and **`reference/32x32x32_opt/`** paper audit artifacts.
 
 ### Changed
 
