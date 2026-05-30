@@ -209,6 +209,7 @@ __marimo__/
 # --- JAX & ML Specific ---
 .ipynb_checkpoints
 *.ipynb
+!examples/Notebooks/moju_slab_cooling_arxiv.ipynb
 /bazel-*
 .jax_configure.bazelrc
 # Ignore local model weights and datasets
@@ -226,6 +227,8 @@ data/processed/
 **/0/
 **/[1-9]*/
 !**/0.orig/
+!examples/Notebooks/reference/
+!examples/Notebooks/reference/**
 *.log
 *.foam
 platforms/

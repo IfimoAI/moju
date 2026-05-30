@@ -1,0 +1,100 @@
+"""Smoke tests for examples/Notebooks Path B zips and Path A reference bundle."""
+
+from __future__ import annotations
+
+import sys
+import zipfile
+from pathlib import Path
+
+import jax.numpy as jnp
+import numpy as np
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+NOTEBOOKS = ROOT / "examples" / "Notebooks"
+MEDIA_DATA = NOTEBOOKS / "media" / "data"
+REF = NOTEBOOKS / "reference" / "32x32x32_opt"
+
+sys.path.insert(0, str(ROOT / "examples" / "Notebooks" / "media"))
+from export_state_zips import load_state_from_json_zip  # noqa: E402
+
+from moju.monitor import ResidualEngine, audit, implied_group_specs_for_laws  # noqa: E402
+from moju.piratio import Models  # noqa: E402
+
+
+def _slab_engine_kw():
+    L, cp, h, k, rho = 0.1, 900.0, 500.0, 200.0, 2700.0
+    return {
+        "constants": {
+            "L": L,
+            "cp": cp,
+            "h": h,
+            "k": k,
+            "rho": rho,
+            "alpha": Models.thermal_diffusivity(k, rho, cp),
+        },
+        "laws": [
+            {
+                "name": "fourier_conduction",
+                "state_map": {
+                    "T_t": "T_t",
+                    "T_laplacian": "T_xx",
+                    "fo": "fo",
+                    "t": "t",
+                    "L": "L",
+                },
+            }
+        ],
+        "groups": implied_group_specs_for_laws(["fourier_conduction"]),
+    }
+
+
+@pytest.mark.parametrize(
+    "zip_name",
+    [
+        "wide2_const_prop_1D_cooling_slab_final_training_state.json.zip",
+        "wide2_const_prop_1D_cooling_slab_test_state_pred.json.zip",
+    ],
+)
+def test_wide2_zip_loads_and_audits(zip_name):
+    zip_path = MEDIA_DATA / zip_name
+    assert zip_path.exists(), zip_path
+    with zipfile.ZipFile(zip_path) as zf:
+        assert not any(n.startswith("__MACOSX") for n in zf.namelist())
+
+    state = load_state_from_json_zip(zip_path)
+    assert set(state.keys()) >= {"T", "T_t", "T_x", "T_xx", "t", "x"}
+
+    engine = ResidualEngine(**_slab_engine_kw())
+    state_jax = {k: jnp.asarray(v) for k, v in state.items()}
+    residuals = engine.compute_residuals(state_jax, log_to_python=True)
+    report = audit(engine.log, last_residual_dict=residuals)
+    assert report["overall_admissibility_score"] > 0.0
+
+
+def test_path_a_reference_bundle_present():
+    assert (REF / "training_admissibility.npy").exists()
+    assert (REF / "constitutive_fields.npz").exists()
+    cat = REF / "category_scores.np.npy"
+    if not cat.exists():
+        cat = REF / "category_scores.npy"
+    assert cat.exists()
+
+
+def test_path_a_reference_verify_logic():
+    """Mirror the arxiv notebook tolerance check against stored reference only."""
+    ref_adm = np.load(REF / "training_admissibility.npy", allow_pickle=True).item()
+    cat_path = REF / "category_scores.np.npy"
+    if not cat_path.exists():
+        cat_path = REF / "category_scores.npy"
+    ref_cat = np.load(cat_path, allow_pickle=True).item()
+
+    gov = ref_adm["governing admissibility"][-1]
+    const = ref_adm["constitutive admissibility"][-1]
+    assert gov > 0.99
+    assert 0.90 < const < 0.96
+    for key, val in ref_cat.items():
+        assert key.startswith(("laws/", "constitutive/"))
+        assert 0.0 < float(val) <= 1.0
+
+    assert (NOTEBOOKS / "moju_slab_cooling_arxiv.ipynb").exists()
