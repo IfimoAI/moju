@@ -1,6 +1,7 @@
 # Large raw JSON state dumps — do not commit
 *.json
 
-# Other JSON zip archives stay local; wide2* demo states are versioned
+# Other JSON zip archives stay local; bundled Path B demo states are allowlisted below
 *.json.zip
-!w2*.json.zip
+!wide2_const_prop_1D_cooling_slab_final_training_state.json.zip
+!wide2_const_prop_1D_cooling_slab_test_state_pred.json.zip

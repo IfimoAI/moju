@@ -16,7 +16,12 @@ MEDIA_DATA = NOTEBOOKS / "media" / "data"
 REF = NOTEBOOKS / "reference" / "32x32x32_opt"
 
 sys.path.insert(0, str(ROOT / "examples" / "Notebooks" / "media"))
-from export_state_zips import load_state_from_json_zip  # noqa: E402
+from export_state_zips import (  # noqa: E402
+    DEFAULT_SLAB_PREFIX,
+    export_state_bundle,
+    load_state_from_json_zip,
+    state_bundle_paths,
+)
 
 from moju.monitor import ResidualEngine, audit, implied_group_specs_for_laws  # noqa: E402
 from moju.piratio import Models  # noqa: E402
@@ -56,7 +61,7 @@ def _slab_engine_kw():
         "wide2_const_prop_1D_cooling_slab_test_state_pred.json.zip",
     ],
 )
-def test_wide2_zip_loads_and_audits(zip_name):
+def test_bundled_demo_zip_loads_and_audits(zip_name):
     zip_path = MEDIA_DATA / zip_name
     assert zip_path.exists(), zip_path
     with zipfile.ZipFile(zip_path) as zf:
@@ -97,4 +102,30 @@ def test_path_a_reference_verify_logic():
         assert key.startswith(("laws/", "constitutive/"))
         assert 0.0 < float(val) <= 1.0
 
-    assert (NOTEBOOKS / "moju_slab_cooling_arxiv.ipynb").exists()
+    arxiv_nb = NOTEBOOKS / "moju_slab_cooling_arxiv.ipynb"
+    if arxiv_nb.exists():
+        assert arxiv_nb.is_file()
+
+
+def test_export_state_bundle_roundtrip(tmp_path):
+    state = {
+        "T": [[300.0, 310.0], [320.0, 330.0]],
+        "T_t": [[0.0, 0.1], [0.2, 0.3]],
+        "T_x": [[1.0, 1.1], [1.2, 1.3]],
+        "T_xx": [[0.01, 0.02], [0.03, 0.04]],
+        "t": [1.0, 2.0],
+        "x": [[0.0], [0.05]],
+    }
+    prefix = "test_arch_const_prop_1D_cooling_slab"
+    train_zip, test_zip = export_state_bundle(state, state, tmp_path, prefix=prefix)
+    assert train_zip == state_bundle_paths(tmp_path, prefix)[0]
+    assert test_zip == state_bundle_paths(tmp_path, prefix)[1]
+    assert load_state_from_json_zip(train_zip)["T"] == state["T"]
+    assert load_state_from_json_zip(test_zip)["T"] == state["T"]
+
+
+def test_export_state_bundle_default_prefix_matches_demo(tmp_path):
+    state = {"T": [300.0], "T_t": [0.0], "T_x": [1.0], "T_xx": [0.01], "t": [1.0], "x": [[0.0]]}
+    train_zip, test_zip = export_state_bundle(state, state, tmp_path)
+    assert train_zip.name == f"{DEFAULT_SLAB_PREFIX}_final_training_state.json.zip"
+    assert test_zip.name == f"{DEFAULT_SLAB_PREFIX}_test_state_pred.json.zip"

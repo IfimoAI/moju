@@ -7,7 +7,13 @@ import zipfile
 from pathlib import Path
 from typing import Any, Mapping
 
-WIDE2_PREFIX = "wide2_const_prop_1D_cooling_slab"
+# Bundled Path B demo in ``media/data/`` (128×128×128 w2 slab run).
+DEFAULT_SLAB_PREFIX = "wide2_const_prop_1D_cooling_slab"
+
+TRAINING_ZIP_SUFFIX = "_final_training_state.json.zip"
+TEST_ZIP_SUFFIX = "_test_state_pred.json.zip"
+TRAINING_JSON_SUFFIX = "_final_training_state.json"
+TEST_JSON_SUFFIX = "_test_state_pred.json"
 
 
 def jax_serializable(obj: Any) -> Any:
@@ -36,33 +42,32 @@ def write_state_json_zip(
     return out_zip_path
 
 
-def wide2_training_zip_path(data_dir: str | Path) -> Path:
-    return Path(data_dir) / f"{WIDE2_PREFIX}_final_training_state.json.zip"
+def state_bundle_paths(data_dir: str | Path, prefix: str) -> tuple[Path, Path]:
+    """Return training and eval zip paths for a slab state bundle prefix."""
+    data_dir = Path(data_dir)
+    train_zip = data_dir / f"{prefix}{TRAINING_ZIP_SUFFIX}"
+    test_zip = data_dir / f"{prefix}{TEST_ZIP_SUFFIX}"
+    return train_zip, test_zip
 
 
-def wide2_test_zip_path(data_dir: str | Path) -> Path:
-    return Path(data_dir) / f"{WIDE2_PREFIX}_test_state_pred.json.zip"
-
-
-def export_wide2_states(
+def export_state_bundle(
     state_final: Mapping[str, Any],
     state_pred: Mapping[str, Any],
     data_dir: str | Path,
+    *,
+    prefix: str = DEFAULT_SLAB_PREFIX,
 ) -> tuple[Path, Path]:
-    """Write both wide2 Path B zip bundles under ``data_dir``."""
+    """Write training and eval Path B zip bundles under ``data_dir``.
+
+    ``prefix`` tags the architecture or run, e.g.
+    ``wide2_const_prop_1D_cooling_slab`` or ``32x32x32_opt_const_prop_1D_cooling_slab``.
+    """
     data_dir = Path(data_dir)
-    train_json = f"{WIDE2_PREFIX}_final_training_state.json"
-    test_json = f"{WIDE2_PREFIX}_test_state_pred.json"
-    train_zip = write_state_json_zip(
-        state_final,
-        wide2_training_zip_path(data_dir),
-        train_json,
-    )
-    test_zip = write_state_json_zip(
-        state_pred,
-        wide2_test_zip_path(data_dir),
-        test_json,
-    )
+    train_zip, test_zip = state_bundle_paths(data_dir, prefix)
+    train_json = f"{prefix}{TRAINING_JSON_SUFFIX}"
+    test_json = f"{prefix}{TEST_JSON_SUFFIX}"
+    write_state_json_zip(state_final, train_zip, train_json)
+    write_state_json_zip(state_pred, test_zip, test_json)
     return train_zip, test_zip
 
 
@@ -91,8 +96,6 @@ if __name__ == "__main__":
     if args.repack:
         for zip_path in args.repack:
             state = load_state_from_json_zip(zip_path)
-            json_name = Path(zip_path).stem.replace(".json", "") + ".json"
-            if not json_name.endswith(".json"):
-                json_name = Path(zip_path).name.replace(".zip", "")
+            json_name = Path(zip_path).name.replace(".zip", "")
             write_state_json_zip(state, zip_path, json_name)
             print(f"repacked {zip_path}")

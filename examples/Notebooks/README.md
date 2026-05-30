@@ -32,4 +32,4 @@ Paper reference audit artifacts for the `32×32×32` architecture (Table 1 / §4
 
 ## Path B — instant audit / media (`media/`)
 
-Pre-exported `128×128×128` (w2) state bundles for social posts and quick demos: load `state_pred`, audit, and visualize **without** 14k-step training. See [`media/README.md`](media/README.md).
+Pre-exported `128×128×128` (w2) state bundles for social posts and quick demos: load `state_pred`, audit, and visualize **without** 14k-step training. Use `media/export_state_zips.py` to export bundles for **any** architecture (`export_state_bundle(..., prefix=...)`). See [`media/README.md`](media/README.md).
