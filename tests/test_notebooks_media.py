@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import zipfile
 from pathlib import Path
@@ -12,8 +13,16 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOKS = ROOT / "examples" / "Notebooks"
-MEDIA_DATA = NOTEBOOKS / "media" / "data"
+MEDIA = NOTEBOOKS / "media"
+MEDIA_DATA = MEDIA / "data"
 REF = NOTEBOOKS / "reference" / "32x32x32_opt"
+PATH_A_NB = NOTEBOOKS / "moju_slab_cooling_arxiv.ipynb"
+PATH_B_NB = MEDIA / "moju_slab_cooling_path_b.ipynb"
+COLAB_BADGE = "colab.research.google.com/assets/colab-badge.svg"
+WIDE2_RAW = (
+    "https://github.com/IfimoAI/moju/raw/main/examples/Notebooks/media/data/"
+    "wide2_const_prop_1D_cooling_slab_test_state_pred.json.zip"
+)
 
 sys.path.insert(0, str(ROOT / "examples" / "Notebooks" / "media"))
 from export_state_zips import (  # noqa: E402
@@ -102,9 +111,44 @@ def test_path_a_reference_verify_logic():
         assert key.startswith(("laws/", "constitutive/"))
         assert 0.0 < float(val) <= 1.0
 
-    arxiv_nb = NOTEBOOKS / "moju_slab_cooling_arxiv.ipynb"
-    if arxiv_nb.exists():
-        assert arxiv_nb.is_file()
+    arxiv_nb = PATH_A_NB
+    assert arxiv_nb.exists()
+    assert arxiv_nb.is_file()
+
+
+def test_colab_notebooks_present_and_lightweight():
+    assert PATH_A_NB.exists()
+    assert PATH_B_NB.exists()
+    assert PATH_A_NB.stat().st_size < 500_000
+    assert PATH_B_NB.stat().st_size < 500_000
+
+
+def test_path_a_notebook_colab_setup():
+    nb = json.loads(PATH_A_NB.read_text())
+    joined = "\n".join("".join(c.get("source", [])) for c in nb["cells"])
+    assert COLAB_BADGE in joined
+    assert "git clone" in joined
+    assert "optax" in joined
+    assert "/content/moju/examples/Notebooks" in joined
+
+
+def test_path_b_notebook_colab_and_wide2_url():
+    nb = json.loads(PATH_B_NB.read_text())
+    joined = "\n".join("".join(c.get("source", [])) for c in nb["cells"])
+    assert COLAB_BADGE in joined
+    assert WIDE2_RAW in joined
+    assert "w2_const_prop_1D_cooling_slab" not in joined
+    assert "__MACOSX" in joined or "json_members" in joined
+
+
+def test_readme_colab_badges():
+    root_readme = (ROOT / "README.md").read_text()
+    notebooks_readme = (NOTEBOOKS / "README.md").read_text()
+    media_readme = (MEDIA / "README.md").read_text()
+    for text in (root_readme, notebooks_readme, media_readme):
+        assert COLAB_BADGE in text
+    assert "moju_slab_cooling_arxiv.ipynb" in root_readme
+    assert "moju_slab_cooling_path_b.ipynb" in root_readme
 
 
 def test_export_state_bundle_roundtrip(tmp_path):

@@ -6,6 +6,15 @@ Physics supervision and audit tools for SciML and Physics AI.
 pip install moju
 ```
 
+## Paper and demo notebooks (Colab)
+
+| Notebook | Description |
+|----------|-------------|
+| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/moju_slab_cooling_arxiv.ipynb) [Path A — arXiv reproduction](examples/Notebooks/moju_slab_cooling_arxiv.ipynb) | Train `32×32×32` PINN, Moju audit, verify vs paper reference |
+| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/media/moju_slab_cooling_path_b.ipynb) [Path B — instant audit](examples/Notebooks/media/moju_slab_cooling_path_b.ipynb) | Load pre-exported w2 states, audit and visualize (no training) |
+
+Open-in-Colab badges require the notebooks on GitHub **`main`**. See [examples/Notebooks/README.md](examples/Notebooks/README.md).
+
 Moju helps you turn predicted state fields into governing-law residuals, physics losses, constitutive consistency checks, and audit reports. It is JAX-native at the core, with a PyTorch-facing interface available through `moju.torch`.
 
 ## What Moju Does
