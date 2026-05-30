@@ -2,6 +2,10 @@
 
 Pre-exported PINN states for quick Moju audits and figures (social posts, demos) without retraining.
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/media/moju_slab_cooling_path_b.ipynb) [`moju_slab_cooling_path_b.ipynb`](moju_slab_cooling_path_b.ipynb)
+
+Colab badge requires this notebook on GitHub **`main`**.
+
 ## Bundled demo (`data/`)
 
 The repo ships one canonical **128×128×128 (w2)** slab bundle (`DEFAULT_SLAB_PREFIX` in `export_state_zips.py`):

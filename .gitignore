@@ -210,6 +210,7 @@ __marimo__/
 .ipynb_checkpoints
 *.ipynb
 !examples/Notebooks/moju_slab_cooling_arxiv.ipynb
+!examples/Notebooks/media/moju_slab_cooling_path_b.ipynb
 /bazel-*
 .jax_configure.bazelrc
 # Ignore local model weights and datasets
