@@ -6,9 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-03
+
 ### Changed
 
-- **Publication metadata.** Canonical preprint on [Zenodo](https://zenodo.org/records/20519331) (PDF only); added `CITATION.cff` and [docs/paper_metadata.md](docs/paper_metadata.md). Path A notebook renamed to `moju_slab_cooling_paper.ipynb`; user-facing docs no longer reference arXiv.
+- **Publication metadata (Zenodo).** Canonical preprint on [Zenodo](https://zenodo.org/records/20519331) (PDF only); added `CITATION.cff` and [docs/paper_metadata.md](docs/paper_metadata.md). Path A notebook renamed to `moju_slab_cooling_paper.ipynb`; user-facing docs no longer reference arXiv.
+- **PyPI:** `project.urls.Paper` points to the Zenodo record; install `moju==1.1.1` for this metadata-aligned release.
 
 ## [1.1.0] - 2026-05-30
 
