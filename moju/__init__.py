@@ -1,3 +1,3 @@
 """Moju: Physics-AI supervision for engineering-grade simulations."""
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
