@@ -10,16 +10,16 @@ pip install moju
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20519331.svg)](https://doi.org/10.5281/zenodo.20519331)
 
-**[Moju: A Physics Admissibility Auditing Framework for Scientific Machine Learning Surrogates](https://zenodo.org/records/20519331)** — preprint PDF on Zenodo. Software and reproduction notebooks are on GitHub (see below). Canonical links: [docs/paper_metadata.md](docs/paper_metadata.md).
+**[Moju: A Physics Admissibility Auditing Framework for Scientific Machine Learning Surrogates](https://zenodo.org/records/20519331)** — preprint PDF on Zenodo. Software and reproduction notebooks are on GitHub (see below). Canonical links: [docs/paper_metadata.md](https://github.com/IfimoAI/moju/blob/main/docs/paper_metadata.md).
 
 ## Paper and demo notebooks (Colab)
 
 | Notebook | Description |
 |----------|-------------|
-| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/moju_slab_cooling_paper.ipynb) [Path A — paper reproduction](examples/Notebooks/moju_slab_cooling_paper.ipynb) | Train `32×32×32` PINN, Moju audit, verify vs paper reference |
-| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/media/moju_slab_cooling_path_b.ipynb) [Path B — instant audit](examples/Notebooks/media/moju_slab_cooling_path_b.ipynb) | Load pre-exported w2 states, audit and visualize (no training) |
+| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/moju_slab_cooling_paper.ipynb) [Path A — paper reproduction](https://github.com/IfimoAI/moju/blob/main/examples/Notebooks/moju_slab_cooling_paper.ipynb) | Train `32×32×32` PINN, Moju audit, verify vs paper reference |
+| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/media/moju_slab_cooling_path_b.ipynb) [Path B — instant audit](https://github.com/IfimoAI/moju/blob/main/examples/Notebooks/media/moju_slab_cooling_path_b.ipynb) | Load pre-exported w2 states, audit and visualize (no training) |
 
-Open-in-Colab badges require the notebooks on GitHub **`main`**. See [examples/Notebooks/README.md](examples/Notebooks/README.md).
+Open-in-Colab badges require the notebooks on GitHub **`main`**. See [examples/Notebooks/README.md](https://github.com/IfimoAI/moju/blob/main/examples/Notebooks/README.md).
 
 Moju helps you turn predicted state fields into governing-law residuals, physics losses, constitutive consistency checks, and audit reports. It is JAX-native at the core, with a PyTorch-facing interface available through `moju.torch`.
 
@@ -113,11 +113,11 @@ Overall admissibility is the **minimum** of the finite category scores participa
 
 ### Why two admissibility metrics?
 
-Governing **laws** are scored with **RMS `R_eff`** (average compliance across collocation points). Constitutive **`implied_delta`** / **`ref_delta`** closure keys use **worst-point** `max |δ|` for admissibility — a PINN can satisfy the PDE on average while cheating closure at a few hotspots. Logged **`rms`** and **`build_loss`** stay RMS everywhere; audit/reporting uses the split. Constitutive category rolls up with **minimum** (not geometric mean). See **Admissibility metrics** in [`docs/monitor_training_vs_eval.md`](docs/monitor_training_vs_eval.md).
+Governing **laws** are scored with **RMS `R_eff`** (average compliance across collocation points). Constitutive **`implied_delta`** / **`ref_delta`** closure keys use **worst-point** `max |δ|` for admissibility — a PINN can satisfy the PDE on average while cheating closure at a few hotspots. Logged **`rms`** and **`build_loss`** stay RMS everywhere; audit/reporting uses the split. Constitutive category rolls up with **minimum** (not geometric mean). See **Admissibility metrics** in [`docs/monitor_training_vs_eval.md`](https://github.com/IfimoAI/moju/blob/main/docs/monitor_training_vs_eval.md).
 
 For **multi-scale or high-Re** problems, governing laws use **auto term-balance `scale_k`** by default (floored at **`≈ 1e-2`**). Use **`law_scale_mode="fixed"`** or per-key **`audit(..., r_ref={...})`** when you want a fixed gauge — see **Calibrating scale_k** in that doc. Path B SI uploads: **`state_units="dimensional"`** (Studio checkbox **State in physical units (SI)**).
 
-Details: [`docs/monitor_training_vs_eval.md`](docs/monitor_training_vs_eval.md).
+Details: [`docs/monitor_training_vs_eval.md`](https://github.com/IfimoAI/moju/blob/main/docs/monitor_training_vs_eval.md).
 
 ## PyTorch Support
 
@@ -134,7 +134,7 @@ pip install "moju[torch]"
 - `wrap_law_torch` - wrap JAX `Laws.*` functions for use with Torch tensors through `jax2torch`.
 - Torch-native nondimensionalization helpers.
 
-Start with [`scripts/torch_laws_jax2torch_example.py`](scripts/torch_laws_jax2torch_example.py). The implementation is covered by `tests/test_torch_engine.py` and `tests/test_torch_interop.py`.
+Start with [`scripts/torch_laws_jax2torch_example.py`](https://github.com/IfimoAI/moju/blob/main/scripts/torch_laws_jax2torch_example.py). The implementation is covered by `tests/test_torch_engine.py` and `tests/test_torch_interop.py`.
 
 ## Installation profiles
 
@@ -146,24 +146,24 @@ Start with [`scripts/torch_laws_jax2torch_example.py`](scripts/torch_laws_jax2to
 | `pip install "moju[torch,io]"` | PyTorch training + file loaders |
 | `pip install "moju[dev]"` | Development (pytest, black, ruff) |
 
-Training demos that use **optax** (e.g. [`examples/slab_cooling_demo.py`](examples/slab_cooling_demo.py)) require `pip install optax` in addition to `moju`.
+Training demos that use **optax** (e.g. [`examples/slab_cooling_demo.py`](https://github.com/IfimoAI/moju/blob/main/examples/slab_cooling_demo.py)) require `pip install optax` in addition to `moju`.
 
 ## Documentation
 
-- GitHub Pages source and API overview: [`docs/`](docs/)
-- Training vs eval behavior: [`docs/monitor_training_vs_eval.md`](docs/monitor_training_vs_eval.md)
-- Law-linked constitutive implied audits: [`docs/law_implied_audits.md`](docs/law_implied_audits.md)
-- Moju Studio: [`apps/moju_studio/README.md`](apps/moju_studio/README.md)
-- Versioning policy: [`VERSIONING.md`](VERSIONING.md)
-- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
+- GitHub Pages source and API overview: [`docs/`](https://github.com/IfimoAI/moju/tree/main/docs)
+- Training vs eval behavior: [`docs/monitor_training_vs_eval.md`](https://github.com/IfimoAI/moju/blob/main/docs/monitor_training_vs_eval.md)
+- Law-linked constitutive implied audits: [`docs/law_implied_audits.md`](https://github.com/IfimoAI/moju/blob/main/docs/law_implied_audits.md)
+- Moju Studio: [`apps/moju_studio/README.md`](https://github.com/IfimoAI/moju/blob/main/apps/moju_studio/README.md)
+- Versioning policy: [`VERSIONING.md`](https://github.com/IfimoAI/moju/blob/main/VERSIONING.md)
+- Changelog: [`CHANGELOG.md`](https://github.com/IfimoAI/moju/blob/main/CHANGELOG.md)
 
 ## Examples
 
-- Full 1D slab cooling demo: [`examples/slab_cooling_demo.py`](examples/slab_cooling_demo.py)
-- CFD snapshot audit: [`examples/cfd_snapshot_cookbook_heat_1d.py`](examples/cfd_snapshot_cookbook_heat_1d.py)
-- Path B finite-difference law fill: [`examples/cookbook_path_b_fd_law_laplace.py`](examples/cookbook_path_b_fd_law_laplace.py)
-- Constitutive divergence dashboard: [`examples/cookbook_constitutive_divergence.py`](examples/cookbook_constitutive_divergence.py)
-- Torch interop: [`scripts/torch_laws_jax2torch_example.py`](scripts/torch_laws_jax2torch_example.py)
+- Full 1D slab cooling demo: [`examples/slab_cooling_demo.py`](https://github.com/IfimoAI/moju/blob/main/examples/slab_cooling_demo.py)
+- CFD snapshot audit: [`examples/cfd_snapshot_cookbook_heat_1d.py`](https://github.com/IfimoAI/moju/blob/main/examples/cfd_snapshot_cookbook_heat_1d.py)
+- Path B finite-difference law fill: [`examples/cookbook_path_b_fd_law_laplace.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_path_b_fd_law_laplace.py)
+- Constitutive divergence dashboard: [`examples/cookbook_constitutive_divergence.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_constitutive_divergence.py)
+- Torch interop: [`scripts/torch_laws_jax2torch_example.py`](https://github.com/IfimoAI/moju/blob/main/scripts/torch_laws_jax2torch_example.py)
 
 ## Philosophy
 

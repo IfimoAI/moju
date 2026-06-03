@@ -127,7 +127,7 @@ def test_path_a_notebook_colab_setup():
     nb = json.loads(PATH_A_NB.read_text())
     joined = "\n".join("".join(c.get("source", [])) for c in nb["cells"])
     assert COLAB_BADGE in joined
-    assert "moju==1.1.1" in joined
+    assert "moju==1.1.2" in joined
     assert "git clone" in joined
     assert "optax" in joined
     assert "/content/moju/examples/Notebooks" in joined
@@ -137,7 +137,7 @@ def test_path_b_notebook_colab_and_wide2_url():
     nb = json.loads(PATH_B_NB.read_text())
     joined = "\n".join("".join(c.get("source", [])) for c in nb["cells"])
     assert COLAB_BADGE in joined
-    assert "moju==1.1.1" in joined
+    assert "moju==1.1.2" in joined
     assert WIDE2_RAW in joined
     assert "w2_const_prop_1D_cooling_slab" not in joined
     assert "__MACOSX" in joined or "json_members" in joined

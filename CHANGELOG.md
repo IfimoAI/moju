@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-06-03
+
+### Fixed
+
+- **PyPI README:** Notebook and repo links in the Colab table (and other README paths) use absolute GitHub URLs so they work on https://pypi.org/project/moju/ (relative links previously 404'd).
+
 ## [1.1.1] - 2026-06-03
 
 ### Changed
