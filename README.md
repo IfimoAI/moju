@@ -6,11 +6,17 @@ Physics supervision and audit tools for SciML and Physics AI.
 pip install moju
 ```
 
+## Paper (Zenodo)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20519331.svg)](https://doi.org/10.5281/zenodo.20519331)
+
+**[Moju: A Physics Admissibility Auditing Framework for Scientific Machine Learning Surrogates](https://zenodo.org/records/20519331)** — preprint PDF on Zenodo. Software and reproduction notebooks are on GitHub (see below). Canonical links: [docs/paper_metadata.md](docs/paper_metadata.md).
+
 ## Paper and demo notebooks (Colab)
 
 | Notebook | Description |
 |----------|-------------|
-| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/moju_slab_cooling_arxiv.ipynb) [Path A — arXiv reproduction](examples/Notebooks/moju_slab_cooling_arxiv.ipynb) | Train `32×32×32` PINN, Moju audit, verify vs paper reference |
+| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/moju_slab_cooling_paper.ipynb) [Path A — paper reproduction](examples/Notebooks/moju_slab_cooling_paper.ipynb) | Train `32×32×32` PINN, Moju audit, verify vs paper reference |
 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/media/moju_slab_cooling_path_b.ipynb) [Path B — instant audit](examples/Notebooks/media/moju_slab_cooling_path_b.ipynb) | Load pre-exported w2 states, audit and visualize (no training) |
 
 Open-in-Colab badges require the notebooks on GitHub **`main`**. See [examples/Notebooks/README.md](examples/Notebooks/README.md).

@@ -53,6 +53,7 @@ dev = ["pytest", "black", "ruff"]
 Homepage = "https://ifimoai.github.io/moju/"
 Documentation = "https://ifimoai.github.io/moju/doc/overview.html"
 Source = "https://github.com/IfimoAI/moju"
+Paper = "https://zenodo.org/records/20519331"
 Changelog = "https://github.com/IfimoAI/moju/blob/main/CHANGELOG.md"
 Issues = "https://github.com/IfimoAI/moju/issues"
 

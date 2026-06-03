@@ -1,12 +1,12 @@
-# Moju notebooks — arXiv slab cooling benchmark
+# Moju notebooks — slab cooling benchmark
 
-Reproducible companion to the Moju arXiv paper on 1D transient slab cooling with constant material properties and Robin convection at `x = L`.
+Reproducible companion to the [Moju preprint on Zenodo](https://zenodo.org/records/20519331): 1D transient slab cooling with constant material properties and Robin convection at `x = L`.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/moju_slab_cooling_arxiv.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IfimoAI/moju/blob/main/examples/Notebooks/moju_slab_cooling_paper.ipynb)
 
 **Colab badges** open notebooks from GitHub **`main`**. Push merged changes before sharing badge links.
 
-## Path A — paper reproduction (`moju_slab_cooling_arxiv.ipynb`)
+## Path A — paper reproduction (`moju_slab_cooling_paper.ipynb`)
 
 Train the paper's `32×32×32` PINN (`[2, 32, 32, 32, 1]`), run L-BFGS for **14,000** steps, and audit training (`64×48` collocation) and eval (`512×384`) grids with Moju.
 

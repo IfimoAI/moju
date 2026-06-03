@@ -16,7 +16,7 @@ NOTEBOOKS = ROOT / "examples" / "Notebooks"
 MEDIA = NOTEBOOKS / "media"
 MEDIA_DATA = MEDIA / "data"
 REF = NOTEBOOKS / "reference" / "32x32x32_opt"
-PATH_A_NB = NOTEBOOKS / "moju_slab_cooling_arxiv.ipynb"
+PATH_A_NB = NOTEBOOKS / "moju_slab_cooling_paper.ipynb"
 PATH_B_NB = MEDIA / "moju_slab_cooling_path_b.ipynb"
 COLAB_BADGE = "colab.research.google.com/assets/colab-badge.svg"
 WIDE2_RAW = (
@@ -96,7 +96,7 @@ def test_path_a_reference_bundle_present():
 
 
 def test_path_a_reference_verify_logic():
-    """Mirror the arxiv notebook tolerance check against stored reference only."""
+    """Mirror the Path A paper notebook tolerance check against stored reference only."""
     ref_adm = np.load(REF / "training_admissibility.npy", allow_pickle=True).item()
     cat_path = REF / "category_scores.np.npy"
     if not cat_path.exists():
@@ -111,9 +111,9 @@ def test_path_a_reference_verify_logic():
         assert key.startswith(("laws/", "constitutive/"))
         assert 0.0 < float(val) <= 1.0
 
-    arxiv_nb = PATH_A_NB
-    assert arxiv_nb.exists()
-    assert arxiv_nb.is_file()
+    paper_nb = PATH_A_NB
+    assert paper_nb.exists()
+    assert paper_nb.is_file()
 
 
 def test_colab_notebooks_present_and_lightweight():
@@ -149,7 +149,8 @@ def test_readme_colab_badges():
     media_readme = (MEDIA / "README.md").read_text()
     for text in (root_readme, notebooks_readme, media_readme):
         assert COLAB_BADGE in text
-    assert "moju_slab_cooling_arxiv.ipynb" in root_readme
+    assert "moju_slab_cooling_paper.ipynb" in root_readme
+    assert "zenodo.org" in root_readme
     assert "moju_slab_cooling_path_b.ipynb" in root_readme
 
 
