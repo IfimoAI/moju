@@ -209,7 +209,7 @@ __marimo__/
 # --- JAX & ML Specific ---
 .ipynb_checkpoints
 *.ipynb
-!examples/Notebooks/moju_slab_cooling_arxiv.ipynb
+!examples/Notebooks/moju_slab_cooling_paper.ipynb
 !examples/Notebooks/media/moju_slab_cooling_path_b.ipynb
 /bazel-*
 .jax_configure.bazelrc
