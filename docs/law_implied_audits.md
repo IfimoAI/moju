@@ -17,7 +17,7 @@ It is element-wise, so scalar, vector and tensor predictions are all supported (
 Two `implied_fn` styles cover all supported laws:
 
 1. **Scalar-coefficient safe-division.** The law rearranges to solve for a single material property (e.g. Fourier: \(\alpha = T_t / T_{\text{laplacian}}\); Fick: \(D = \phi_t / \phi_{\text{laplacian}}\); wave: \(c = \sqrt{\phi_{tt}/\phi_{\text{laplacian}}}\)). The helper uses `_safe_ratio` to NaN-mask ill-conditioned regions, so points where the denominator vanishes appear as `NaN` rather than huge finite values; downstream reductions are nan-aware.
-2. **Approximate / direct-field reconstruction.** The constitutive term is vector or tensor valued and cannot be inverted to a single scalar coefficient by safe division. The helper returns the law-implied vector/tensor field directly so the engine can compute element-wise `F − ˜F`. Covers stress (Hooke's law), density (mass compressible), turbulent viscous acceleration (compressible / incompressible momentum balance), and μ rows (NS / Stokes / Burgers) which use `_project_scalar_coefficient` (a least-squares projection onto `u_laplacian`) to recover a per-point scalar from a vector balance.
+2. **Approximate / direct-field reconstruction.** The constitutive term is vector or tensor valued and cannot be inverted to a single scalar coefficient by safe division. The helper returns the law-implied vector/tensor field directly so the engine can compute element-wise `F − ˜F`. Covers stress (Hooke's law), density (mass compressible), turbulent viscous acceleration (compressible / incompressible momentum balance), and μ rows (NS / Stokes) / Burgers **ν**, which use `_project_scalar_coefficient` (a least-squares projection onto `u_laplacian`) to recover a per-point scalar from a vector balance.
 
 Both flavours feed into the same fractional residual `δ = (F − ˜F) / (|F| + ε)`, producing an array of the same shape as `F`. **`Models.*`** still uses your physical state keys; the monitor residual is always model-normalised as above.
 
@@ -90,7 +90,7 @@ The mapping lives in **`moju/monitor/law_implied_diagnostics.py`** (`_LAW_IMPLIE
 | `advection_diffusion` | `scalar_diffusivity_from_pe` | Implied \(\kappa = (\phi_t + \mathbf u\!\cdot\!\nabla\phi)|\mathbf u|L / \phi_{\text{laplacian}}\). |
 | `momentum_navier_stokes` | `dynamic_viscosity_from_re` | Implied **μ** from least-squares projection of \(u_t + u\cdot\nabla u + \nabla p\) onto \(\nabla^2u\). |
 | `stokes_flow` | `dynamic_viscosity_from_re` | Implied **μ** from least-squares projection of \(\nabla p\) onto \(\nabla^2u\). |
-| `burgers_equation` | `dynamic_viscosity_from_re` | Implied **μ** from projected kinematic viscosity in \(u_t + u\cdot\nabla u = \nu\nabla^2u\). |
+| `burgers_equation` | `kinematic_viscosity_from_re` | Implied **ν** from least-squares projection of \(u_t + u\cdot\nabla u\) onto \(\nabla^2u\) (last vector axis; works for 1D/2D/3D). Catalog \(\nu = U L/\mathrm{Re}\) matches the law coefficient. The former Burgers **μ** implied row was removed (relative δ was redundant with ν and fragile at low \(\|u\|\)). |
 | `momentum_incompressible_newtonian_laplacian` | `turbulent_viscous_acceleration_*` | Three auto rows: k-ω, k-ε, and Smagorinsky; **subtract** mode **`pred − implied_fn`**. |
 | `momentum_compressible_newtonian_laplacian` | `turbulent_viscous_acceleration_compressible_*` | Three auto rows: compressible k-ω, k-ε, and Smagorinsky; **subtract** mode. |
 
@@ -114,6 +114,8 @@ If you still want implied constitutive checks for unsupported laws, add explicit
 ## User functions for constitutive terms (Python-only)
 
 If a law-linked implied constitutive row requires inputs like **`k`**, **`rho`**, or **`mu`**, you can supply them either as arrays/scalars in `state_pred` / `constants`, **or** as Python callables keyed by the **output state key** via `ResidualEngine(user_fns=...)`.
+
+For **Burgers**, the law-linked row is **`kinematic_viscosity_from_re`** with **`output_key="nu"`**. Catalog **ν** needs **`U`**, **`L`**, and **`re`** (resolved through the law `state_map`, e.g. `"re": "Re"`). The implied side is recovered from the velocity fields alone via last-axis projection; you do **not** need **`mu`** or local **`|u|`** for that audit.
 
 Example: let Moju materialize `k`, `rho`, and `alpha` from `T` (so the Fourier implied `thermal_diffusivity` check can run without you precomputing those fields):
 

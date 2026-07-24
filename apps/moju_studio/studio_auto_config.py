@@ -82,6 +82,7 @@ MODEL_DEFAULT_OUTPUT_KEY: Dict[str, str] = {
     "boussinesq_rho": "rho",
     "thermal_diffusivity": "alpha",
     "kinematic_viscosity": "nu",
+    "kinematic_viscosity_from_re": "nu",
     "mass_diffusivity": "D",
     "wave_speed_from_st": "c",
     "dynamic_viscosity_from_re": "mu",

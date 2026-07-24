@@ -6,7 +6,8 @@ Shows:
   - NN u(params,t,x)
   - Operators: u_t, u_x, u_xx
   - Laws.burgers_equation residual
-  - Law-linked implied ``re``: catalog Groups.re vs Re from momentum-balance rearrangement (needs rho, mu in state)
+  - Law-linked implied kinematic viscosity: catalog Models.kinematic_viscosity_from_re
+    vs ν̃ from projecting (u_t + u·∇u) onto ∇²u (needs U, L, re in state / law map)
   - Required keys introspection
   - audit() PDF export (included in core moju)
 """

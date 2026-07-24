@@ -213,26 +213,20 @@ def implied_mu_stokes_flow_torch(law_sm: Dict[str, str]) -> Callable[..., Any]:
     return fn
 
 
-def implied_mu_burgers_equation_torch(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Recover dynamic viscosity from Burgers' implied kinematic viscosity projection."""
+def implied_nu_burgers_equation_torch(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """Recover kinematic viscosity ν by projecting inertial terms onto ``u_laplacian``."""
 
     def fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[torch.Tensor]:
         u_t = _val_t(state, constants, law_sm, "u_t")
         u = _val_t(state, constants, law_sm, "u")
         u_grad = _val_t(state, constants, law_sm, "u_grad")
         u_lap = _val_t(state, constants, law_sm, "u_laplacian")
-        U_ref = _val_t(state, constants, law_sm, "U")
-        Llaw = _val_t(state, constants, law_sm, "L")
-        rho = _sc_t(state, constants, "rho")
-        L = _sc_t(state, constants, "L")
-        if any(v is None for v in [u_t, u, u_grad, u_lap, U_ref, Llaw, rho, L]):
+        if any(v is None for v in [u_t, u, u_grad, u_lap]):
             return None
         u_t2 = _as_t(u)
         adv = torch.einsum("...ij,...j->...i", _as_t(u_grad), u_t2)
         inertial = _as_t(u_t) + adv
-        nu = _project_scalar_coefficient_t(inertial, u_lap)
-        numerator = nu * _as_t(rho) * _vec_norm_last_t(u_t2) * _as_t(L)
-        return _safe_ratio_t(numerator, _as_t(U_ref) * _as_t(Llaw))
+        return _project_scalar_coefficient_t(inertial, u_lap)
 
     return fn
 
@@ -385,11 +379,11 @@ _LAW_IMPLIED_ROWS_TORCH: Dict[str, List[Dict[str, Any]]] = {
     "burgers_equation": [
         {
             "category": "constitutive",
-            "name": "dynamic_viscosity_from_re",
-            "output_key": "mu",
-            "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
-            "implied_maker_torch": implied_mu_burgers_equation_torch,
-            "residual_basename": "dynamic_viscosity_from_re/law_burgers_equation",
+            "name": "kinematic_viscosity_from_re",
+            "output_key": "nu",
+            "state_map": {"U": "U", "L": "L", "re": "re"},
+            "implied_maker_torch": implied_nu_burgers_equation_torch,
+            "residual_basename": "kinematic_viscosity_from_re/law_burgers_equation",
             "include_ref_delta": True,
         },
     ],
@@ -556,10 +550,14 @@ def merge_law_implied_audit_specs_torch(
             sub_maker = row.get("implied_maker_torch")
             if sub_maker is None:
                 continue
+            raw_sm = dict(row["state_map"])
+            resolved_sm = {
+                str(arg): str(law_sm.get(str(arg), src)) for arg, src in raw_sm.items()
+            }
             d: Dict[str, Any] = {
                 "name": row["name"],
                 "output_key": row["output_key"],
-                "state_map": dict(row["state_map"]),
+                "state_map": resolved_sm,
                 "residual_basename": basename,
                 "include_ref_delta": bool(row.get("include_ref_delta", True)),
             }

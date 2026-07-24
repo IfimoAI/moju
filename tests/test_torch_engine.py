@@ -446,6 +446,15 @@ class TestMergeLawImpliedAuditSpecsTorch:
         specs = merge_law_implied_audit_specs_torch(laws)
         assert any(s["name"] == "dynamic_viscosity_from_re" for s in specs)
 
+    def test_burgers_returns_nu_spec(self):
+        laws = [{"name": "burgers_equation", "state_map": {"re": "Re", "U": "U", "L": "L"}}]
+        specs = merge_law_implied_audit_specs_torch(laws)
+        assert any(s["name"] == "kinematic_viscosity_from_re" for s in specs)
+        burgers = next(s for s in specs if s["name"] == "kinematic_viscosity_from_re")
+        assert burgers["output_key"] == "nu"
+        assert burgers["state_map"]["re"] == "Re"
+        assert burgers["residual_basename"] == "kinematic_viscosity_from_re/law_burgers_equation"
+
 
 class TestTorchImpliedFunctions:
     def test_fourier_implied_alpha_basic(self):
