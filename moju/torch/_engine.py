@@ -117,8 +117,8 @@ class TorchResidualEngine:
         Auto-prepend implied constitutive audit rows for supported laws
         (default ``True``).
     path_b_fill:
-        Auto-fill missing spatial derivatives via ``torch.gradient`` before
-        law evaluation (default ``False``).
+        Auto-fill missing spatial derivatives before law evaluation (default ``False``).
+        Use ``path_b_diff_method=\"spectral\"`` with ``path_b_periodic=True`` for FFT spatial fill.
     best_effort:
         If ``True`` (default), skip laws / audits whose required state keys
         are missing.  If ``False``, raise ``KeyError`` on any missing key.
@@ -148,6 +148,8 @@ class TorchResidualEngine:
         user_fns: Optional[Dict[str, Callable[..., Any]]] = None,
         law_implied_audits: bool = True,
         path_b_fill: bool = False,
+        path_b_diff_method: str = "fd",
+        path_b_periodic: bool = False,
         best_effort: bool = True,
         law_scale_mode: str = "auto",
         state_units: str = "nondimensional",
@@ -162,6 +164,8 @@ class TorchResidualEngine:
         self._derived_state_chain: List[Dict[str, Any]] = list(derived_state_chain or [])
         self._user_fns: Dict[str, Callable[..., Any]] = dict(user_fns or {})
         self._path_b_fill = path_b_fill
+        self._path_b_diff_method = str(path_b_diff_method)
+        self._path_b_periodic = bool(path_b_periodic)
         self._best_effort = best_effort
 
         # ------------------------------------------------------------------
@@ -334,10 +338,14 @@ class TorchResidualEngine:
             state = dimensional_to_nd_torch(state, nd_scales, warn_unknown=False)
             merged = {**self._constants, **state}
 
-        # 5. Path-B FD fill
+        # 5. Path-B derivative fill (FD or spectral spatial)
         if self._path_b_fill:
             state, pb_warns = fill_path_b_derivatives_torch(
-                state, laws_spec=self._laws_spec, constants=self._constants
+                state,
+                laws_spec=self._laws_spec,
+                constants=self._constants,
+                diff_method=self._path_b_diff_method,  # type: ignore[arg-type]
+                periodic=self._path_b_periodic,
             )
             for w in pb_warns:
                 warnings.warn(f"TorchResidualEngine path_b: {w}", UserWarning, stacklevel=2)

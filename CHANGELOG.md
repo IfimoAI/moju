@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 - **`Models.kinematic_viscosity_from_re(U, L, re)`** — catalog \(\nu = U L / \mathrm{Re}\) (same coefficient as `Laws.burgers_equation`).
+- **Spectral Path B spatial derivatives** — opt-in periodic Fourier fill via `PathBGridConfig(diff_method="spectral", periodic=True)` or `fill_path_b_spectral(...)`. Reuses `LAW_FD_RECIPES`; temporal `dt`/`dtt` remain FD. Bare `auto_path_b_derivatives=True` stays FD. Torch: `fill_path_b_derivatives_torch(..., diff_method="spectral", periodic=True)` and `TorchResidualEngine(path_b_diff_method=..., path_b_periodic=...)`. Docs: `docs/path_b_derivatives.md`. Cookbook: `examples/cookbook_path_b_spectral_burgers.py`.
 
 ### Changed
 

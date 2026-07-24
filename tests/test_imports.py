@@ -101,6 +101,7 @@ def test_monitor_module_has_all():
         "keys_produced_by_chain",
         "PathBGridConfig",
         "fill_path_b_derivatives",
+        "fill_path_b_spectral",
         "fill_law_fd_from_primitives",
         "list_law_fd_supported_laws",
         "effective_audit_specs_for_fragment",

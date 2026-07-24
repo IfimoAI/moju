@@ -1,14 +1,18 @@
 """
-Opt-in finite-difference fill for Path B: **law** inputs (gradients, Laplacians, etc.).
+Opt-in Path B fill for **law** inputs (gradients, Laplacians, etc.).
 
 When ``fill_law_recipes`` is True, fills registered ``Laws.*`` arguments via
-``law_fd_recipes``. Does not overwrite existing non-None entries in ``state_pred``.
+``law_fd_recipes``. Spatial derivatives use finite differences by default, or
+periodic Fourier (FFT) differentiation when ``PathBGridConfig.diff_method=\"spectral\"``
+and ``periodic=True``. Temporal ``dt`` / ``dtt`` always use FD.
+
+Does not overwrite existing non-None entries in ``state_pred``.
 Use with structured grids; see ``PathBGridConfig`` for layout conventions.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import jax
@@ -24,6 +28,12 @@ class PathBGridConfig:
       and differenced with 1D axes; general curvilinear mesh coordinates are not supported for FD.
     - **separable**: ``x`` length ``nx``, ``y`` length ``ny``, ``z`` length ``nz``; field shape
       ``(nx,)``, ``(nx, ny)``, or ``(nx, ny, nz)``. Passed as 1D spacing vectors to ``jnp.gradient``.
+
+    ``diff_method``:
+      - ``\"fd\"`` (default): central finite differences (``jnp.gradient``).
+      - ``\"spectral\"``: periodic Fourier spatial derivatives (requires ``periodic=True`` and
+        uniform spacing). Temporal fill stays FD. Never enabled by bare
+        ``auto_path_b_derivatives=True`` — pass an explicit ``PathBGridConfig``.
     """
 
     layout: Literal["meshgrid", "separable"] = "meshgrid"
@@ -33,6 +43,8 @@ class PathBGridConfig:
     key_y: str = "y"
     key_z: str = "z"
     key_t: str = "t"
+    diff_method: Literal["fd", "spectral"] = "fd"
+    periodic: bool = False
 
 
 def _merged(state: Dict[str, Any], constants: Dict[str, Any]) -> Dict[str, Any]:
@@ -403,6 +415,13 @@ def _fill_spatial_derivative_steady(
         warnings.append(f"skip d/d{deriv_axis}: spatial_dimension {dim} < axis index")
         return None
 
+    if cfg.diff_method == "spectral":
+        from moju.monitor.path_b_spectral import spectral_grad_along_named_axis
+
+        return spectral_grad_along_named_axis(
+            K, deriv_axis, cfg, x, y, z, dim, warnings
+        )
+
     if cfg.layout == "separable":
         try:
             coords = _separable_1d_coords(K.shape, x, y, z, dim)
@@ -503,11 +522,18 @@ def fill_path_b_derivatives(
     ``Laws.*`` inputs (gradients, Laplacians, time derivatives) from primitive fields on the
     same grid; see ``moju.monitor.law_fd_recipes``.
 
-    ``constitutive_audit`` is accepted for API compatibility but is not used for finite-difference fill.
+    Spatial fill uses ``grid.diff_method`` (``\"fd\"`` default, or ``\"spectral\"`` with
+    ``periodic=True``). Temporal ``dt`` / ``dtt`` always use FD.
+
+    ``constitutive_audit`` is accepted for API compatibility but is not used for derivative fill.
 
     Returns ``(new_state, warnings)``.
     """
     cfg = grid or PathBGridConfig()
+    if cfg.diff_method == "spectral":
+        from moju.monitor.path_b_spectral import validate_spectral_grid_config
+
+        validate_spectral_grid_config(cfg)
     c = dict(constants or {})
     state: Dict[str, Any] = dict(state_pred) if copy else state_pred
     warnings: List[str] = []
@@ -527,7 +553,36 @@ def fill_path_b_derivatives(
     return state, warnings
 
 
+def fill_path_b_spectral(
+    state_pred: Dict[str, Any],
+    *,
+    constitutive_audit: Sequence[Dict[str, Any]] = (),
+    laws_spec: Sequence[Dict[str, Any]] = (),
+    constants: Optional[Dict[str, Any]] = None,
+    grid: Optional[PathBGridConfig] = None,
+    copy: bool = True,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """
+    Path B law-input fill with **periodic Fourier** spatial derivatives.
+
+    Sets ``diff_method=\"spectral\"`` and ``periodic=True`` on ``grid`` (or a default
+    ``PathBGridConfig``) and always enables law recipes. Temporal derivatives remain FD.
+    """
+    base = grid or PathBGridConfig()
+    cfg = replace(base, diff_method="spectral", periodic=True)
+    return fill_path_b_derivatives(
+        state_pred,
+        constitutive_audit=constitutive_audit,
+        laws_spec=laws_spec,
+        constants=constants,
+        grid=cfg,
+        copy=copy,
+        fill_law_recipes=True,
+    )
+
+
 __all__ = [
     "PathBGridConfig",
     "fill_path_b_derivatives",
+    "fill_path_b_spectral",
 ]

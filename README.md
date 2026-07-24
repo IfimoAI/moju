@@ -99,7 +99,7 @@ What happens here:
 - `moju.piratio.Groups` - dimensionless quantities such as `re`, `pr`, `pe`, `fo`, `ma`, and `bi`, materialized into state for laws.
 - `moju.piratio.Laws` - governing-equation residuals for heat, diffusion, wave, momentum, mass, Darcy/Brinkman, Poisson, Burgers, and related equations.
 - `moju.piratio.Operators` - JAX autodiff helpers such as gradients, divergence, Laplacian, curl, and time derivatives.
-- `moju.monitor.ResidualEngine` - runs laws, groups, constitutive audits, optional data comparisons, and records audit logs. With default **`law_implied_audits=True`**, selected laws prepend constitutive implied rows (e.g. Fourier → `thermal_diffusivity`; **Burgers → `kinematic_viscosity_from_re`** with implied **ν**).
+- `moju.monitor.ResidualEngine` - runs laws, groups, constitutive audits, optional data comparisons, and records audit logs. With default **`law_implied_audits=True`**, selected laws prepend constitutive implied rows (e.g. Fourier → `thermal_diffusivity`; **Burgers → `kinematic_viscosity_from_re`** with implied **ν**). Path B can optionally fill missing law derivatives with **FD** (`auto_path_b_derivatives=True`) or **periodic spectral** (`PathBGridConfig(diff_method="spectral", periodic=True)` / `fill_path_b_spectral`); see [`docs/path_b_derivatives.md`](https://github.com/IfimoAI/moju/blob/main/docs/path_b_derivatives.md).
 - `moju.monitor.audit` - converts logs into R_norm, admissibility scores, category summaries, and report data.
 - `moju.monitor.visualize` - Plotly dashboards for training/eval residuals, category scores, spatial fields, and constitutive diagnostics. The constitutive row shows a **Divergence** heatmap (normalised as `(model − implied) / (|model| + ε)`) alongside a **Constitutive Consistency** line plot with spatially varying **±0.1 % / ±0.5 % / ±1 %** acceptability bands and tier boundary markers centred on the model prediction.
 
@@ -129,7 +129,7 @@ pip install "moju[torch]"
 
 `moju.torch` provides:
 
-- `TorchResidualEngine` - PyTorch-facing residual engine with parity-oriented behavior.
+- `TorchResidualEngine` - PyTorch-facing residual engine with parity-oriented behavior. Optional Path B fill: `path_b_fill=True` with `path_b_diff_method="fd"|"spectral"` and `path_b_periodic` (spectral requires periodic grids; see [`docs/path_b_derivatives.md`](https://github.com/IfimoAI/moju/blob/main/docs/path_b_derivatives.md)).
 - `build_loss_torch` and `r_eff_scalar_torch` - Torch-native R_eff loss helpers.
 - `wrap_law_torch` - wrap JAX `Laws.*` functions for use with Torch tensors through `jax2torch`.
 - Torch-native nondimensionalization helpers.
@@ -152,6 +152,7 @@ Training demos that use **optax** (e.g. [`examples/slab_cooling_demo.py`](https:
 
 - GitHub Pages source and API overview: [`docs/`](https://github.com/IfimoAI/moju/tree/main/docs)
 - Training vs eval behavior: [`docs/monitor_training_vs_eval.md`](https://github.com/IfimoAI/moju/blob/main/docs/monitor_training_vs_eval.md)
+- Path B FD / spectral derivative fill: [`docs/path_b_derivatives.md`](https://github.com/IfimoAI/moju/blob/main/docs/path_b_derivatives.md)
 - Law-linked constitutive implied audits: [`docs/law_implied_audits.md`](https://github.com/IfimoAI/moju/blob/main/docs/law_implied_audits.md)
 - Moju Studio: [`apps/moju_studio/README.md`](https://github.com/IfimoAI/moju/blob/main/apps/moju_studio/README.md)
 - Versioning policy: [`VERSIONING.md`](https://github.com/IfimoAI/moju/blob/main/VERSIONING.md)
@@ -163,6 +164,7 @@ Training demos that use **optax** (e.g. [`examples/slab_cooling_demo.py`](https:
 - Burgers end-to-end (law + implied **ν**): [`examples/monitor_burgers_end_to_end.py`](https://github.com/IfimoAI/moju/blob/main/examples/monitor_burgers_end_to_end.py)
 - CFD snapshot audit: [`examples/cfd_snapshot_cookbook_heat_1d.py`](https://github.com/IfimoAI/moju/blob/main/examples/cfd_snapshot_cookbook_heat_1d.py)
 - Path B finite-difference law fill: [`examples/cookbook_path_b_fd_law_laplace.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_path_b_fd_law_laplace.py)
+- Path B spectral (periodic) Burgers fill: [`examples/cookbook_path_b_spectral_burgers.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_path_b_spectral_burgers.py)
 - Constitutive divergence dashboard: [`examples/cookbook_constitutive_divergence.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_constitutive_divergence.py)
 - Torch interop: [`scripts/torch_laws_jax2torch_example.py`](https://github.com/IfimoAI/moju/blob/main/scripts/torch_laws_jax2torch_example.py)
 

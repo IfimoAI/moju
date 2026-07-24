@@ -49,7 +49,11 @@ from moju.monitor.model_derived_registry import (
     collect_group_input_state_keys,
     enrich_derived_state_from_constitutive_audits,
 )
-from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
+from moju.monitor.path_b_derivatives import (
+    PathBGridConfig,
+    fill_path_b_derivatives,
+    fill_path_b_spectral,
+)
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
 
 __all__ = [
@@ -79,6 +83,7 @@ __all__ = [
     "keys_produced_by_chain",
     "PathBGridConfig",
     "fill_path_b_derivatives",
+    "fill_path_b_spectral",
     "fill_law_fd_from_primitives",
     "list_law_fd_supported_laws",
     "effective_audit_specs_for_fragment",

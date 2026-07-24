@@ -124,6 +124,37 @@ If you do use Path B finite-difference inference (`auto_path_b_derivatives=True`
 
 Also provide the primitive field(s) used by your selected law(s), such as `T` or `u`, plus any required material/property terms not inferable from your supplied state/constants.
 
+### Path B derivative backends (FD vs spectral)
+
+| Source | When to use |
+|--------|-------------|
+| **Path A autodiff** | Live PINN / differentiable `state_builder` |
+| **Path B FD** (`auto_path_b_derivatives=True` or `PathBGridConfig(diff_method="fd")`) | Structured field dumps; default Path B fill |
+| **Path B spectral** (`PathBGridConfig(diff_method="spectral", periodic=True)` or `fill_path_b_spectral`) | Periodic Fourier-friendly grids (e.g. FNO); spatial only — `dt`/`dtt` stay FD |
+| **Precomputed in `state_pred`** | Prefer when the surrogate already provides spectral ∂; Moju never overwrites non-`None` keys |
+
+Spectral Path B requires **uniform** spacing and `periodic=True`. It is never activated by bare `auto_path_b_derivatives=True`.
+
+Full API, Torch parity, requirements, and examples: **[path_b_derivatives.md](path_b_derivatives.md)**.
+
+```python
+from moju.monitor import PathBGridConfig, fill_path_b_spectral
+
+# Periodic Fourier spatial fill (temporal dt/dtt stay FD if filled)
+state, warns = fill_path_b_spectral(
+    {"u": u, "x": x},
+    laws_spec=laws,
+    constants=constants,
+    grid=PathBGridConfig(spatial_dimension=1, layout="separable"),
+)
+
+# Or on ResidualEngine — must pass PathBGridConfig explicitly for spectral
+grid = PathBGridConfig(diff_method="spectral", periodic=True, spatial_dimension=1, layout="separable")
+engine.compute_residuals(state_pred, auto_path_b_derivatives=grid, fill_law_fd=True)
+```
+
+Cookbook: [`examples/cookbook_path_b_spectral_burgers.py`](../examples/cookbook_path_b_spectral_burgers.py).
+
 ## Training (`run_mode="training"`)
 
 Use inside optimization loops.

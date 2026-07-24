@@ -115,6 +115,15 @@ flowchart TB
       <li><strong>visualize</strong> - Plotly dashboard for residuals, category scores, spatial fields, and constitutive divergence and consistency when closure debug data is available. The constitutive row includes a Divergence heatmap (normalised as <code>(model &minus; implied) / (|model| + &epsilon;)</code>) and a Constitutive Consistency line plot with spatially varying &plusmn;0.1&thinsp;%&thinsp;/&thinsp;&plusmn;0.5&thinsp;%&thinsp;/&thinsp;&plusmn;1&thinsp;% acceptability bands and tier boundary markers centred on the model prediction.</li>
     </ul>
     <p>
+      Path B can optionally fill missing law inputs from primitives on a structured grid.
+      Default fill is finite-difference (<code>auto_path_b_derivatives=True</code>).
+      For <strong>periodic</strong> Fourier-friendly fields (e.g. FNO grids), use
+      <code>PathBGridConfig(diff_method="spectral", periodic=True)</code> or
+      <code>fill_path_b_spectral</code>; temporal <code>dt</code>/<code>dtt</code> remain FD.
+      Bare <code>auto_path_b_derivatives=True</code> never enables spectral.
+      See <a href="../path_b_derivatives.md">path_b_derivatives.md</a>.
+    </p>
+    <p>
       Use <a href="../monitor_training_vs_eval.md">monitor_training_vs_eval.md</a> for
       run-mode details and <a href="../law_implied_audits.md">law_implied_audits.md</a>
       for the law-linked constitutive audit registry.
@@ -139,6 +148,7 @@ flowchart TB
       <li><code>examples/slab_cooling_demo.py</code> - full 1D slab cooling demo.</li>
       <li><code>examples/cfd_snapshot_cookbook_heat_1d.py</code> - xarray snapshot to eval audit.</li>
       <li><code>examples/cookbook_path_b_fd_law_laplace.py</code> - optional Path B finite-difference fill.</li>
+      <li><code>examples/cookbook_path_b_spectral_burgers.py</code> - Path B periodic spectral fill for Burgers.</li>
       <li><code>examples/cookbook_constitutive_divergence.py</code> - constitutive divergence dashboard.</li>
       <li><code>scripts/torch_laws_jax2torch_example.py</code> - basic Torch interop.</li>
     </ul>
