@@ -23,9 +23,10 @@ is what is scored.
    or tensor valued and cannot be inverted to a scalar coefficient by safe division.  The
    helper returns the law-implied vector/tensor field directly (e.g.
    ``viscous_acceleration = u_t + (u·grad) u + grad p`` from the momentum balance) so the
-   engine can compute element-wise ``Models.F(pred) - implied``.  μ rows (NS / Stokes /
-   Burgers) use :func:`_project_scalar_coefficient` (LSQ projection onto ``u_laplacian``)
-   to recover a per-point scalar from a vector balance.
+   engine can compute element-wise ``Models.F(pred) - implied``.  μ rows (NS / Stokes) and
+   Burgers **ν** use :func:`_project_scalar_coefficient` (LSQ projection onto ``u_laplacian``)
+   to recover a per-point scalar from a vector balance; Burgers compares that
+   ``nu_tilde`` to ``Models.kinematic_viscosity_from_re``.
 
 Both flavours feed into the same fractional residual via
 :func:`moju.monitor.closure_registry.compute_implied_delta_with_debug`, producing an array
@@ -236,28 +237,24 @@ def implied_mu_stokes_flow(law_sm: Dict[str, str]) -> Callable[..., Any]:
     return implied_fn
 
 
-def implied_mu_burgers_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Recover dynamic viscosity from Burgers' implied kinematic viscosity projection."""
+def implied_nu_burgers_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
+    """Recover kinematic viscosity ν by projecting inertial terms onto ``u_laplacian``.
+
+    Same last-axis LSQ projection as the former μ path, but returns ν̃ directly
+    (no ρ·|u| conversion). Works for vector Burgers with last axis d ∈ {1,2,3}.
+    """
 
     def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
         u_t = _val(state, constants, law_sm, "u_t")
         u = _val(state, constants, law_sm, "u")
         u_grad = _val(state, constants, law_sm, "u_grad")
         u_lap = _val(state, constants, law_sm, "u_laplacian")
-        U = _val(state, constants, law_sm, "U")
-        Llaw = _val(state, constants, law_sm, "L")
-        rho = _state_or_const(state, constants, "rho")
-        L = _state_or_const(state, constants, "L")
         if u_t is None or u is None or u_grad is None or u_lap is None:
-            return None
-        if U is None or Llaw is None or rho is None or L is None:
             return None
         u_a = jnp.asarray(u)
         adv = jnp.einsum("...ij,...j->...i", jnp.asarray(u_grad), u_a)
         inertial = jnp.asarray(u_t) + adv
-        nu = _project_scalar_coefficient(inertial, u_lap)
-        numerator = nu * jnp.asarray(rho) * _vec_norm_last(u_a) * jnp.asarray(L)
-        return _safe_ratio(numerator, jnp.asarray(U) * jnp.asarray(Llaw))
+        return _project_scalar_coefficient(inertial, u_lap)
 
     return implied_fn
 
@@ -408,11 +405,11 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
     "burgers_equation": [
         {
             "category": "constitutive",
-            "name": "dynamic_viscosity_from_re",
-            "output_key": "mu",
-            "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
-            "implied_maker": implied_mu_burgers_equation,
-            "residual_basename": "dynamic_viscosity_from_re/law_burgers_equation",
+            "name": "kinematic_viscosity_from_re",
+            "output_key": "nu",
+            "state_map": {"U": "U", "L": "L", "re": "re"},
+            "implied_maker": implied_nu_burgers_equation,
+            "residual_basename": "kinematic_viscosity_from_re/law_burgers_equation",
             "include_ref_delta": True,
         },
     ],
@@ -714,10 +711,16 @@ def merge_law_implied_audit_specs(
                 raise ValueError(
                     f"law_implied row for {law_name!r} missing implied_maker"
                 )
+            # Resolve catalog state keys through the law state_map when present
+            # (e.g. law maps ``re`` → ``Re`` so Models.* looks up ``Re``).
+            raw_sm = dict(row["state_map"])
+            resolved_sm = {
+                str(arg): str(law_sm.get(str(arg), src)) for arg, src in raw_sm.items()
+            }
             d: Dict[str, Any] = {
                 "name": row["name"],
                 "output_key": row["output_key"],
-                "state_map": dict(row["state_map"]),
+                "state_map": resolved_sm,
                 "residual_basename": basename,
                 "include_ref_delta": bool(row.get("include_ref_delta", True)),
             }

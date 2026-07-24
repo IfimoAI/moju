@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`Models.kinematic_viscosity_from_re(U, L, re)`** — catalog \(\nu = U L / \mathrm{Re}\) (same coefficient as `Laws.burgers_equation`).
+
+### Changed
+
+- **Burgers law-linked implied audit** now uses **`kinematic_viscosity_from_re`** (implied **ν** via last-axis LSQ projection) instead of **`dynamic_viscosity_from_re`**. Residual key: `constitutive/kinematic_viscosity_from_re/law_burgers_equation/implied_delta`. NS/Stokes μ implied rows are unchanged.
+
+### Breaking
+
+- Burgers implied constitutive key renamed from `.../dynamic_viscosity_from_re/law_burgers_equation/implied_delta` to `.../kinematic_viscosity_from_re/law_burgers_equation/implied_delta`. Update callers that hard-code the old basename.
+
 ## [1.1.2] - 2026-06-03
 
 ### Fixed

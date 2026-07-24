@@ -125,6 +125,16 @@ def _closure_dynamic_viscosity_from_re(state: Dict, constants: Dict) -> Optional
     )
 
 
+def _closure_kinematic_viscosity_from_re(state: Dict, constants: Dict) -> Optional[Any]:
+    if not _all_present(state, constants, ("nu", "U", "L", "re")):
+        return None
+    return _val(state, constants, "nu") - Models.kinematic_viscosity_from_re(
+        _val(state, constants, "U"),
+        _val(state, constants, "L"),
+        _val(state, constants, "re"),
+    )
+
+
 def _closure_scalar_diffusivity_from_pe(state: Dict, constants: Dict) -> Optional[Any]:
     if not _all_present(state, constants, ("kappa", "u", "L", "pe")):
         return None
@@ -208,6 +218,7 @@ CONSTITUTIVE_REGISTRY: Dict[str, List[Tuple[str, Callable[[Dict, Dict], Any]]]] 
     "boussinesq_rho": [("direct_rho", _closure_boussinesq_rho)],
     "thermal_diffusivity": [("direct_alpha", _closure_thermal_diffusivity)],
     "kinematic_viscosity": [("direct_nu", _closure_kinematic_viscosity)],
+    "kinematic_viscosity_from_re": [("direct_nu", _closure_kinematic_viscosity_from_re)],
     "mass_diffusivity": [("direct_D", _closure_mass_diffusivity)],
     "wave_speed_from_st": [("direct_c", _closure_wave_speed_from_st)],
     "dynamic_viscosity_from_re": [("direct_mu", _closure_dynamic_viscosity_from_re)],

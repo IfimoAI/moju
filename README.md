@@ -95,11 +95,11 @@ What happens here:
 
 ## Core Concepts
 
-- `moju.piratio.Models` - constitutive relationships such as viscosity, density, diffusivity, wave speed, and turbulence closures.
+- `moju.piratio.Models` - constitutive relationships such as viscosity, density, diffusivity, wave speed, and turbulence closures (including `kinematic_viscosity_from_re` for Burgers).
 - `moju.piratio.Groups` - dimensionless quantities such as `re`, `pr`, `pe`, `fo`, `ma`, and `bi`, materialized into state for laws.
 - `moju.piratio.Laws` - governing-equation residuals for heat, diffusion, wave, momentum, mass, Darcy/Brinkman, Poisson, Burgers, and related equations.
 - `moju.piratio.Operators` - JAX autodiff helpers such as gradients, divergence, Laplacian, curl, and time derivatives.
-- `moju.monitor.ResidualEngine` - runs laws, groups, constitutive audits, optional data comparisons, and records audit logs.
+- `moju.monitor.ResidualEngine` - runs laws, groups, constitutive audits, optional data comparisons, and records audit logs. With default **`law_implied_audits=True`**, selected laws prepend constitutive implied rows (e.g. Fourier → `thermal_diffusivity`; **Burgers → `kinematic_viscosity_from_re`** with implied **ν**).
 - `moju.monitor.audit` - converts logs into R_norm, admissibility scores, category summaries, and report data.
 - `moju.monitor.visualize` - Plotly dashboards for training/eval residuals, category scores, spatial fields, and constitutive diagnostics. The constitutive row shows a **Divergence** heatmap (normalised as `(model − implied) / (|model| + ε)`) alongside a **Constitutive Consistency** line plot with spatially varying **±0.1 % / ±0.5 % / ±1 %** acceptability bands and tier boundary markers centred on the model prediction.
 
@@ -160,6 +160,7 @@ Training demos that use **optax** (e.g. [`examples/slab_cooling_demo.py`](https:
 ## Examples
 
 - Full 1D slab cooling demo: [`examples/slab_cooling_demo.py`](https://github.com/IfimoAI/moju/blob/main/examples/slab_cooling_demo.py)
+- Burgers end-to-end (law + implied **ν**): [`examples/monitor_burgers_end_to_end.py`](https://github.com/IfimoAI/moju/blob/main/examples/monitor_burgers_end_to_end.py)
 - CFD snapshot audit: [`examples/cfd_snapshot_cookbook_heat_1d.py`](https://github.com/IfimoAI/moju/blob/main/examples/cfd_snapshot_cookbook_heat_1d.py)
 - Path B finite-difference law fill: [`examples/cookbook_path_b_fd_law_laplace.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_path_b_fd_law_laplace.py)
 - Constitutive divergence dashboard: [`examples/cookbook_constitutive_divergence.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_constitutive_divergence.py)

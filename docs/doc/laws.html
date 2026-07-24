@@ -128,7 +128,7 @@
     <div class="api-block">
       <div class="name">Laws.burgers_equation(u_t, u, u_grad, u_laplacian, re, U, L)</div>
       <div class="sig">∂u/∂t + (u·∇)u − ν ∇²u = 0, ν = U·L/Re</div>
-      <div class="desc">re from Groups.re(). U, L scale. Simplified turbulence, shocks.</div>
+      <div class="desc">Vector form (last axis d = 1/2/3). re from Groups.re(). With default <code>law_implied_audits=True</code>, Moju prepends constitutive implied <strong>ν</strong> via <code>Models.kinematic_viscosity_from_re</code> (LSQ projection of inertial terms onto ∇²u). Residual key: <code>constitutive/kinematic_viscosity_from_re/law_burgers_equation/implied_delta</code>. See <a href="../law_implied_audits.md">law_implied_audits.md</a>.</div>
     </div>
     <div class="api-block">
       <div class="name">Laws.schrodinger_steady(psi_laplacian, V, E, psi, sch_kin_l2)</div>

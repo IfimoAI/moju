@@ -45,6 +45,16 @@
       <div class="sig">ν = μ / ρ</div>
       <div class="desc">mu [Pa·s], rho [kg/m³] → [m²/s].</div>
     </div>
+    <div class="api-block">
+      <div class="name">Models.kinematic_viscosity_from_re(U, L, re)</div>
+      <div class="sig">ν = U L / Re</div>
+      <div class="desc">Same coefficient as <code>Laws.burgers_equation</code>. Used by the Burgers law-linked implied audit (<code>constitutive/kinematic_viscosity_from_re/law_burgers_equation/implied_delta</code>). U [m/s], L [m], re dimensionless → [m²/s].</div>
+    </div>
+    <div class="api-block">
+      <div class="name">Models.dynamic_viscosity_from_re(rho, u, L, re)</div>
+      <div class="sig">μ = ρ |u| L / Re</div>
+      <div class="desc">Local-speed form. Used by Navier–Stokes / Stokes law-linked implied μ audits (not Burgers). Returns [Pa·s].</div>
+    </div>
 
     <h2>Density and equation of state</h2>
 

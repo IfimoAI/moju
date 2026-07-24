@@ -282,16 +282,14 @@ def test_advection_diffusion_implied_kappa_near_zero():
     assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-6
 
 
-def test_ns_stokes_burgers_implied_mu_balance_near_zero():
-    checks = [
+def test_ns_stokes_implied_mu_and_burgers_implied_nu_balance_near_zero():
+    ns_stokes = [
         ("momentum_navier_stokes", {"u_t": "u_t", "u": "u", "u_grad": "u_grad", "p_grad": "p_grad", "u_laplacian": "u_lap", "re": "re"},
          "dynamic_viscosity_from_re/law_momentum_navier_stokes/implied_delta"),
         ("stokes_flow", {"p_grad": "p_grad", "u_laplacian": "u_lap", "re": "re"},
          "dynamic_viscosity_from_re/law_stokes_flow/implied_delta"),
-        ("burgers_equation", {"u_t": "u_t", "u": "u", "u_grad": "u_grad", "u_laplacian": "u_lap", "re": "re", "U": "U", "L": "L"},
-         "dynamic_viscosity_from_re/law_burgers_equation/implied_delta"),
     ]
-    for law_name, sm, key in checks:
+    for law_name, sm, key in ns_stokes:
         common = {
             "u": jnp.array([2.0, 0.0]),
             "u_grad": jnp.array([[0.0, 0.0], [0.0, 0.0]]),
@@ -302,15 +300,117 @@ def test_ns_stokes_burgers_implied_mu_balance_near_zero():
             "L": jnp.array(1.0),
             "U": jnp.array(1.0),
             "mu": jnp.array(2.0),
+            "u_t": jnp.array([0.0, 0.0]),
         }
-        if law_name == "burgers_equation":
-            common["u_t"] = jnp.array([2.0, 0.0])
-        else:
-            common["u_t"] = jnp.array([0.0, 0.0])
         engine = ResidualEngine(laws=[{"name": law_name, "state_map": sm}], law_implied_audits=True)
         r = engine.compute_residuals(dict(common))
         assert key in r["constitutive"]
         assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-5
+
+    # Burgers: ν_cat = U L / Re = 1; inertial = ν * u_lap with ν=1 → δ≈0
+    burgers_sm = {
+        "u_t": "u_t",
+        "u": "u",
+        "u_grad": "u_grad",
+        "u_laplacian": "u_lap",
+        "re": "re",
+        "U": "U",
+        "L": "L",
+    }
+    burgers_state = {
+        "u": jnp.array([2.0, 0.0]),
+        "u_grad": jnp.array([[0.0, 0.0], [0.0, 0.0]]),
+        "u_lap": jnp.array([2.0, 0.0]),
+        "u_t": jnp.array([2.0, 0.0]),  # inertial = u_t (+ zero adv) = 1 * u_lap
+        "re": jnp.array(1.0),
+        "U": jnp.array(1.0),
+        "L": jnp.array(1.0),
+        "nu": jnp.array(1.0),
+    }
+    key_b = "kinematic_viscosity_from_re/law_burgers_equation/implied_delta"
+    engine_b = ResidualEngine(
+        laws=[{"name": "burgers_equation", "state_map": burgers_sm}],
+        law_implied_audits=True,
+    )
+    r_b = engine_b.compute_residuals(dict(burgers_state))
+    assert key_b in r_b["constitutive"]
+    assert float(jnp.max(jnp.abs(r_b["constitutive"][key_b]))) < 1e-5
+
+
+def test_burgers_implied_nu_2d_vector_projection():
+    """2-component velocity: last-axis LSQ recovers ν matching U L / Re."""
+    re = 2.0
+    U = 1.0
+    L = 1.0
+    nu_cat = U * L / re  # 0.5
+    u_lap = jnp.array([4.0, 2.0])
+    # zero advection; u_t = nu_cat * u_lap
+    u_t = nu_cat * u_lap
+    state = {
+        "u": jnp.array([1.0, 0.5]),
+        "u_grad": jnp.zeros((2, 2)),
+        "u_lap": u_lap,
+        "u_t": u_t,
+        "re": jnp.array(re),
+        "U": jnp.array(U),
+        "L": jnp.array(L),
+        "nu": jnp.array(nu_cat),
+    }
+    sm = {
+        "u_t": "u_t",
+        "u": "u",
+        "u_grad": "u_grad",
+        "u_laplacian": "u_lap",
+        "re": "re",
+        "U": "U",
+        "L": "L",
+    }
+    engine = ResidualEngine(
+        laws=[{"name": "burgers_equation", "state_map": sm}],
+        law_implied_audits=True,
+    )
+    r = engine.compute_residuals(state)
+    key = "kinematic_viscosity_from_re/law_burgers_equation/implied_delta"
+    assert key in r["constitutive"]
+    assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-5
+    debug = r["closure_debug"]["kinematic_viscosity_from_re/law_burgers_equation"]
+    assert jnp.allclose(debug["pred"], jnp.asarray(nu_cat), atol=1e-5)
+    assert jnp.allclose(debug["implied"], jnp.asarray(nu_cat), atol=1e-5)
+
+
+def test_burgers_implied_nu_1d_column_shape():
+    """Column-shaped (N, 1) fields stay consistent under ν implied audit."""
+    n = 4
+    re, U, L = 1.0, 1.0, 1.0
+    nu_cat = U * L / re
+    u_lap = jnp.ones((n, 1)) * 2.0
+    state = {
+        "u": jnp.ones((n, 1)),
+        "u_grad": jnp.zeros((n, 1, 1)),
+        "u_lap": u_lap,
+        "u_t": nu_cat * u_lap,
+        "re": jnp.full((n,), re),
+        "U": jnp.full((n,), U),
+        "L": jnp.full((n,), L),
+        "nu": jnp.full((n,), nu_cat),
+    }
+    sm = {
+        "u_t": "u_t",
+        "u": "u",
+        "u_grad": "u_grad",
+        "u_laplacian": "u_lap",
+        "re": "re",
+        "U": "U",
+        "L": "L",
+    }
+    engine = ResidualEngine(
+        laws=[{"name": "burgers_equation", "state_map": sm}],
+        law_implied_audits=True,
+    )
+    r = engine.compute_residuals(state)
+    key = "kinematic_viscosity_from_re/law_burgers_equation/implied_delta"
+    assert key in r["constitutive"]
+    assert float(jnp.nanmax(jnp.abs(r["constitutive"][key]))) < 1e-5
 
 
 def test_law_linked_implied_rows_use_subtract_debug_mode():

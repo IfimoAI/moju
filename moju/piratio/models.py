@@ -253,6 +253,21 @@ class Models:
 
     @staticmethod
     @jax.jit
+    def kinematic_viscosity_from_re(U, L, re):
+        """
+        Kinematic viscosity from Reynolds number: :math:`\\nu = U L / \\mathrm{Re}`.
+
+        Same coefficient as :func:`moju.piratio.laws.Laws.burgers_equation`.
+
+        :param U: Characteristic velocity [m/s].
+        :param L: Characteristic length [m].
+        :param re: Reynolds number.
+        :return: Kinematic viscosity nu [m^2/s].
+        """
+        return (jnp.asarray(U) * jnp.asarray(L)) / (jnp.asarray(re) + 1e-30)
+
+    @staticmethod
+    @jax.jit
     def scalar_diffusivity_from_pe(u, L, pe):
         """
         Effective scalar diffusivity from Peclet number definition.

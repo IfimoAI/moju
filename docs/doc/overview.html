@@ -37,7 +37,7 @@ pip install "moju[torch,io]"     # PyTorch + file loaders</code></pre>
     <h2>API at a glance</h2>
     <ul>
       <li><strong><a href="groups.html">Groups</a></strong> - Dimensionless numbers such as Re, Pr, Pe, Fo, Ma, Bi, Sc, Da, and related quantities.</li>
-      <li><strong><a href="models.html">Models</a></strong> - Constitutive relationships such as viscosity, density, diffusivity, heat transfer, friction, and turbulence closures.</li>
+      <li><strong><a href="models.html">Models</a></strong> - Constitutive relationships such as viscosity (including <code>kinematic_viscosity_from_re</code> for Burgers), density, diffusivity, heat transfer, friction, and turbulence closures.</li>
       <li><strong><a href="laws.html">Laws</a></strong> - Residuals for heat/diffusion, wave, mass, momentum, Darcy/Brinkman, Poisson, Burgers, Schrodinger, and related equations.</li>
       <li><strong><a href="operators.html">Operators</a></strong> - JAX autodiff helpers: gradient, jacobian, divergence, laplacian, curl, time derivatives, advection, and symmetric gradient.</li>
       <li><strong><a href="#training-and-monitoring-residual-engine">ResidualEngine</a></strong> - Build residuals, physics losses, audit logs, and visual diagnostics.</li>
@@ -104,7 +104,9 @@ flowchart TB
       <code>L</code>, and material properties directly. No finite-difference inference is
       needed. The Fourier conduction law runs from those fields, and the default law-linked
       implied audit checks <code>Models.thermal_diffusivity(k, rho, cp)</code> against the
-      diffusivity implied by the law fields.
+      diffusivity implied by the law fields. For Burgers, the default implied audit is
+      <code>Models.kinematic_viscosity_from_re(U, L, re)</code> versus ν recovered by
+      projecting inertial terms onto ∇²u (not dynamic viscosity μ).
     </p>
     <ul>
       <li><strong>compute_residuals</strong> - runs laws, groups, constitutive audits, and optional eval data comparisons.</li>
