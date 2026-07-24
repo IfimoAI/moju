@@ -1,8 +1,12 @@
 """
-Optional finite-difference fill for ``Laws.*`` inputs (gradients, Laplacians, time derivatives).
+Optional Path B fill for ``Laws.*`` inputs (gradients, Laplacians, time derivatives).
 
 Only **registered** law arguments are filled when primitives exist on a structured grid and the
 target key is missing (``None``). Does not overwrite non-``None`` values.
+
+Spatial derivatives use finite differences by default, or periodic Fourier differentiation when
+``PathBGridConfig.diff_method=\"spectral\"`` (requires ``periodic=True``). Temporal ``dt`` / ``dtt``
+always use FD.
 
 Naming convention when ``source_arg`` is omitted: the **state key** for the target (value in
 ``state_map``) must use a predictable suffix so the primitive field key can be inferred, e.g.
@@ -154,6 +158,11 @@ def _scalar_laplacian_steady(
     dim: int,
     warnings: List[str],
 ) -> Optional[jnp.ndarray]:
+    if cfg.diff_method == "spectral":
+        from moju.monitor.path_b_spectral import spectral_scalar_laplacian_steady
+
+        return spectral_scalar_laplacian_steady(K, cfg, x, y, z, dim, warnings)
+
     if cfg.layout == "separable":
         try:
             coords = _separable_1d_coords(K.shape, x, y, z, dim)
@@ -382,12 +391,17 @@ def fill_law_fd_from_primitives(
     copy: bool = True,
 ) -> Tuple[Dict[str, Any], List[str]]:
     """
-    Fill missing **registered** ``Laws.*`` argument keys using FD on structured grids.
+    Fill missing **registered** ``Laws.*`` argument keys using FD or spectral spatial ops.
 
     Returns ``(new_state, warnings)``. Skips targets that are already non-``None``.
     Unknown law names or unregistered arguments are ignored (no error).
+    Temporal ``dt`` / ``dtt`` always use finite differences.
     """
     cfg = grid or PathBGridConfig()
+    if cfg.diff_method == "spectral":
+        from moju.monitor.path_b_spectral import validate_spectral_grid_config
+
+        validate_spectral_grid_config(cfg)
     c = dict(constants or {})
     state: Dict[str, Any] = dict(state_pred) if copy else state_pred
     m = _merged(state, c)

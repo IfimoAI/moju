@@ -348,6 +348,34 @@ class TestFillPathBDerivativesTorchU:
         new_state, warns = fill_path_b_derivatives_torch(state)
         assert any("u_grad" in w or "no coordinate" in w for w in warns)
 
+    def test_spectral_sin_mode_exact(self):
+        n = 64
+        L = 2.0 * math.pi
+        dx = L / float(n)
+        x = torch.arange(n, dtype=torch.float64) * dx
+        u = torch.sin(x)
+        new_state, warns = fill_path_b_derivatives_torch(
+            {"x": x.float(), "u": u.float()},
+            diff_method="spectral",
+            periodic=True,
+        )
+        assert not warns
+        ux = new_state["u_grad"].squeeze()
+        uxx = new_state["u_laplacian"]
+        assert float((ux.double() - torch.cos(x)).abs().max()) < 1e-4
+        assert float((uxx.double() + torch.sin(x)).abs().max()) < 1e-4
+
+    def test_spectral_requires_periodic(self):
+        n = 32
+        L = 2.0 * math.pi
+        x = torch.arange(n, dtype=torch.float32) * (L / float(n))
+        with pytest.raises(ValueError, match="periodic=True"):
+            fill_path_b_derivatives_torch(
+                {"x": x, "u": torch.sin(x)},
+                diff_method="spectral",
+                periodic=False,
+            )
+
 
 class TestFillPathBDerivativesTorch:
     def test_fills_T_grad_and_laplacian(self):

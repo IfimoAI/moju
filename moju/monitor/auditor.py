@@ -200,7 +200,8 @@ def _kwargs_from_state(
                 msg += f" (law {law_context!r})"
                 if _state_key_suggests_law_fd_fill(key):
                     msg += (
-                        " — on Path B, enable auto_path_b_derivatives=True and fill_law_fd=True, "
+                        " — on Path B, enable auto_path_b_derivatives=True (FD) or pass "
+                        "PathBGridConfig(diff_method='spectral', periodic=True) with fill_law_fd=True, "
                         "provide the primitive field (e.g. T for T_laplacian) and mesh coordinates "
                         "(x, and y/z/t as needed); see moju.monitor.law_fd_recipes.LAW_FD_RECIPES. "
                         "The engine does not rename NPZ keys: use key `T` (or change law state_map), "
@@ -2011,10 +2012,12 @@ class ResidualEngine:
         When ``\"dimensional\"``, groups run on physical state, then fields are converted via
         :func:`moju.piratio.nondim.dimensional_to_nd` before laws (see ``nondim_inference``).
 
-        If ``auto_path_b_derivatives`` is True, uses default ``PathBGridConfig``; if a
-        ``PathBGridConfig`` instance, uses that layout. When ``fill_law_fd`` is also True, missing
+        If ``auto_path_b_derivatives`` is True, uses default ``PathBGridConfig`` with
+        ``diff_method=\"fd\"`` (finite differences). If a ``PathBGridConfig`` instance, uses that
+        layout; set ``diff_method=\"spectral\"`` and ``periodic=True`` for periodic Fourier spatial
+        derivatives (temporal ``dt`` / ``dtt`` remain FD). When ``fill_law_fd`` is also True, missing
         **registered** ``Laws.*`` inputs (e.g. ``phi_laplacian``, ``u_grad``) are filled from
-        primitives on the same grid via finite differences (see ``law_fd_recipes``).
+        primitives on the same grid (see ``law_fd_recipes`` / ``fill_path_b_spectral``).
         Warnings are appended to the log ``inferred`` list when enabled.
 
         If ``fill_law_fd`` is True, ``auto_path_b_derivatives`` must also be enabled.

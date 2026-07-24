@@ -40,6 +40,8 @@ prepend the `thermal_diffusivity/law_fourier_conduction` implied audit.
 
 **Training vs eval:** **`implied_delta`** law-linked rows run in both **`run_mode="training"`** (default) and **`run_mode="eval"`**. **`ref_delta`** on those rows (and separate **`data/`** pred−ref) runs only when you call **`compute_residuals(..., run_mode="eval", state_ref=...)`**. See [monitor_training_vs_eval.md](monitor_training_vs_eval.md).
 
+Implied constitutive δ (especially Burgers **ν**) is sensitive to Laplacian quality. On Path B, prefer spectral or model-native spatial derivatives over coarse FD when those audits lead the study — see [path_b_derivatives.md](path_b_derivatives.md).
+
 ## Configuration
 
 | Mechanism | Behavior |
