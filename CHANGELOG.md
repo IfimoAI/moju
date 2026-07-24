@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-07-24
+
 ### Added
 
 - **`Models.kinematic_viscosity_from_re(U, L, re)`** — catalog \(\nu = U L / \mathrm{Re}\) (same coefficient as `Laws.burgers_equation`).
