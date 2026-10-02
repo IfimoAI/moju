@@ -7,9 +7,9 @@ name = "moju"
 version = "1.1.3"
 description = "Physics supervision and audit tools for SciML models, with JAX-native residuals and PyTorch support."
 readme = "README.md"
-authors = [{ name = "Ifimo Lab", email = "lab@ifimoanalytics.com" }]
+authors = [{ name = "Ifimo Lab (Ifimo Global Solutions LLC)", email = "lab@ifimoanalytics.com" }]
 maintainers = [
-  { name = "Ifimo Analytics", email = "info@ifimoanalytics.com" }
+  { name = "Ifimo Global Solutions LLC (dba Ifimo Lab)", email = "info@ifimoanalytics.com" }
 ]
 license = { text = "MIT" }
 requires-python = ">=3.9"
@@ -55,6 +55,7 @@ Documentation = "https://ifimoai.github.io/moju/doc/overview.html"
 Source = "https://github.com/IfimoAI/moju"
 Paper = "https://zenodo.org/records/20519331"
 Changelog = "https://github.com/IfimoAI/moju/blob/main/CHANGELOG.md"
+Citation = "https://github.com/IfimoAI/moju/blob/main/CITATION.cff"
 Issues = "https://github.com/IfimoAI/moju/issues"
 
 [tool.setuptools.packages.find]

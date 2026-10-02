@@ -23,6 +23,14 @@ Open-in-Colab badges require the notebooks on GitHub **`main`**. See [examples/N
 
 Moju helps you turn predicted state fields into governing-law residuals, physics losses, constitutive consistency checks, and audit reports. It is JAX-native at the core, with a PyTorch-facing interface available through `moju.torch`.
 
+## What Moju Is
+
+Moju is an open-source physics admissibility auditing library for scientific ML surrogates. It separates governing-law residuals from constitutive consistency and reports one of four admissibility tiers: **High**, **Moderate**, **Low**, or **Non-Admissible**. It ships 22 governing laws, 11 of which carry law-linked constitutive audits.
+
+### What a tier means
+
+A tier is computed from an admissibility score in `[0, 1]`: High at `≥ 0.909`, Moderate at `≥ 0.667`, Low at `≥ 0.5`, and Non-Admissible below that (see `moju.monitor.auditor.admissibility_level`). A passing tier indicates consistency with the stated physics within the audited conditions: the laws, constitutive models, sample points, and scales you supplied. It is not a guarantee of correctness.
+
 ## What Moju Does
 
 - Builds residuals from composable `Laws`, `Groups`, and `Models`.
@@ -172,6 +180,20 @@ Training demos that use **optax** (e.g. [`examples/slab_cooling_demo.py`](https:
 
 Moju does not define physics for you. It gives you a structured way to apply the physics you already trust, measure residuals consistently, and surface where a model agrees or disagrees with governing laws and constitutive assumptions.
 
+## How to Cite
+
+Citation metadata is in [`CITATION.cff`](https://github.com/IfimoAI/moju/blob/main/CITATION.cff); GitHub's "Cite this repository" button reads it. Please cite the paper:
+
+Ifimo Lab. *Moju: A Physics Admissibility Auditing Framework for Scientific Machine Learning Surrogates.* Preprint, Zenodo, 2026. [doi:10.5281/zenodo.20519331](https://doi.org/10.5281/zenodo.20519331)
+
+## Contributing
+
+Contributions are made under the MIT license and require a Developer Certificate of Origin sign-off. See [`CONTRIBUTING.md`](https://github.com/IfimoAI/moju/blob/main/CONTRIBUTING.md).
+
+## Development
+
+Moju is developed with the assistance of AI coding tools under human direction and review.
+
 ## License
 
-MIT License. Developed by Ifimo Lab, a division of Ifimo Analytics.
+MIT License. Developed by Ifimo Lab, a DBA of Ifimo Global Solutions LLC.
