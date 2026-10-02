@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-10-02
+
+### Added
+
+- **`CONTRIBUTING.md`** and a pull request template: contributions are made under the MIT license and require a Developer Certificate of Origin `Signed-off-by` line.
+- **README:** "What Moju Is" (scope, 22 laws, 11 with law-linked constitutive audits, four admissibility tiers), "What a tier means", "How to Cite", "Contributing", and "Development" sections.
+- **PyPI project URLs:** `Citation` link to `CITATION.cff`.
+
+### Changed
+
+- **Attribution:** copyright holder is now Ifimo Global Solutions LLC (dba Ifimo Lab, Ifimo Analytics); package authors and maintainers, documentation site footers, README, and the PDF audit report footer now read "Developed by Ifimo Lab, a DBA of Ifimo Global Solutions LLC".
+- No changes to audit logic, APIs, or dependencies.
+
 ## [1.1.3] - 2026-07-24
 
 ### Added

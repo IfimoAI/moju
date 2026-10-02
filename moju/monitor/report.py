@@ -85,7 +85,7 @@ def write_residuals_json(residual_dict: Dict[str, Any], path: str) -> None:
         json.dump(data, f, indent=2)
 
 
-_FOOTER_LEFT = "Moju is developed by Ifimo Lab at Ifimo Analytics"
+_FOOTER_LEFT = "Moju is developed by Ifimo Lab, a DBA of Ifimo Global Solutions LLC"
 _FOOTER_RIGHT = "This report is a heuristic and not a certification."
 
 
