@@ -2,7 +2,7 @@
 ``moju.torch`` — full-parity PyTorch interface for Moju.
 
 Install with ``pip install moju[torch]`` to pull in the required dependencies
-(``torch >= 2.0`` and ``jax2torch``).
+(``torch >= 2.0``). JAX laws are called through a DLPack handoff, not a third-party bridge.
 
 Quick start
 -----------

@@ -135,10 +135,10 @@ flowchart TB
       It provides <code>TorchResidualEngine</code>, <code>build_loss_torch</code>,
       <code>r_eff_scalar_torch</code>, Torch-native nondimensionalization helpers, and
       <code>wrap_law_torch</code> for calling JAX laws from Torch tensors through
-      <code>jax2torch</code>.
+      a DLPack handoff.
     </p>
     <p>
-      See <code>scripts/torch_laws_jax2torch_example.py</code>,
+      See <code>scripts/torch_laws_example.py</code>,
       <code>tests/test_torch_engine.py</code>, and <code>tests/test_torch_interop.py</code>
       for the current public surface.
     </p>
@@ -150,7 +150,7 @@ flowchart TB
       <li><code>examples/cookbook_path_b_fd_law_laplace.py</code> - optional Path B finite-difference fill.</li>
       <li><code>examples/cookbook_path_b_spectral_burgers.py</code> - Path B periodic spectral fill for Burgers.</li>
       <li><code>examples/cookbook_constitutive_divergence.py</code> - constitutive divergence dashboard.</li>
-      <li><code>scripts/torch_laws_jax2torch_example.py</code> - basic Torch interop.</li>
+      <li><code>scripts/torch_laws_example.py</code> - basic Torch interop.</li>
     </ul>
 
     <p class="doc-footer">MIT License. Developed by Ifimo Lab, a DBA of Ifimo Global Solutions LLC.</p>

@@ -7,9 +7,6 @@ from moju.piratio import Laws
 
 
 torch = pytest.importorskip("torch", reason="torch is required for torch interop tests")
-jax2torch = pytest.importorskip(
-    "jax2torch", reason="jax2torch is required for torch interop tests"
-)
 
 from moju.torch_interop import wrap_law_torch
 
@@ -53,4 +50,19 @@ def test_wrap_law_torch_is_differentiable_in_torch():
 
     assert u_grad_torch.grad is not None
     assert torch.isfinite(u_grad_torch.grad).all()
+
+
+def test_wrap_law_torch_pytree_dict_roundtrip():
+    """Dict inputs and outputs stay dicts, and gradients reach tensor leaves."""
+
+    def residual(state, constants):
+        return {"e": state["q"] * constants["k"] + state["q"]}
+
+    wrapped = wrap_law_torch(residual)
+    q = torch.tensor([1.0, -2.0], dtype=torch.float32, requires_grad=True)
+    out = wrapped({"q": q}, {"k": 3.0})
+    assert set(out) == {"e"}
+    torch.testing.assert_close(out["e"], torch.tensor([4.0, -8.0]))
+    out["e"].sum().backward()
+    torch.testing.assert_close(q.grad, torch.tensor([4.0, 4.0]))
 

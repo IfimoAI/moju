@@ -11,7 +11,7 @@ Register user functions so specs can refer to them by name, exactly like built-i
 - :func:`register_law_time_scale`: time-scale convention for a custom law in dimensional mode.
 
 Registered models and groups must be JAX-traceable (they are also wrapped for
-:class:`moju.torch.TorchResidualEngine` through ``jax2torch``).
+:class:`moju.torch.TorchResidualEngine` through a DLPack handoff).
 """
 
 from __future__ import annotations

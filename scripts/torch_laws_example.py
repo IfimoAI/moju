@@ -1,10 +1,10 @@
 """
-Minimal example: using moju JAX laws from PyTorch via jax2torch.
+Minimal example: using moju JAX laws from PyTorch via the DLPack handoff.
 
 Run (after installing extras):
 
     pip install "moju[torch,io]"
-    python scripts/torch_laws_jax2torch_example.py
+    python scripts/torch_laws_example.py
 """
 
 import torch
@@ -36,4 +36,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
