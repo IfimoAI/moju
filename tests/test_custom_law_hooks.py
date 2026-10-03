@@ -98,7 +98,7 @@ def test_registered_recipe_used_and_reported():
     spec = {"name": "my_law", "state_map": {"a": "a"}}
     register_law_scale_recipe("my_law", lambda m, c, s, n: 7.0)
     try:
-        assert characteristic_law_scale_k("my_law", merged={}, constants={}, law_spec=spec) == (7.0, "auto")
+        assert characteristic_law_scale_k("my_law", merged={}, constants={}, law_spec=spec) == (7.0, "user_recipe")
         assert law_scale_coverage_report()["my_law"] == "user_recipe"
         with pytest.raises(ValueError):
             register_law_scale_recipe("my_law", lambda *a: 1.0)
@@ -111,7 +111,8 @@ def test_spec_recipe_beats_registered():
     spec = {"name": "my_law2", "state_map": {}, "scale_recipe": lambda *a: 3.0}
     register_law_scale_recipe("my_law2", lambda *a: 9.0)
     try:
-        assert characteristic_law_scale_k("my_law2", merged={}, constants={}, law_spec=spec)[0] == 3.0
+        sk, src = characteristic_law_scale_k("my_law2", merged={}, constants={}, law_spec=spec)
+        assert sk == 3.0 and src == "user_recipe"
     finally:
         unregister_law_scale_recipe("my_law2")
 
@@ -124,6 +125,7 @@ def test_failing_user_recipe_warns_and_falls_back():
     with pytest.warns(UserWarning, match="boom"):
         sk, src = characteristic_law_scale_k("bad_law", merged={"a": jnp.array([5.0])}, constants={}, law_spec=spec)
     assert sk == pytest.approx(5.0, rel=1e-6)
+    assert src == "auto"
 
 
 def test_oscillator_si_scale_is_term_balance():
@@ -134,6 +136,11 @@ def test_oscillator_si_scale_is_term_balance():
         float(term_rms(osc.M * st["q_tt"])), float(term_rms(osc.C * st["q_t"])), float(term_rms(osc.K * st["q"]))
     )
     assert eng.log[-1]["scale"]["laws/damped_oscillator"] == pytest.approx(expected, rel=1e-5)
+    assert eng.log[-1]["scale_source"]["laws/damped_oscillator"] == "user_recipe"
+    row = next(
+        r for r in rep["audit_meta"]["scale_calibration"]["per_key"] if r["key"] == "laws/damped_oscillator"
+    )
+    assert row["plain"] == "Term-balance scale from a user-registered or spec scale recipe."
     assert rep["overall_admissibility_level"] == "High Admissibility"
 
 

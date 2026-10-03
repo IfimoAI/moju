@@ -898,3 +898,89 @@ class TestPublicApi:
         result = fn(u_grad)
         assert isinstance(result, torch.Tensor)
         assert result.shape[0] == 10
+
+
+def test_torch_custom_law_matches_jax_oscillator():
+    import importlib.util
+    from pathlib import Path
+
+    import jax.numpy as jnp
+    import numpy as np
+
+    from moju.torch import TorchResidualEngine
+
+    path = Path(__file__).resolve().parents[1] / "examples" / "cookbook_custom_law_oscillator.py"
+    spec = importlib.util.spec_from_file_location("oscillator_cookbook", path)
+    osc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(osc)
+
+    state_j = osc.trajectory(n=32)
+    state_t = {k: torch.tensor(np.asarray(v)) for k, v in state_j.items()}
+    jax_res = osc.si_engine().compute_residuals({k: state_j[k] for k in ("q", "q_t", "q_tt")})
+    teng = TorchResidualEngine(
+        laws=[osc.LawSpec(name="damped_oscillator", fn=osc.oscillator_si, state_map=osc._STATE_MAP)],
+        constants=osc.CONSTANTS,
+        law_implied_audits=False,
+    )
+    torch_res = teng.compute_residuals_torch(state_t)
+    np.testing.assert_allclose(
+        torch_res["laws"]["damped_oscillator"].detach().cpu().numpy(),
+        np.asarray(jax_res["laws"]["damped_oscillator"]),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+    assert jnp.isfinite(jax_res["laws"]["damped_oscillator"]).all()
+
+
+def test_torch_bound_check_matches_jax_values_and_grad():
+    import jax
+    import jax.numpy as jnp
+    import numpy as np
+
+    from moju.monitor import BoundCheck, ResidualEngine
+    from moju.monitor.auditor import _evaluate_bound_check
+    from moju.torch import TorchResidualEngine
+
+    check = BoundCheck(name="pos", value_key="v", lower=0.0, scale=10.0)
+    values = jnp.array([1.0, -0.01, 3.0])
+    jax_res = ResidualEngine(bound_checks=[check]).compute_residuals({"v": values})
+    v = torch.tensor([1.0, -0.01, 3.0], dtype=torch.float32, requires_grad=True)
+    teng = TorchResidualEngine(laws=[], bound_checks=[check], law_implied_audits=False)
+    torch_res = teng.compute_residuals_torch({"v": v})
+    viol = torch_res["constitutive"]["bound/pos/violation"]
+    np.testing.assert_allclose(
+        viol.detach().cpu().numpy(),
+        np.asarray(jax_res["constitutive"]["bound/pos/violation"]),
+        rtol=1e-6,
+        atol=1e-8,
+    )
+    viol.sum().backward()
+
+    def _sum_viol(x):
+        out, _dbg = _evaluate_bound_check(check, {"v": x}, {})
+        return jnp.sum(out)
+
+    np.testing.assert_allclose(v.grad.detach().cpu().numpy(), np.asarray(jax.grad(_sum_viol)(values)), atol=1e-6)
+
+
+def test_torch_audit_reports_declared_scoring_and_bound():
+    from moju.monitor import BoundCheck, LawSpec, Scoring
+    from moju.torch import TorchResidualEngine
+
+    teng = TorchResidualEngine(
+        laws=[
+            LawSpec(
+                name="unit_law",
+                fn=lambda r: r,
+                state_map={"r": "r"},
+                scoring=Scoring("rms", dimensionless=True),
+            )
+        ],
+        bound_checks=[BoundCheck(name="pos", value_key="v", lower=0.0, scale=10.0)],
+        law_implied_audits=False,
+    )
+    report = teng.audit(
+        {"r": torch.full((4,), 1e-3), "v": torch.tensor([1.0, -0.01])}
+    )
+    assert report["per_key"]["laws/unit_law"]["scale_source"] == "declared"
+    assert "constitutive/bound/pos/violation" in report["per_key"]

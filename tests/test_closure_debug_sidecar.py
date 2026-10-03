@@ -171,7 +171,6 @@ def test_engine_flatten_skips_closure_debug() -> None:
 
 def test_torch_engine_closure_debug_sidecar() -> None:
     torch = pytest.importorskip("torch")
-    pytest.importorskip("jax2torch")
     from moju.piratio.models import Models
     from moju.torch import TorchResidualEngine
 

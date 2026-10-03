@@ -2209,6 +2209,42 @@ class ResidualEngine:
 
         If ``fill_law_fd`` is True, ``auto_path_b_derivatives`` must also be enabled.
         """
+        residuals, entry = self._compute_entry(
+            state_pred,
+            state_ref,
+            model=model,
+            params=params,
+            collocation=collocation,
+            log_to_python=log_to_python,
+            auto_path_b_derivatives=auto_path_b_derivatives,
+            fill_law_fd=fill_law_fd,
+            run_mode=run_mode,
+            law_scale_mode=law_scale_mode,
+            state_units=state_units,
+            nondim_scales=nondim_scales,
+        )
+        self._log.append(entry)
+        self._index += 1
+        self._last_residuals = residuals
+        return residuals
+
+    def _compute_entry(
+        self,
+        state_pred: Optional[Dict[str, Any]] = None,
+        state_ref: Optional[Dict[str, Any]] = None,
+        *,
+        model: Any = None,
+        params: Any = None,
+        collocation: Optional[Dict[str, Any]] = None,
+        log_to_python: bool = True,
+        auto_path_b_derivatives: Any = False,
+        fill_law_fd: bool = False,
+        run_mode: str = "training",
+        law_scale_mode: Optional[str] = None,
+        state_units: Optional[str] = None,
+        nondim_scales: Any = None,
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Compute residuals and one log entry without touching the engine log."""
         if run_mode not in ("training", "eval"):
             raise ValueError("run_mode must be 'training' or 'eval'")
         if self.derivatives == "supplied_only" and (auto_path_b_derivatives or fill_law_fd):
@@ -2767,10 +2803,7 @@ class ResidualEngine:
             cs = _coord_snapshot_from_merged(merged)
             if cs:
                 entry["coord_snapshot"] = cs
-        self._log.append(entry)
-        self._index += 1
-        self._last_residuals = residuals
-        return residuals
+        return residuals, entry
 
     def required_state_keys(
         self,
@@ -2805,6 +2838,47 @@ class ResidualEngine:
         keys -= keys_produced_by_chain(self.derived_state_chain)
         return keys
 
+
+def evaluate(
+    engine: ResidualEngine,
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    state_refs: Optional[Sequence[Optional[Mapping[str, Any]]]] = None,
+    run_mode: str = "eval",
+    r_ref: Optional[Dict[str, float]] = None,
+    return_residuals: bool = False,
+    **compute_kwargs: Any,
+) -> List[Dict[str, Any]]:
+    """
+    One :func:`audit` report per candidate; ``engine.log`` is not modified.
+
+    ``state_refs``, when given, must have the same length as ``candidates``. Further keywords are
+    forwarded to :meth:`ResidualEngine._compute_entry` (``law_scale_mode``, ``state_units``, and so on).
+    Set ``return_residuals=True`` to attach each candidate's residual dict under ``"residuals"``.
+    """
+    n = len(candidates)
+    if state_refs is None:
+        refs: Sequence[Optional[Mapping[str, Any]]] = (None,) * n
+    else:
+        if len(state_refs) != n:
+            raise ValueError(
+                f"state_refs length {len(state_refs)} does not match candidates length {n}"
+            )
+        refs = state_refs
+    reports: List[Dict[str, Any]] = []
+    for i, (state, ref) in enumerate(zip(candidates, refs)):
+        residuals, entry = engine._compute_entry(
+            state,
+            ref,
+            run_mode=run_mode,
+            **compute_kwargs,
+        )
+        entry["index"] = i
+        report = audit([entry], r_ref=r_ref)
+        if return_residuals:
+            report["residuals"] = residuals
+        reports.append(report)
+    return reports
 
 
 def list_constitutive_models():

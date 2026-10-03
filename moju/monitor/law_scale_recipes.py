@@ -20,7 +20,7 @@ _DEFAULT_LAW_SCALE_K = 1e-2
 
 _SCALE_EPS = 1e-12
 
-ScaleSource = str  # "auto" | "auto_fallback" | "fixed"
+ScaleSource = str  # "auto" | "user_recipe" | "auto_fallback" | "fixed"
 
 
 def _rms_mag(arr: Any) -> float:
@@ -458,6 +458,7 @@ def characteristic_law_scale_k(
     """
     recipe, is_user = _resolve_scale_recipe(law_name, law_spec)
     scale = float("nan")
+    recipe_ok = False
     if recipe is not None:
         try:
             scale = float(recipe(merged, constants, law_spec, nondim_scales))
@@ -472,11 +473,12 @@ def characteristic_law_scale_k(
                     stacklevel=2,
                 )
             scale = float("nan")
-    if not math.isfinite(scale) or scale <= 0:
+        recipe_ok = math.isfinite(scale) and scale > 0
+    if not recipe_ok:
         scale = _generic_state_map_rms(merged, constants, law_spec)
     if math.isfinite(scale) and scale > 0:
         floored = _floor_scale(scale)
-        src: ScaleSource = "auto" if floored == scale else "auto"
+        src: ScaleSource = "user_recipe" if recipe_ok and is_user else "auto"
         return floored, src
     return float(_DEFAULT_LAW_SCALE_K), "auto_fallback"
 

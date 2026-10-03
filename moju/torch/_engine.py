@@ -18,7 +18,7 @@ Eval path (no grad needed):
 - ``audit()`` — delegates to JAX ``ResidualEngine`` + ``moju.monitor.audit``
 - ``visualize()`` — delegates to ``moju.monitor.visualize``
 
-CPU constraint: ``jax2torch`` requires CPU tensors.  Tensors on other devices
+CPU constraint: the DLPack handoff evaluates JAX on CPU.  Tensors on other devices
 are automatically moved to CPU for JAX law evaluation and moved back to their
 original device on return.
 """
@@ -34,9 +34,10 @@ from moju.piratio.laws import Laws
 from moju.piratio.groups import Groups
 from moju.piratio.models import Models
 from moju.piratio.nondim import NondimScales
+from moju.monitor.auditor import _get_fn
 from moju.monitor.closure_registry import MODEL_FNS, get_group_fn
+from moju.monitor.types import BoundCheck, specs_to_engine_dicts
 from moju.monitor.law_group_inference import (
-    law_parameter_names,
     group_parameter_names,
     implied_group_specs_for_laws,
 )
@@ -155,8 +156,20 @@ class TorchResidualEngine:
         law_scale_mode: str = "auto",
         state_units: str = "nondimensional",
         nondim_scales_overrides: Optional[Dict[str, Any]] = None,
+        bound_checks: Optional[Sequence[Any]] = None,
+        constitutive_custom: Optional[Sequence[Any]] = None,
+        derivatives: str = "auto",
     ) -> None:
-        self._laws_spec: List[Dict[str, Any]] = list(laws)
+        if derivatives not in ("auto", "supplied_only"):
+            raise ValueError(f"derivatives must be 'auto' or 'supplied_only', got {derivatives!r}")
+        self._derivatives = derivatives
+        self._laws_spec: List[Dict[str, Any]] = specs_to_engine_dicts(laws)
+        self._bound_checks: List[BoundCheck] = [BoundCheck.coerce(b) for b in (bound_checks or [])]
+        _bnames = [b.name for b in self._bound_checks]
+        if len(set(_bnames)) != len(_bnames):
+            raise ValueError(f"bound check names must be unique, got {_bnames}")
+        self._constitutive_custom: List[Dict[str, Any]] = specs_to_engine_dicts(constitutive_custom)
+        self._user_constitutive_audit: List[Dict[str, Any]] = specs_to_engine_dicts(constitutive_audit)
         self._constants: Dict[str, Any] = dict(constants or {})
         self._scales = scales
         self._law_scale_mode = law_scale_mode
@@ -168,34 +181,37 @@ class TorchResidualEngine:
         self._path_b_diff_method = str(path_b_diff_method)
         self._path_b_periodic = bool(path_b_periodic)
         self._best_effort = best_effort
+        self._law_implied_audits = bool(law_implied_audits)
 
         # ------------------------------------------------------------------
         # Wrap Laws.* — one per unique law name.
         # We do NOT use functools.partial or closures here.  Instead we wrap
-        # the raw JAX function so jax2torch can inspect its real signature
-        # (with named positional parameters).  In compute_residuals_torch we
-        # pass ALL parameters — tensor fields from state AND scalar constants
-        # converted to 0-d torch tensors.  This avoids the "multiple values
-        # for argument" error that occurs when jax2torch expands *args-style
-        # signatures through bound.apply_defaults().
+        # the raw JAX function.  In compute_residuals_torch we pass ALL parameters —
+        # tensor fields from state AND scalar constants converted to 0-d torch tensors.
         # ------------------------------------------------------------------
         self._wrapped_laws: Dict[str, Callable] = {}
         self._law_all_params: Dict[str, List[str]] = {}
+        self._law_state_maps: Dict[str, Dict[str, str]] = {}
         for spec in self._laws_spec:
             name = str(spec["name"])
             if name in self._wrapped_laws:
                 continue
-            fn = getattr(Laws, name)
-            all_params = law_parameter_names(name)
+            fn = _get_fn(spec, Laws)
+            all_params = _positional_param_names(fn)
             self._wrapped_laws[name] = wrap_law_torch(fn)
             self._law_all_params[name] = all_params
+            self._law_state_maps[name] = dict(spec.get("state_map") or {})
 
         # ------------------------------------------------------------------
         # Group inference — topological order, wrap each group function.
         # Same strategy as for laws: wrap the raw function, pass ALL params
         # (including scalars from constants as 0-d tensors) in the pipeline.
         # ------------------------------------------------------------------
-        law_names_list = [str(s["name"]) for s in self._laws_spec]
+        law_names_list = [
+            str(s["name"])
+            for s in self._laws_spec
+            if s.get("fn") is None and hasattr(Laws, str(s["name"]))
+        ]
         group_specs = implied_group_specs_for_laws(law_names_list)
         self._group_compute_plan: List[Dict[str, Any]] = []
         for gspec in group_specs:
@@ -217,8 +233,7 @@ class TorchResidualEngine:
         implied_specs = merge_law_implied_audit_specs_torch(
             self._laws_spec, enabled=law_implied_audits
         )
-        user_specs = list(constitutive_audit or [])
-        self._audit_specs: List[Dict[str, Any]] = implied_specs + user_specs
+        self._audit_specs: List[Dict[str, Any]] = implied_specs + self._user_constitutive_audit
 
         # Wrap Models.* for each unique model name referenced by audits.
         # Same strategy: wrap raw function, pass all args as tensors.
@@ -235,6 +250,81 @@ class TorchResidualEngine:
             all_params = _positional_param_names(fn)
             self._wrapped_models[mname] = wrap_law_torch(fn)
             self._model_all_params[mname] = all_params
+
+        self._wrapped_custom: Dict[str, Callable] = {}
+        for cspec in self._constitutive_custom:
+            cname = str(cspec["name"])
+            cfn = cspec.get("fn")
+            if cfn is None:
+                raise ValueError(f"constitutive_custom {cname!r} is missing fn")
+            self._wrapped_custom[cname] = wrap_law_torch(cfn)
+
+        self._wrapped_bounds: Dict[str, Dict[str, Callable]] = {}
+        for bc in self._bound_checks:
+            wrapped: Dict[str, Callable] = {}
+            if bc.value_fn is not None:
+                wrapped["value"] = wrap_law_torch(bc.value_fn)
+            if callable(bc.lower):
+                wrapped["lower"] = wrap_law_torch(bc.lower)
+            if callable(bc.upper):
+                wrapped["upper"] = wrap_law_torch(bc.upper)
+            self._wrapped_bounds[bc.name] = wrapped
+
+    def _evaluate_bound_torch(
+        self, check: BoundCheck, merged: Dict[str, Any]
+    ) -> tuple:
+        """One-sided violation ``(relu(lower - v) + relu(v - upper)) / scale``."""
+        wrapped = self._wrapped_bounds[check.name]
+        if "value" in wrapped:
+            v = wrapped["value"](merged, self._constants)
+        else:
+            key = str(check.value_key)
+            if key in merged:
+                v = merged[key]
+            elif key in self._constants:
+                v = self._constants[key]
+            else:
+                raise KeyError(
+                    f"bound check {check.name!r}: value key {key!r} not found in state or constants"
+                )
+        if not isinstance(v, torch.Tensor):
+            v = _to_tensor(v)
+
+        def _as_bound(slot: str, raw_bound: Any) -> Optional[torch.Tensor]:
+            if raw_bound is None:
+                return None
+            if slot in wrapped:
+                b = wrapped[slot](merged, self._constants)
+            else:
+                b = raw_bound
+            if not isinstance(b, torch.Tensor):
+                b = torch.as_tensor(float(b), dtype=v.dtype, device=v.device)
+            return b.to(device=v.device, dtype=v.dtype)
+
+        lo = _as_bound("lower", check.lower)
+        hi = _as_bound("upper", check.upper)
+        viol = torch.zeros_like(v)
+        clamped = v
+        if lo is not None:
+            viol = viol + torch.relu(lo - v)
+            clamped = torch.maximum(clamped, lo)
+        if hi is not None:
+            viol = viol + torch.relu(v - hi)
+            clamped = torch.minimum(clamped, hi)
+        viol = viol / float(check.scale)
+        debug = {
+            "pred": v,
+            "implied": clamped,
+            "raw": v - clamped,
+            "delta": viol,
+            "mode": "bound",
+            "output_key": check.value_key or check.name,
+            "law_name": None,
+            "category": "constitutive",
+            "model_name": f"bound:{check.name}",
+            "state_map": {},
+        }
+        return viol, debug
 
     # ------------------------------------------------------------------
     # Primary compute method
@@ -282,6 +372,11 @@ class TorchResidualEngine:
         """
         if run_mode not in ("training", "eval"):
             raise ValueError("run_mode must be 'training' or 'eval'")
+        if self._derivatives == "supplied_only" and self._path_b_fill:
+            raise ValueError(
+                "derivatives='supplied_only' cannot be combined with path_b_fill; "
+                "supply every derivative or use derivatives='auto'"
+            )
 
         # Detect original device to restore outputs
         orig_device = _device_of(state)
@@ -358,14 +453,16 @@ class TorchResidualEngine:
         for spec in self._laws_spec:
             name = str(spec["name"])
             all_params = self._law_all_params[name]
+            state_map = self._law_state_maps.get(name) or {}
             # Merge spec-level constants (highest priority)
             spec_consts = spec.get("constants") or {}
             effective_merged = {**merged, **spec_consts}
-            if self._best_effort and any(k not in effective_merged for k in all_params):
+            resolved_keys = [state_map.get(k, k) for k in all_params]
+            if self._best_effort and any(k not in effective_merged for k in resolved_keys):
                 continue
             args = []
             try:
-                for k in all_params:
+                for k in resolved_keys:
                     args.append(_to_tensor(effective_merged[k]))
                 result = self._wrapped_laws[name](*args)
                 law_residuals[name] = _restore_device({"r": result}, orig_device)["r"]
@@ -432,6 +529,39 @@ class TorchResidualEngine:
                 if ref_result is not None:
                     r = _restore_device({"r": ref_result}, orig_device)["r"]
                     constitutive_residuals[f"{basename}/ref_delta"] = r
+
+        for cspec in self._constitutive_custom:
+            cname = str(cspec["name"])
+            try:
+                arr = self._wrapped_custom[cname](merged, self._constants)
+            except Exception as exc:  # noqa: BLE001
+                if not self._best_effort:
+                    raise
+                warnings.warn(
+                    f"TorchResidualEngine constitutive_custom {cname}: {exc}",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+            if arr is None:
+                continue
+            if not isinstance(arr, torch.Tensor):
+                arr = _to_tensor(arr)
+            constitutive_residuals[f"custom/{cname}"] = _restore_device({"r": arr}, orig_device)["r"]
+
+        for bc in self._bound_checks:
+            try:
+                viol, bdebug = self._evaluate_bound_torch(bc, merged)
+            except KeyError as err:
+                if not self._best_effort:
+                    raise
+                warnings.warn(
+                    f"TorchResidualEngine bound {bc.name}: {err}", UserWarning, stacklevel=2
+                )
+                continue
+            bkey = f"bound/{bc.name}/violation"
+            constitutive_residuals[bkey] = _restore_device({"r": viol}, orig_device)["r"]
+            closure_debug[bkey] = bdebug
 
         # 8. Data comparison (eval mode)
         data_residuals: Dict[str, Any] = {}
@@ -541,7 +671,12 @@ class TorchResidualEngine:
         jax_engine = ResidualEngine(
             laws=self._laws_spec,
             constants=self._constants,
+            constitutive_audit=self._user_constitutive_audit,
+            constitutive_custom=self._constitutive_custom,
+            bound_checks=self._bound_checks,
+            derivatives=self._derivatives,
             derived_state_chain=self._derived_state_chain if self._derived_state_chain else None,
+            law_implied_audits=self._law_implied_audits,
             law_scale_mode=self._law_scale_mode,
             state_units=eff_state_units,
             nondim_scales=self._scales,

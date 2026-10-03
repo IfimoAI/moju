@@ -18,6 +18,7 @@ _DEFAULT_NONDIM_R_NORM_SCALE_K = 1e-2
 
 _SCALE_SOURCE_PLAIN: Dict[str, str] = {
     "auto": "Term-balance RMS from merged state (governing law).",
+    "user_recipe": "Term-balance scale from a user-registered or spec scale recipe.",
     "auto_fallback": "Generic field RMS fallback; floored at the 1e-2 reference gauge.",
     "fixed": "Fixed 1e-2 reference gauge (closure-aligned tier calibration).",
     "state_derived": "RMS of related state or reference fields.",
@@ -139,6 +140,7 @@ def _build_scale_calibration(
     flat_keys = sorted(set(scales.keys()) | set((entry.get("scale_source") or {}).keys()))
     summary: Dict[str, int] = {
         "laws_auto": 0,
+        "laws_user_recipe": 0,
         "laws_auto_fallback": 0,
         "laws_fixed": 0,
         "closure_fixed": 0,
@@ -161,6 +163,8 @@ def _build_scale_calibration(
         elif k.startswith("laws/"):
             if src == "auto":
                 summary["laws_auto"] += 1
+            elif src == "user_recipe":
+                summary["laws_user_recipe"] += 1
             elif src == "auto_fallback":
                 summary["laws_auto_fallback"] += 1
             elif src == "fixed":
@@ -259,7 +263,7 @@ def format_audit_meta_plain_summary(meta: Dict[str, Any]) -> str:
     sm = sc.get("summary") or {}
     law_rows = _law_rows(sc.get("per_key") or [])
     n_laws = len(law_rows)
-    n_auto = int(sm.get("laws_auto") or 0)
+    n_auto = int(sm.get("laws_auto") or 0) + int(sm.get("laws_user_recipe") or 0)
     n_fallback = int(sm.get("laws_auto_fallback") or 0)
     n_fixed_laws = int(sm.get("laws_fixed") or 0)
 

@@ -139,10 +139,10 @@ pip install "moju[torch]"
 
 - `TorchResidualEngine` - PyTorch-facing residual engine with parity-oriented behavior. Optional Path B fill: `path_b_fill=True` with `path_b_diff_method="fd"|"spectral"` and `path_b_periodic` (spectral requires periodic grids; see [`docs/path_b_derivatives.md`](https://github.com/IfimoAI/moju/blob/main/docs/path_b_derivatives.md)).
 - `build_loss_torch` and `r_eff_scalar_torch` - Torch-native R_eff loss helpers.
-- `wrap_law_torch` - wrap JAX `Laws.*` functions for use with Torch tensors through `jax2torch`.
+- `wrap_law_torch` - wrap JAX `Laws.*` functions for use with Torch tensors through a DLPack handoff.
 - Torch-native nondimensionalization helpers.
 
-Start with [`scripts/torch_laws_jax2torch_example.py`](https://github.com/IfimoAI/moju/blob/main/scripts/torch_laws_jax2torch_example.py). The implementation is covered by `tests/test_torch_engine.py` and `tests/test_torch_interop.py`.
+Start with [`scripts/torch_laws_example.py`](https://github.com/IfimoAI/moju/blob/main/scripts/torch_laws_example.py). The implementation is covered by `tests/test_torch_engine.py` and `tests/test_torch_interop.py`.
 
 ## Installation profiles
 
@@ -174,7 +174,7 @@ Training demos that use **optax** (e.g. [`examples/slab_cooling_demo.py`](https:
 - Path B finite-difference law fill: [`examples/cookbook_path_b_fd_law_laplace.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_path_b_fd_law_laplace.py)
 - Path B spectral (periodic) Burgers fill: [`examples/cookbook_path_b_spectral_burgers.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_path_b_spectral_burgers.py)
 - Constitutive divergence dashboard: [`examples/cookbook_constitutive_divergence.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_constitutive_divergence.py)
-- Torch interop: [`scripts/torch_laws_jax2torch_example.py`](https://github.com/IfimoAI/moju/blob/main/scripts/torch_laws_jax2torch_example.py)
+- Torch interop: [`scripts/torch_laws_example.py`](https://github.com/IfimoAI/moju/blob/main/scripts/torch_laws_example.py)
 
 ## Philosophy
 

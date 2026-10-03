@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-03
+
+### Added
+
+- **Typed specs and versioned reports.** `LawSpec`, `GroupSpec`, `ConstitutiveCustomSpec`, `BoundCheck`, `Scoring`, and `KeyDeclaration` are accepted anywhere a spec dict was. Audit reports include `schema_version`, `moju_version`, and `tier_definition`.
+- **Extension registry.** `moju.registry` registers constitutive models and dimensionless groups by name. Third-party packages can publish them through the `moju.models` and `moju.groups` entry-point groups.
+- **Custom-law hooks.** `register_law_scale_recipe`, `register_law_time_scale`, and `register_law_implied_check`, plus `LawImpliedCheck` and `implied_by_projection`.
+- **`derivatives="supplied_only"`.** Every derivative a law needs must be supplied. The log, the report, and the PDF record derivative provenance.
+- **`Scoring` and `BoundCheck`.** Declared scales and metrics, and inequality checks logged as `constitutive/bound/<name>/violation`.
+- **`moju.monitor.evaluate`.** Scores a batch of candidate states without appending to the engine log.
+- **`scale_source="user_recipe"`.** A law scaled by a user-registered or spec scale recipe reports that source instead of `"auto"`.
+- **PyTorch parity for custom laws.** `TorchResidualEngine` resolves a spec `fn`, runs `constitutive_custom` and `BoundCheck`, and forwards scoring, bound checks, and `derivatives` into `audit()`.
+
+### Changed
+
+- **DLPack handoff.** `wrap_law_torch` no longer uses `jax2torch`. Tensors cross the JAX/PyTorch boundary through DLPack, including dict and tuple arguments. The `torch` extra is `torch>=2.0`.
+- **JAX floor.** `jax` and `jaxlib` now require `>=0.4.32`, the release that accepts the DLPack `__dlpack__` protocol. Python `>=3.10` is required (3.9 is no longer tested).
+
+### Fixed
+
+- **Custom time scale.** `time_scale="custom"` without `t_ref_override` and without a law `t_ref` hint raises `ValueError` instead of `IndexError`.
+- **Dimensional L/U scaling** for Path B state in physical units.
+- **`moju[torch]` on current JAX.** The `jax2torch` 0.0.7 bridge failed against JAX releases that reject DLPack capsules.
+
+### Breaking
+
+- An unknown constitutive model name now raises instead of being skipped.
+- `jax2torch` is no longer installed by `moju[torch]`.
+- Python 3.9 is no longer supported.
+
 ## [1.1.4] - 2026-10-02
 
 ### Added
