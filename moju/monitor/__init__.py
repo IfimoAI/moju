@@ -26,6 +26,7 @@ from moju.monitor.monitor_log_export import (
 )
 from moju.monitor.spatial_rnorm_panels import build_spatial_rnorm_panels_from_residuals
 from moju.monitor.config import AuditSpec, MonitorConfig, audit_spec_to_engine_dict
+from moju.monitor.derivative_provenance import MissingSuppliedDerivativeError
 from moju.monitor.derived_state_chain import (
     apply_derived_state_chain,
     eval_derived_expr,
@@ -137,4 +138,5 @@ __all__ = [
     "report_json_schema",
     "LawImpliedCheck",
     "implied_by_projection",
+    "MissingSuppliedDerivativeError",
 ]

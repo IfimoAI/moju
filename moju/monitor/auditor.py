@@ -821,6 +821,8 @@ def audit(
         "overall_admissibility_level": admissibility_level(overall),
         "monitor_run_mode": (log[-1].get("run_mode") if log else None),
     }
+    if log[-1].get("derivative_provenance"):
+        report["derivative_provenance"] = dict(log[-1]["derivative_provenance"])
     from moju.monitor.constitutive_closure_summary import build_constitutive_closure_summary
 
     report["constitutive_closure_summary"] = build_constitutive_closure_summary(last_report_per_key)
@@ -2115,8 +2117,14 @@ class ResidualEngine:
         """
         if run_mode not in ("training", "eval"):
             raise ValueError("run_mode must be 'training' or 'eval'")
+        if self.derivatives == "supplied_only" and (auto_path_b_derivatives or fill_law_fd):
+            raise ValueError(
+                "derivatives='supplied_only' cannot be combined with auto_path_b_derivatives or "
+                "fill_law_fd; supply every derivative or use derivatives='auto'"
+            )
         residuals: Dict[str, Any] = {"laws": {}}
         pb_warn: List[str] = []
+        filled_provenance: Dict[str, str] = {}
 
         if state_pred is None:
             if self.state_builder is None:
@@ -2375,7 +2383,7 @@ class ResidualEngine:
                 raise TypeError(
                     "auto_path_b_derivatives must be False, True, or a PathBGridConfig instance"
                 )
-            state_pred_built, pb_warn = fill_path_b_derivatives(
+            state_pred_built, pb_warn, filled_provenance = fill_path_b_derivatives(
                 state_pred_built,
                 constitutive_audit=self.constitutive_audit,
                 laws_spec=self.laws_spec,
@@ -2383,6 +2391,7 @@ class ResidualEngine:
                 grid=grid,
                 copy=False,
                 fill_law_recipes=bool(fill_law_fd),
+                return_provenance=True,
             )
             merged = {**self.constants, **state_pred_built}
             for w in pb_warn:
@@ -2403,6 +2412,19 @@ class ResidualEngine:
         merged = {**self.constants, **state_pred_built}
 
         unresolved_dependencies: List[Dict[str, Any]] = []
+
+        from moju.monitor.derivative_provenance import (
+            MissingSuppliedDerivativeError,
+            label_provenance,
+            law_derivative_inputs,
+        )
+
+        deriv_inputs = law_derivative_inputs(self.laws_spec, self.state_declarations)
+        if self.derivatives == "supplied_only":
+            for law_n, arg_n, key_n in deriv_inputs:
+                if merged.get(key_n) is None:
+                    raise MissingSuppliedDerivativeError(law_n, arg_n, key_n)
+        derivative_provenance = label_provenance(deriv_inputs, merged, filled_provenance)
 
         for spec in self.laws_spec:
             name = spec["name"]
@@ -2627,6 +2649,8 @@ class ResidualEngine:
             entry["inferred"] = inferred_msgs
         if unresolved_dependencies:
             entry["unresolved_dependencies"] = unresolved_dependencies
+        if derivative_provenance:
+            entry["derivative_provenance"] = derivative_provenance
         if "coord_snapshot" not in entry:
             cs = _coord_snapshot_from_merged(merged)
             if cs:
