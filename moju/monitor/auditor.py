@@ -47,6 +47,7 @@ from moju.monitor.closure_registry import (
     compute_implied_delta,
     compute_implied_delta_with_debug,
     compute_ref_delta,
+    get_group_fn,
 )
 from moju.monitor.derived_state_chain import all_ref_keys_from_chain, keys_produced_by_chain
 from moju.monitor.model_derived_registry import enrich_derived_state_from_constitutive_audits
@@ -221,9 +222,17 @@ def _kwargs_from_state(
 
 
 def _get_fn(spec: Dict[str, Any], builtin_class: Any) -> Any:
-    if "fn" in spec:
+    if spec.get("fn") is not None:
         return spec["fn"]
-    return getattr(builtin_class, spec["name"])
+    name = spec["name"]
+    if builtin_class is Groups:
+        return get_group_fn(name)
+    fn = getattr(builtin_class, name, None)
+    if fn is None:
+        raise KeyError(
+            f"Unknown {builtin_class.__name__} entry {name!r}; pass a custom callable via the spec's 'fn' key"
+        )
+    return fn
 
 
 def _build_state(
@@ -2429,8 +2438,10 @@ class ResidualEngine:
                 else:
                     reg = registry.get(name)
                     if reg is None:
-                        # unknown function name -> omit silently (config validation should catch)
-                        continue
+                        raise KeyError(
+                            f"{category}:{name} is not a Models.* function or a registered model "
+                            "(moju.registry.register_model)"
+                        )
                     fn, arg_names = reg
                 base = spec.get("residual_basename") or name
 
