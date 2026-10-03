@@ -172,6 +172,13 @@ def test_explicit_t_ref_dict_and_mixing_error():
         resolve_time_scale_for_laws(["a", "fourier_conduction"], law_specs=specs)
 
 
+def test_custom_time_scale_without_hint_or_override_raises():
+    with pytest.raises(ValueError, match="t_ref_override"):
+        infer_nondim_scales(
+            ["fourier_conduction"], {}, {}, overrides={"time_scale": "custom", "L_ref": 1.0}
+        )
+
+
 def test_unhinted_custom_law_warns_in_dimensional_mode():
     eng = ResidualEngine(
         constants={"L": 1.0},

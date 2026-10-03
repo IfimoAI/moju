@@ -349,6 +349,11 @@ def infer_nondim_scales(
     if time_scale == "custom":
         t_override = ov.get("t_ref_override")
         if t_override is None:
+            if not explicit:
+                raise ValueError(
+                    "time_scale='custom' requires nondim_scales.t_ref_override when no selected law "
+                    "provides an explicit t_ref hint"
+                )
             if L_ref is None:
                 raise ValueError("Cannot infer L_ref for a custom time scale; provide nondim_scales.L_ref")
             partial = NondimScales(**{**kwargs, "L_ref": float(L_ref), "time_scale": "convective"})
