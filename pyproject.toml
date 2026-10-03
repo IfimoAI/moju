@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moju"
-version = "1.1.4"
+version = "1.2.0"
 description = "Physics supervision and audit tools for SciML models, with JAX-native residuals and PyTorch support."
 readme = "README.md"
 authors = [{ name = "Ifimo Lab (Ifimo Global Solutions LLC)", email = "lab@ifimoanalytics.com" }]
@@ -12,21 +12,20 @@ maintainers = [
   { name = "Ifimo Global Solutions LLC (dba Ifimo Lab)", email = "info@ifimoanalytics.com" }
 ]
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = ["physics", "jax", "torch", "pytorch", "sciml", "pinn", "dimensionless", "cfd", "differentiable", "residual"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
-    "jax>=0.4.0",
-    "jaxlib>=0.4.0",
+    "jax>=0.4.32",
+    "jaxlib>=0.4.32",
     "numpy>=1.20.0",
     "plotly>=5.18.0",
     "reportlab>=4.0",
@@ -46,7 +45,7 @@ studio = [
     "h5py>=3.8.0",
     "netCDF4>=1.6.0",
 ]
-torch = ["torch>=2.0.0", "jax2torch>=0.0.7"]
+torch = ["torch>=2.0.0"]
 dev = ["pytest", "black", "ruff"]
 
 [project.urls]
