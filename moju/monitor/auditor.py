@@ -235,6 +235,58 @@ def _get_fn(spec: Dict[str, Any], builtin_class: Any) -> Any:
     return fn
 
 
+def _evaluate_bound_check(
+    check: Any,
+    merged: Mapping[str, Any],
+    constants: Mapping[str, Any],
+) -> Tuple[jnp.ndarray, Dict[str, Any]]:
+    """
+    One-sided violation ``(relu(lower - v) + relu(v - upper)) / scale`` and a ``closure_debug`` row
+    (``pred`` = value, ``implied`` = nearest admissible value). Raises ``KeyError`` if the value is missing.
+    """
+    if check.value_fn is not None:
+        v = check.value_fn(dict(merged), dict(constants))
+    else:
+        v = merged.get(check.value_key)
+        if v is None:
+            v = constants.get(check.value_key)
+    if v is None:
+        raise KeyError(f"bound check {check.name!r}: value key {check.value_key!r} not found in state or constants")
+    v = jnp.asarray(v)
+
+    def _bound(b: Any) -> Optional[jnp.ndarray]:
+        if b is None:
+            return None
+        if callable(b):
+            return jnp.asarray(b(dict(merged), dict(constants)))
+        return jnp.asarray(float(b))
+
+    lo, hi = _bound(check.lower), _bound(check.upper)
+    viol = jnp.zeros_like(v, dtype=jnp.result_type(v, jnp.float32))
+    clamped = v
+    if lo is not None:
+        viol = viol + jax.nn.relu(lo - v)
+        clamped = jnp.maximum(clamped, lo)
+    if hi is not None:
+        viol = viol + jax.nn.relu(v - hi)
+        clamped = jnp.minimum(clamped, hi)
+    viol = viol / float(check.scale)
+    pred_b, impl_b = jnp.broadcast_arrays(v, clamped)
+    debug = {
+        "pred": pred_b,
+        "implied": impl_b,
+        "raw": pred_b - impl_b,
+        "delta": viol,
+        "mode": "bound",
+        "output_key": check.value_key or check.name,
+        "law_name": None,
+        "category": "constitutive",
+        "model_name": f"bound:{check.name}",
+        "state_map": {},
+    }
+    return viol, debug
+
+
 def _build_state(
     state_pred: Dict[str, Any],
     constants: Dict[str, Any],
@@ -402,11 +454,12 @@ def _max_per_key(
     residuals_flat: Dict[str, jnp.ndarray],
     *,
     to_python: bool = True,
+    scoring: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Per-key worst-point ``max |r|`` for ND closure keys only (``r_max`` in the log)."""
+    """Per-key worst-point ``max |r|`` for worst-point keys only (``r_max`` in the log)."""
     out: Dict[str, Any] = {}
     for key, arr in residuals_flat.items():
-        if not _key_uses_worst_point_admissibility(key):
+        if not _key_uses_worst_point_admissibility(key, scoring):
             continue
         r = _r_max_scalar(arr)
         if to_python:
@@ -454,8 +507,18 @@ def _suffix_is_nd_closure(rest: str) -> bool:
     return bool(parts) and parts[-1] in ("implied_delta", "ref_delta")
 
 
-def _key_uses_worst_point_admissibility(flat_key: str) -> bool:
-    """True when audit admissibility should use ``r_max`` (worst-point) instead of RMS."""
+def _key_uses_worst_point_admissibility(
+    flat_key: str, scoring: Optional[Mapping[str, Any]] = None
+) -> bool:
+    """True when audit admissibility should use ``r_max`` (worst-point) instead of RMS.
+
+    ``scoring`` maps flat keys to declared :class:`~moju.monitor.types.Scoring` (or its dict form);
+    a declaration overrides the built-in rule.
+    """
+    if scoring and flat_key in scoring:
+        decl = scoring[flat_key]
+        metric = decl.get("metric") if isinstance(decl, Mapping) else getattr(decl, "metric", None)
+        return metric == "worst_point"
     if "/" not in flat_key:
         return False
     prefix, rest = flat_key.split("/", 1)
@@ -473,11 +536,14 @@ def _state_derived_scale_per_key(
     law_scale_mode: str = "auto",
     nondim_scales: Optional[NondimScales] = None,
     constants: Optional[Dict[str, Any]] = None,
+    scoring: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[Dict[str, float], Dict[str, str]]:
     """
     Per-key scale for ``R_norm = R_eff / scale_k`` (``R_eff`` in ``entry["rms"]``) stored on each log entry (``entry["scale"]``).
 
-    Governing **laws/** use ``law_scale_mode`` (**``auto``** term-balance by default, or **``fixed``** ≈ 1e-2).
+    Declared :class:`~moju.monitor.types.Scoring` wins (``scale``, or the 1e-2 gauge when
+    ``dimensionless=True``; ``scale_source="declared"``). Otherwise governing **laws/** use
+    ``law_scale_mode`` (**``auto``** term-balance by default, or **``fixed``** ≈ 1e-2).
     Nondimensional **implied_delta** / **ref_delta** under **constitutive/** stay fixed ≈ 1e-2.
     Other audit keys and **data/** use RMS of relevant state (or reference) fields.
     Optional ``r_ref`` in :func:`audit` overrides per key after logging.
@@ -488,8 +554,17 @@ def _state_derived_scale_per_key(
     const = constants or {}
     mode = validate_law_scale_mode(law_scale_mode)
     law_spec_by_name = {str(s["name"]): s for s in laws_spec if "name" in s}
+    declared = dict(scoring or {})
 
     for k in flat_keys:
+        if k in declared:
+            decl = declared[k]
+            if decl.scale is not None:
+                out[k] = float(decl.scale)
+            else:
+                out[k] = _default_unit_scale_k(to_python=to_python)
+            sources[k] = "declared"
+            continue
         if "/" not in k:
             out[k] = _default_unit_scale_k(to_python=to_python)
             sources[k] = "fixed"
@@ -625,6 +700,7 @@ def _compute_log_step_metrics(
         r_max = entry.get("r_max") or {}
         entry_scale = entry.get("scale") or {}
         entry_scale_source = entry.get("scale_source") or {}
+        entry_scoring = entry.get("scoring") or {}
         r_norm: Dict[str, float] = {}
         admissibility: Dict[str, float] = {}
         per_key_report: Dict[str, Any] = {}
@@ -647,7 +723,7 @@ def _compute_log_step_metrics(
                 rms_f = float(v)
             except (TypeError, ValueError):
                 rms_f = float("nan")
-            if _key_uses_worst_point_admissibility(k):
+            if _key_uses_worst_point_admissibility(k, entry_scoring):
                 try:
                     v_max = float(r_max.get(k, float("nan")))
                 except (TypeError, ValueError):
@@ -710,7 +786,7 @@ def _compute_log_step_metrics(
             if category_failed:
                 category_scores[cat] = 0.0
             elif cat == "constitutive" and any(
-                _key_uses_worst_point_admissibility(kk) for kk in keys
+                _key_uses_worst_point_admissibility(kk, entry_scoring) for kk in keys
             ):
                 category_scores[cat] = _min_admissibility(vals)
             else:
@@ -1972,6 +2048,7 @@ class ResidualEngine:
         _bnames = [b.name for b in self.bound_checks]
         if len(set(_bnames)) != len(_bnames):
             raise ValueError(f"bound check names must be unique, got {_bnames}")
+        self._scoring_by_key = self._build_scoring_map()
 
         # Config-time validation (low effort)
         def _validate_specs(
@@ -2038,6 +2115,23 @@ class ResidualEngine:
         self._log.clear()
         self._index = 0
         self._last_residuals = None
+
+    def _build_scoring_map(self) -> Dict[str, Any]:
+        """Flat residual key -> declared :class:`~moju.monitor.types.Scoring`."""
+        from moju.monitor.types import Scoring
+
+        out: Dict[str, Any] = {}
+        for spec in self.laws_spec:
+            sc = Scoring.coerce(spec.get("scoring"))
+            if sc is not None:
+                out[f"laws/{spec['name']}"] = sc
+        for spec in self.constitutive_custom:
+            sc = Scoring.coerce(spec.get("scoring"))
+            if sc is not None:
+                out[f"constitutive/custom/{spec['name']}"] = sc
+        for b in self.bound_checks:
+            out[f"constitutive/bound/{b.name}/violation"] = b.scoring
+        return out
 
     def _check_undeclared_keys(self, state_built: Mapping[str, Any]) -> None:
         """Dimensional mode: warn (once per key) or raise for keys that would pass through unscaled."""
@@ -2579,7 +2673,7 @@ class ResidualEngine:
             return out
 
         closure_debug: Dict[str, Dict[str, Any]] = {}
-        if self.constitutive_audit or self.constitutive_custom:
+        if self.constitutive_audit or self.constitutive_custom or self.bound_checks:
             c = _run_specs(
                 self.constitutive_audit,
                 registry=MODEL_FNS,
@@ -2592,6 +2686,20 @@ class ResidualEngine:
                     arr = spec["fn"](merged, self.constants)
                     if arr is not None:
                         c[f"custom/{cname}"] = jnp.asarray(arr)
+            for bc in self.bound_checks:
+                try:
+                    viol, bdebug = _evaluate_bound_check(bc, merged, self.constants)
+                except KeyError as err:
+                    if not self.best_effort_partial:
+                        raise
+                    unresolved_dependencies.append(
+                        {"stage": "bound", "name": bc.name, "missing_keys": [str(bc.value_key)]}
+                    )
+                    _maybe_log_omit(f"bound:{bc.name} skipped in best_effort_partial mode: {err}")
+                    continue
+                bkey = f"bound/{bc.name}/violation"
+                c[bkey] = viol
+                closure_debug[bkey] = bdebug
             if c:
                 residuals["constitutive"] = c
         if closure_debug:
@@ -2610,7 +2718,7 @@ class ResidualEngine:
 
         flat = _flatten_residual_dict(residuals)
         rms_per_key = _rms_per_key(flat, to_python=log_to_python)
-        r_max_per_key = _max_per_key(flat, to_python=log_to_python)
+        r_max_per_key = _max_per_key(flat, to_python=log_to_python, scoring=self._scoring_by_key)
         state_ref_built_for_scale = None
         if ref_for_audits is not None:
             state_ref_built_for_scale = _maybe_nd_convert(
@@ -2626,6 +2734,7 @@ class ResidualEngine:
             law_scale_mode=eff_law_scale_mode,
             nondim_scales=effective_nd_scales or self.nondim_scales,
             constants=self.constants,
+            scoring=self._scoring_by_key,
         )
         entry: Dict[str, Any] = {
             "index": self._index,
@@ -2651,6 +2760,9 @@ class ResidualEngine:
             entry["unresolved_dependencies"] = unresolved_dependencies
         if derivative_provenance:
             entry["derivative_provenance"] = derivative_provenance
+        entry_scoring = {k: s.to_dict() for k, s in self._scoring_by_key.items() if k in flat}
+        if entry_scoring:
+            entry["scoring"] = entry_scoring
         if "coord_snapshot" not in entry:
             cs = _coord_snapshot_from_merged(merged)
             if cs:
@@ -2686,6 +2798,9 @@ class ResidualEngine:
                 ivk = spec.get("implied_value_key")
                 if ivk:
                     keys.add(ivk)
+            for bc in self.bound_checks:
+                if bc.value_key:
+                    keys.add(bc.value_key)
         keys |= all_ref_keys_from_chain(self.derived_state_chain)
         keys -= keys_produced_by_chain(self.derived_state_chain)
         return keys
