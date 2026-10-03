@@ -55,6 +55,24 @@ from moju.monitor.path_b_derivatives import (
     fill_path_b_spectral,
 )
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
+from moju.monitor.tiers import (
+    TIER_CUTOFFS,
+    TIER_DEFINITION,
+    TIER_ORDER,
+    tier_definition,
+    tier_for_score,
+)
+from moju.monitor.types import (
+    REPORT_SCHEMA_VERSION,
+    AuditReport,
+    BoundCheck,
+    ConstitutiveCustomSpec,
+    GroupSpec,
+    KeyDeclaration,
+    LawSpec,
+    Scoring,
+    report_json_schema,
+)
 
 __all__ = [
     "audit_meta",
@@ -101,4 +119,18 @@ __all__ = [
     "build_law_spec_identity",
     "implied_group_specs_for_laws",
     "merge_implied_groups_first",
+    "TIER_CUTOFFS",
+    "TIER_DEFINITION",
+    "TIER_ORDER",
+    "tier_definition",
+    "tier_for_score",
+    "REPORT_SCHEMA_VERSION",
+    "AuditReport",
+    "BoundCheck",
+    "ConstitutiveCustomSpec",
+    "GroupSpec",
+    "KeyDeclaration",
+    "LawSpec",
+    "Scoring",
+    "report_json_schema",
 ]

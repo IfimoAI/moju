@@ -33,10 +33,13 @@ class AuditSpec:
     include_ref_delta: bool = True
     # Optional reference tensor key for ref_delta denominator (|ref|); else symmetric scale.
     ref_delta_ref_key: Optional[str] = None
+    # Optional user callable (``user_fns[pred_fn_key]``) used instead of ``Models.<name>``.
+    pred_fn_key: Optional[str] = None
+    pred_state_map: Optional[Dict[str, str]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         # implied_fn omitted (not JSON-serializable); use audit_spec_to_engine_dict for engine.
-        return {
+        d = {
             "name": self.name,
             "output_key": self.output_key,
             "state_map": dict(self.state_map),
@@ -45,6 +48,10 @@ class AuditSpec:
             "include_ref_delta": self.include_ref_delta,
             "ref_delta_ref_key": self.ref_delta_ref_key,
         }
+        if self.pred_fn_key is not None:
+            d["pred_fn_key"] = self.pred_fn_key
+            d["pred_state_map"] = dict(self.pred_state_map or {})
+        return d
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "AuditSpec":
@@ -86,6 +93,8 @@ class AuditSpec:
             residual_basename=(d.get("residual_basename") or None),
             include_ref_delta=bool(d.get("include_ref_delta", True)),
             ref_delta_ref_key=(d.get("ref_delta_ref_key") or None),
+            pred_fn_key=(d.get("pred_fn_key") or None),
+            pred_state_map=(dict(d["pred_state_map"]) if d.get("pred_state_map") else None),
         )
 
 

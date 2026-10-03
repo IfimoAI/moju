@@ -115,7 +115,25 @@ def test_monitor_module_has_all():
         "enrich_derived_state_from_constitutive_audits",
         "pretty_residual_key",
         "pretty_category_name",
-    }
+    } | NEW_1_2_0_MONITOR_EXPORTS
+
+
+NEW_1_2_0_MONITOR_EXPORTS = {
+    "TIER_CUTOFFS",
+    "TIER_DEFINITION",
+    "TIER_ORDER",
+    "tier_definition",
+    "tier_for_score",
+    "REPORT_SCHEMA_VERSION",
+    "AuditReport",
+    "BoundCheck",
+    "ConstitutiveCustomSpec",
+    "GroupSpec",
+    "KeyDeclaration",
+    "LawSpec",
+    "Scoring",
+    "report_json_schema",
+}
 
 
 def test_groups_has_re_and_pr():

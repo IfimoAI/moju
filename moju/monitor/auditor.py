@@ -739,6 +739,18 @@ def _compute_log_step_metrics(
     return out
 
 
+def _report_header() -> Dict[str, Any]:
+    from moju import __version__
+    from moju.monitor.tiers import tier_definition
+    from moju.monitor.types import REPORT_SCHEMA_VERSION
+
+    return {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "moju_version": __version__,
+        "tier_definition": tier_definition(),
+    }
+
+
 def audit(
     log: List[Dict[str, Any]],
     r_ref: Optional[Dict[str, float]] = None,
@@ -772,10 +784,17 @@ def audit(
     finite present category score (missing categories excluded); for legacy entries without
     ``run_mode``, minimum finite score across all present categories.
 
-    The returned dict includes ``monitor_run_mode`` from the last log entry when present.
+    The returned dict includes ``monitor_run_mode`` from the last log entry when present, plus
+    ``schema_version`` (:data:`moju.monitor.types.REPORT_SCHEMA_VERSION`), ``moju_version``, and
+    ``tier_definition`` (:data:`moju.monitor.tiers.TIER_DEFINITION`).
     """
     if not log:
-        return {"per_key": {}, "overall_admissibility_score": 0.0, "overall_admissibility_level": "Non-Admissible"}
+        return {
+            **_report_header(),
+            "per_key": {},
+            "overall_admissibility_score": 0.0,
+            "overall_admissibility_level": "Non-Admissible",
+        }
     step_metrics = _compute_log_step_metrics(log, r_ref)
     last_report_per_key: Dict[str, Any] = {}
     for entry, m in zip(log, step_metrics):
@@ -786,6 +805,7 @@ def audit(
         last_report_per_key = dict(m["per_key_report"])
     overall = log[-1].get("overall_admissibility_score", 0.0) if log else 0.0
     report = {
+        **_report_header(),
         "per_key": last_report_per_key,
         "per_category": log[-1].get("category_admissibility_score", {}) if log else {},
         "overall_admissibility_score": overall,
@@ -1852,7 +1872,9 @@ class ResidualEngine:
                 constants = config.constants
                 laws = config.laws
                 groups = config.groups
-                constitutive_audit = [audit_spec_to_engine_dict(s) for s in config.constitutive_audit]
+                from moju.monitor.types import spec_to_engine_dict
+
+                constitutive_audit = [spec_to_engine_dict(s) for s in config.constitutive_audit]
                 constitutive_custom = config.constitutive_custom
                 derived_state_chain = list(config.derived_state_chain or [])
                 primary_fields = list(config.primary_fields)
@@ -1865,14 +1887,16 @@ class ResidualEngine:
             else:
                 raise TypeError("config must be a MonitorConfig")
 
+        from moju.monitor.types import specs_to_engine_dicts
+
         self.constants = dict(constants or {})
-        self.laws_spec = list(laws or [])
-        self.groups_spec = list(groups or [])
-        self.constitutive_audit = list(constitutive_audit or [])
+        self.laws_spec = specs_to_engine_dicts(laws)
+        self.groups_spec = specs_to_engine_dicts(groups)
+        self.constitutive_audit = specs_to_engine_dicts(constitutive_audit)
         li_c, _li_s = merge_law_implied_audit_specs(self.laws_spec, enabled=law_implied_enabled)
         mc, rc = merge_fragment_law_implied_audit_specs(li_c, self.constitutive_audit)
         self.constitutive_audit = mc + rc
-        self.constitutive_custom = list(constitutive_custom or [])
+        self.constitutive_custom = specs_to_engine_dicts(constitutive_custom)
         self.derived_state_chain = list(derived_state_chain or [])
         self.derived_state_chain = enrich_derived_state_from_constitutive_audits(
             self.constitutive_audit,
