@@ -1868,6 +1868,10 @@ class ResidualEngine:
         state_units: str = "nondimensional",
         nondim_scales: Optional[NondimScales] = None,
         nondim_scales_overrides: Optional[Dict[str, Any]] = None,
+        state_declarations: Optional[Dict[str, Any]] = None,
+        undeclared_keys: str = "warn",
+        derivatives: str = "auto",
+        bound_checks: Optional[Sequence[Any]] = None,
     ):
         law_implied_enabled = bool(law_implied_audits)
         cfg_law_scale_mode: Optional[str] = None
@@ -1893,6 +1897,14 @@ class ResidualEngine:
                 cfg_nondim_overrides = config.nondim_scales
                 if config.state_builder is not None and state_builder is None:
                     state_builder = config.state_builder
+                if config.state_declarations and state_declarations is None:
+                    state_declarations = dict(config.state_declarations)
+                undeclared_keys = config.undeclared_keys
+                derivatives = config.derivatives
+                if config.bound_checks and bound_checks is None:
+                    bound_checks = list(config.bound_checks)
+                if config.user_fns and user_fns is None:
+                    user_fns = dict(config.user_fns)
             else:
                 raise TypeError("config must be a MonitorConfig")
 
@@ -1936,6 +1948,28 @@ class ResidualEngine:
             self.nondim_scales = nondim_scales_from_dict(self.nondim_scales_overrides)
         else:
             self.nondim_scales = None
+
+        from moju.monitor.key_declarations import (
+            ENGINE_DEFAULT_DECLARATIONS,
+            compile_state_declarations,
+            normalize_state_declarations,
+            validate_undeclared_keys,
+        )
+        from moju.monitor.types import BoundCheck
+
+        self.state_declarations = normalize_state_declarations(state_declarations)
+        self._declaration_rules = compile_state_declarations(
+            {**ENGINE_DEFAULT_DECLARATIONS, **self.state_declarations}
+        )
+        self.undeclared_keys = validate_undeclared_keys(undeclared_keys)
+        self._warned_undeclared: Set[str] = set()
+        if derivatives not in ("auto", "supplied_only"):
+            raise ValueError(f"derivatives must be 'auto' or 'supplied_only', got {derivatives!r}")
+        self.derivatives = derivatives
+        self.bound_checks: List[BoundCheck] = [BoundCheck.coerce(b) for b in (bound_checks or [])]
+        _bnames = [b.name for b in self.bound_checks]
+        if len(set(_bnames)) != len(_bnames):
+            raise ValueError(f"bound check names must be unique, got {_bnames}")
 
         # Config-time validation (low effort)
         def _validate_specs(
@@ -2002,6 +2036,30 @@ class ResidualEngine:
         self._log.clear()
         self._index = 0
         self._last_residuals = None
+
+    def _check_undeclared_keys(self, state_built: Mapping[str, Any]) -> None:
+        """Dimensional mode: warn (once per key) or raise for keys that would pass through unscaled."""
+        from moju.monitor.key_declarations import undeclared_state_keys
+
+        group_outputs = [str(s["output_key"]) for s in self.groups_spec if s.get("output_key")]
+        undeclared = undeclared_state_keys(
+            state_built.keys(), self.state_declarations, extra_passthrough=group_outputs
+        )
+        if not undeclared:
+            return
+        msg = (
+            "state_units='dimensional': keys with no scaling rule or declaration are passed to laws "
+            f"unscaled: {undeclared}. Declare them with state_declarations={{key: KeyDeclaration(...)}} "
+            "(use KeyDeclaration('dimensionless') for keys that are already nondimensional)."
+        )
+        if self.undeclared_keys == "error":
+            raise ValueError(msg)
+        new = [k for k in undeclared if k not in self._warned_undeclared]
+        if new:
+            import warnings
+
+            self._warned_undeclared.update(new)
+            warnings.warn(msg, UserWarning, stacklevel=4)
 
     def _state_builder(
         self,
@@ -2111,6 +2169,8 @@ class ResidualEngine:
                 state_pred,
                 self.constants,
                 nd_overrides,
+                law_specs=self.laws_spec,
+                warn_unhinted=self.nondim_scales is None and not isinstance(nondim_scales, NondimScales),
             )
             effective_nd_scales = inferred
             nondim_scale_source = dict(nd_src)
@@ -2132,8 +2192,12 @@ class ResidualEngine:
 
         def _maybe_nd_convert(state_built: Dict[str, Any]) -> Dict[str, Any]:
             if eff_state_units == "dimensional" and effective_nd_scales is not None:
+                self._check_undeclared_keys(state_built)
                 return dimensional_to_nd(
-                    state_built, effective_nd_scales, warn_unknown=False
+                    state_built,
+                    effective_nd_scales,
+                    extra_rules=self._declaration_rules or None,
+                    warn_unknown=False,
                 )
             return state_built
 

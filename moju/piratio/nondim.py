@@ -101,7 +101,9 @@ class NondimScales:
     time_scale:
         Convention for nondimensionalising time and time derivatives.
         One of ``"convective"``, ``"fourier"``, ``"mass_fourier"``,
-        ``"wave"``.
+        ``"wave"``, or ``"custom"`` (uses ``t_ref_override``).
+    t_ref_override:
+        Explicit time reference [s]. **Required** when ``time_scale="custom"``.
 
     Examples
     --------
@@ -128,12 +130,19 @@ class NondimScales:
     D_ref: Optional[float] = None
     c_ref: Optional[float] = None
     time_scale: str = "convective"
+    t_ref_override: Optional[float] = None
 
     def __post_init__(self) -> None:
-        valid = ("convective", "fourier", "mass_fourier", "wave")
+        valid = ("convective", "fourier", "mass_fourier", "wave", "custom")
         if self.time_scale not in valid:
             raise ValueError(
                 f"time_scale must be one of {valid!r}; got {self.time_scale!r}"
+            )
+        if self.time_scale == "custom" and (
+            self.t_ref_override is None or not float(self.t_ref_override) > 0.0
+        ):
+            raise ValueError(
+                "t_ref_override must be a positive float when time_scale='custom'"
             )
         if self.time_scale == "fourier" and self.alpha_ref is None:
             raise ValueError(
@@ -168,7 +177,10 @@ class NondimScales:
         - ``"fourier"``       → ``L_ref² / alpha_ref``
         - ``"mass_fourier"``  → ``L_ref² / D_ref``
         - ``"wave"``          → ``L_ref / c_ref``
+        - ``"custom"``        → ``t_ref_override``
         """
+        if self.time_scale == "custom":
+            return float(self.t_ref_override)  # type: ignore[arg-type]
         if self.time_scale == "convective":
             return self.L_ref / self.U_ref
         if self.time_scale == "fourier":
@@ -383,7 +395,7 @@ def dimensional_to_nd(
     Convert a physical-units state dictionary to nondimensional form.
 
     The function applies the scaling rules in ``_FIELD_SCALE_RULES`` (overridden
-    by ``extra_rules``) to every key in *state*. Keys in ``_PASSTHROUGH_KEYS``
+    by ``extra_rules``) to every key in *state*. Keys in ``_PASSTHROUGH_KEYS`` not named in ``extra_rules``
     (dimensionless groups and known dimensional law constants) are copied
     unchanged without any warning.
 
@@ -424,10 +436,11 @@ def dimensional_to_nd(
     ... )
     """
     effective_rules = _build_effective_rules(extra_rules)
+    explicit = set(extra_rules or ())
 
     out: Dict[str, Any] = {}
     for key, value in state.items():
-        if key in _PASSTHROUGH_KEYS:
+        if key in _PASSTHROUGH_KEYS and key not in explicit:
             out[key] = value
         elif key in effective_rules:
             fwd_fn, _ = effective_rules[key]
@@ -479,10 +492,11 @@ def nd_to_dimensional(
         A new dictionary with dimensional values.
     """
     effective_rules = _build_effective_rules(extra_rules)
+    explicit = set(extra_rules or ())
 
     out: Dict[str, Any] = {}
     for key, value in state_nd.items():
-        if key in _PASSTHROUGH_KEYS:
+        if key in _PASSTHROUGH_KEYS and key not in explicit:
             out[key] = value
         elif key in effective_rules:
             _, inv_fn = effective_rules[key]

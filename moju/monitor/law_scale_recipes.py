@@ -370,6 +370,78 @@ def _generic_state_map_rms(
     return max(finite)
 
 
+LawScaleRecipe = Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any], Optional[NondimScales]], float]
+
+_USER_LAW_SCALE_RECIPES: Dict[str, LawScaleRecipe] = {}
+
+
+def register_law_scale_recipe(law_name: str, fn: LawScaleRecipe, *, overwrite: bool = False) -> None:
+    """
+    Register a term-balance recipe ``fn(merged, constants, law_spec, nondim_scales) -> float`` for
+    ``law_name`` (custom laws match on the spec ``name``). User recipes take precedence over built-in
+    recipes; a law spec's own ``"scale_recipe"`` key takes precedence over both.
+
+    Build recipes from :func:`law_arg_value` and :func:`term_max_rms`, e.g.
+    ``term_max_rms(m * x_tt, c * x_t, k * x)`` for ``m x_tt + c x_t + k x = 0``.
+    """
+    if not callable(fn):
+        raise TypeError("scale recipe must be callable")
+    if law_name in _USER_LAW_SCALE_RECIPES and not overwrite:
+        raise ValueError(f"scale recipe for {law_name!r} already registered; pass overwrite=True")
+    _USER_LAW_SCALE_RECIPES[str(law_name)] = fn
+
+
+def unregister_law_scale_recipe(law_name: str) -> None:
+    _USER_LAW_SCALE_RECIPES.pop(str(law_name), None)
+
+
+def list_user_law_scale_recipes() -> Tuple[str, ...]:
+    return tuple(sorted(_USER_LAW_SCALE_RECIPES))
+
+
+def term_rms(arr: Any, *, vector: bool = False) -> float:
+    """
+    RMS magnitude of one term; NaN if ``arr`` is ``None`` or empty.
+
+    With ``vector=True`` the last axis holds vector components and the result is
+    ``sqrt(mean(sum of squares over the last axis))``.
+    """
+    if arr is None:
+        return float("nan")
+    a = jnp.asarray(arr)
+    if a.size == 0:
+        return float("nan")
+    if vector and a.ndim >= 1:
+        return float(jnp.sqrt(jnp.mean(jnp.sum(a**2, axis=-1)) + _SCALE_EPS))
+    return float(jnp.sqrt(jnp.mean(a**2) + _SCALE_EPS))
+
+
+def term_max_rms(*terms: Any, vector: bool = False) -> float:
+    """Largest finite positive :func:`term_rms` among ``terms`` (``None`` skipped); NaN if none."""
+    vals = [term_rms(t, vector=vector) for t in terms if t is not None]
+    finite = [v for v in vals if math.isfinite(v) and v > 0]
+    return max(finite) if finite else float("nan")
+
+
+def law_arg_value(
+    merged: Mapping[str, Any],
+    constants: Mapping[str, Any],
+    law_spec: Mapping[str, Any],
+    arg: str,
+) -> Any:
+    """Value bound to law argument ``arg`` through the spec ``state_map`` (state, then constants)."""
+    return _val(merged, constants, law_spec.get("state_map") or {}, arg)
+
+
+def _resolve_scale_recipe(law_name: str, law_spec: Mapping[str, Any]) -> Tuple[Optional[LawScaleRecipe], bool]:
+    spec_recipe = law_spec.get("scale_recipe")
+    if spec_recipe is not None:
+        return spec_recipe, True
+    if law_name in _USER_LAW_SCALE_RECIPES:
+        return _USER_LAW_SCALE_RECIPES[law_name], True
+    return LAW_SCALE_RECIPES.get(law_name), False
+
+
 def characteristic_law_scale_k(
     law_name: str,
     *,
@@ -381,14 +453,24 @@ def characteristic_law_scale_k(
     """
     Return ``(scale_k, scale_source)`` for a governing law.
 
-    Fallback: recipe → generic state_map RMS → ``DEFAULT_NONDIM_R_NORM_SCALE_K``.
+    Fallback: spec ``scale_recipe`` → registered user recipe → built-in recipe → generic
+    state_map RMS → ``DEFAULT_NONDIM_R_NORM_SCALE_K``.
     """
-    recipe = LAW_SCALE_RECIPES.get(law_name)
+    recipe, is_user = _resolve_scale_recipe(law_name, law_spec)
     scale = float("nan")
     if recipe is not None:
         try:
             scale = float(recipe(merged, constants, law_spec, nondim_scales))
-        except Exception:  # noqa: BLE001
+        except Exception as err:  # noqa: BLE001
+            if is_user:
+                import warnings
+
+                warnings.warn(
+                    f"scale recipe for law {law_name!r} raised {type(err).__name__}: {err}; "
+                    "falling back to generic state_map RMS",
+                    UserWarning,
+                    stacklevel=2,
+                )
             scale = float("nan")
     if not math.isfinite(scale) or scale <= 0:
         scale = _generic_state_map_rms(merged, constants, law_spec)
@@ -405,8 +487,10 @@ def list_laws_with_scale_recipes() -> Tuple[str, ...]:
 
 
 def law_scale_coverage_report() -> Dict[str, str]:
-    """Map every public law to ``recipe`` or ``generic_only``."""
+    """Map every public law (and user-registered recipe) to ``user_recipe``, ``recipe``, or ``generic_only``."""
     out: Dict[str, str] = {}
     for name in all_law_names():
         out[name] = "recipe" if name in LAW_SCALE_RECIPES else "generic_only"
+    for name in _USER_LAW_SCALE_RECIPES:
+        out[name] = "user_recipe"
     return out

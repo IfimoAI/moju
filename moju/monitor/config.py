@@ -133,6 +133,16 @@ class MonitorConfig:
     state_units: str = "nondimensional"
     # Partial overrides for :class:`~moju.piratio.nondim.NondimScales` (JSON-serializable).
     nondim_scales: Optional[Dict[str, Any]] = None
+    # Dimensional mode: {state_key: KeyDeclaration | {"base", "time_order", "space_order"}}.
+    state_declarations: Dict[str, Any] = field(default_factory=dict)
+    # Dimensional mode policy for keys with no scaling rule or declaration: "warn" | "error".
+    undeclared_keys: str = "warn"
+    # "auto" (Moju may fill derivatives) or "supplied_only" (every derivative must be supplied).
+    derivatives: str = "auto"
+    # Inequality checks (BoundCheck or dict); callables are not serialized by to_dict().
+    bound_checks: List[Any] = field(default_factory=list)
+    # Callables for user_fns (not serialized).
+    user_fns: Dict[str, Callable[..., Any]] = field(default_factory=dict, repr=False, compare=False)
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {
@@ -149,6 +159,16 @@ class MonitorConfig:
         }
         if self.nondim_scales:
             d["nondim_scales"] = dict(self.nondim_scales)
+        if self.state_declarations:
+            from moju.monitor.types import KeyDeclaration
+
+            d["state_declarations"] = {
+                k: KeyDeclaration.coerce(v).to_dict() for k, v in self.state_declarations.items()
+            }
+        if self.undeclared_keys != "warn":
+            d["undeclared_keys"] = self.undeclared_keys
+        if self.derivatives != "auto":
+            d["derivatives"] = self.derivatives
         return d
 
     @staticmethod
@@ -195,4 +215,7 @@ class MonitorConfig:
             law_scale_mode=validate_law_scale_mode(d.get("law_scale_mode", "auto")),
             state_units=validate_state_units(d.get("state_units", "nondimensional")),
             nondim_scales=(dict(d["nondim_scales"]) if d.get("nondim_scales") else None),
+            state_declarations=dict(d.get("state_declarations") or {}),
+            undeclared_keys=str(d.get("undeclared_keys", "warn")),
+            derivatives=str(d.get("derivatives", "auto")),
         )
