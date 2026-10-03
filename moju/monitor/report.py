@@ -163,6 +163,10 @@ def write_audit_pdf(
     if model_id:
         meta_parts.append(f"Model ID: {model_id}")
     meta_parts.append(f"Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    if report.get("moju_version"):
+        meta_parts.append(f"Moju {report['moju_version']}")
+    if report.get("schema_version"):
+        meta_parts.append(f"Report schema {report['schema_version']}")
     if meta_parts:
         story.append(Paragraph(" &nbsp; &nbsp; ".join(meta_parts), body_style))
         story.append(Spacer(1, 12))
@@ -295,6 +299,26 @@ def write_audit_pdf(
         )
         story.append(Spacer(1, 16))
 
+    provenance = report.get("derivative_provenance") or {}
+    if provenance:
+        story.append(Paragraph("Derivative provenance", heading_style))
+        prov_rows = [["Derivative key", "Origin"]] + [
+            [str(k), str(v).replace("_", " ")] for k, v in sorted(provenance.items())
+        ]
+        t = Table(prov_rows, colWidths=[3.0 * inch, 2.0 * inch])
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e0e0e0")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ]
+            )
+        )
+        story.append(t)
+        story.append(Spacer(1, 16))
+
     closure_summary = report.get("constitutive_closure_summary")
     if closure_summary:
         story.append(Paragraph("Constitutive closure summary", heading_style))
@@ -334,6 +358,29 @@ def write_audit_pdf(
         )
         story.append(t)
         story.append(Spacer(1, 8))
+
+    tier_def = report.get("tier_definition") or {}
+    tiers = tier_def.get("tiers") or []
+    if tiers:
+        story.append(Paragraph("Tier definition", heading_style))
+        cut_rows = [["Tier", "Minimum score"]] + [
+            [str(t_.get("name", "")), format_admissibility_pct(float(t_.get("min_score", 0.0)))] for t_ in tiers
+        ]
+        t = Table(cut_rows, colWidths=[3.0 * inch, 1.5 * inch])
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e0e0e0")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ]
+            )
+        )
+        story.append(t)
+        if tier_def.get("meaning"):
+            story.append(Spacer(1, 6))
+            story.append(Paragraph(f"<i>{tier_def['meaning']}</i>", body_style))
 
     doc.build(
         story,

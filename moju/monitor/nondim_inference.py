@@ -91,16 +91,97 @@ def _geom_L_ref(state: Mapping[str, Any]) -> Optional[float]:
     return max(spans)
 
 
-def resolve_time_scale_for_laws(law_names: Sequence[str]) -> str:
-    """Pick a single ``time_scale``; raise on incompatible multi-law selection."""
-    scales: Set[str] = set()
-    unknown: list[str] = []
+_TIME_SCALE_KINDS = ("convective", "fourier", "mass_fourier", "wave")
+
+# User hints: law name -> kind | {"t_ref": float} | callable(constants, scales) -> t_ref.
+_USER_LAW_TIME_SCALE: Dict[str, Any] = {}
+
+
+def _validate_time_scale_hint(law_name: str, hint: Any) -> Any:
+    if isinstance(hint, str):
+        if hint not in _TIME_SCALE_KINDS:
+            raise ValueError(
+                f"time_scale for law {law_name!r} must be one of {_TIME_SCALE_KINDS}, "
+                f"a dict {{'t_ref': float}}, or a callable; got {hint!r}"
+            )
+        return hint
+    if isinstance(hint, Mapping):
+        if "t_ref" not in hint or not float(hint["t_ref"]) > 0.0:
+            raise ValueError(f"time_scale dict for law {law_name!r} needs a positive 't_ref'")
+        return {"t_ref": float(hint["t_ref"])}
+    if callable(hint):
+        return hint
+    raise TypeError(f"Unsupported time_scale hint for law {law_name!r}: {hint!r}")
+
+
+def register_law_time_scale(law_name: str, time_scale: Any, *, overwrite: bool = False) -> None:
+    """
+    Declare the nondimensional time convention of ``law_name`` for ``state_units="dimensional"``.
+
+    ``time_scale`` is a kind (``"convective"``, ``"fourier"``, ``"mass_fourier"``, ``"wave"``), a dict
+    ``{"t_ref": float}``, or a callable ``(constants, scales) -> t_ref`` evaluated after the other
+    reference scales are inferred. A law spec's own ``"time_scale"`` key takes precedence.
+    """
+    if law_name in _USER_LAW_TIME_SCALE and not overwrite:
+        raise ValueError(f"time scale for {law_name!r} already registered; pass overwrite=True")
+    _USER_LAW_TIME_SCALE[str(law_name)] = _validate_time_scale_hint(law_name, time_scale)
+
+
+def unregister_law_time_scale(law_name: str) -> None:
+    _USER_LAW_TIME_SCALE.pop(str(law_name), None)
+
+
+def law_time_scale_hint(law_name: str, law_spec: Optional[Mapping[str, Any]] = None) -> Any:
+    """Hint for one law: spec ``time_scale`` > registered hint > built-in table; ``None`` if unknown."""
+    if law_spec is not None and law_spec.get("time_scale") is not None:
+        return _validate_time_scale_hint(law_name, law_spec["time_scale"])
+    if law_name in _USER_LAW_TIME_SCALE:
+        return _USER_LAW_TIME_SCALE[law_name]
+    return LAW_TIME_SCALE.get(law_name)
+
+
+def _collect_time_scale_hints(
+    law_names: Sequence[str],
+    law_specs: Optional[Sequence[Mapping[str, Any]]],
+) -> Tuple[Set[str], list, list]:
+    spec_by_name: Dict[str, Mapping[str, Any]] = {}
+    for s in law_specs or ():
+        if "name" in s:
+            spec_by_name[str(s["name"])] = s
+    kinds: Set[str] = set()
+    explicit: list = []
+    unhinted: list = []
     for name in law_names:
-        ts = LAW_TIME_SCALE.get(name)
-        if ts is None:
-            unknown.append(name)
+        hint = law_time_scale_hint(name, spec_by_name.get(name))
+        if hint is None:
+            unhinted.append(name)
+        elif isinstance(hint, str):
+            kinds.add(hint)
         else:
-            scales.add(ts)
+            explicit.append((name, hint))
+    return kinds, explicit, unhinted
+
+
+def resolve_time_scale_for_laws(
+    law_names: Sequence[str],
+    *,
+    law_specs: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> str:
+    """
+    Pick a single ``time_scale`` kind; raise on incompatible multi-law selection.
+
+    Returns ``"custom"`` when the selected laws carry explicit ``t_ref`` hints
+    (see :func:`register_law_time_scale`). Laws with no hint do not vote.
+    """
+    scales, explicit, _unhinted = _collect_time_scale_hints(law_names, law_specs)
+    if explicit:
+        if scales:
+            raise ValueError(
+                "Selected laws mix an explicit t_ref time scale "
+                f"({', '.join(n for n, _ in explicit)}) with conventions {sorted(scales)}. "
+                "Set nondim_scales.time_scale explicitly or run separate audits."
+            )
+        return "custom"
     if len(scales) > 1:
         raise ValueError(
             "Selected laws require incompatible nondimensional time conventions "
@@ -109,9 +190,30 @@ def resolve_time_scale_for_laws(law_names: Sequence[str]) -> str:
         )
     if scales:
         return next(iter(scales))
-    if unknown:
-        return "convective"
     return "convective"
+
+
+def _explicit_t_ref(
+    explicit: list,
+    constants: Mapping[str, Any],
+    partial_scales: NondimScales,
+) -> float:
+    values = []
+    for name, hint in explicit:
+        if isinstance(hint, Mapping):
+            t = float(hint["t_ref"])
+        else:
+            t = float(hint(constants, partial_scales))
+        if not (math.isfinite(t) and t > 0.0):
+            raise ValueError(f"time_scale hint for law {name!r} gave non-positive t_ref={t!r}")
+        values.append((name, t))
+    t0 = values[0][1]
+    for name, t in values[1:]:
+        if not math.isclose(t, t0, rel_tol=1e-9):
+            raise ValueError(
+                f"Laws disagree on explicit t_ref ({values}); set nondim_scales.time_scale explicitly"
+            )
+    return t0
 
 
 def infer_nondim_scales(
@@ -119,18 +221,38 @@ def infer_nondim_scales(
     state: Mapping[str, Any],
     constants: Mapping[str, Any],
     overrides: Optional[Mapping[str, Any]] = None,
+    *,
+    law_specs: Optional[Sequence[Mapping[str, Any]]] = None,
+    warn_unhinted: bool = False,
 ) -> Tuple[NondimScales, Dict[str, str]]:
     """
     Infer reference scales for ``dimensional_to_nd``.
 
     Returns ``(NondimScales, provenance_dict)`` mapping field names to source labels.
     Raises :class:`ValueError` when required refs cannot be resolved.
+
+    ``law_specs`` supplies per-spec ``"time_scale"`` hints. With ``warn_unhinted=True``, laws with no
+    hint (custom laws not in :data:`LAW_TIME_SCALE` and not registered) emit a ``UserWarning``
+    unless ``overrides`` fixes ``time_scale``.
     """
     ov = dict(overrides or {})
     prov: Dict[str, str] = {}
-    time_scale = str(ov.get("time_scale") or resolve_time_scale_for_laws(law_names))
+    _kinds, explicit, unhinted = _collect_time_scale_hints(law_names, law_specs)
+    if unhinted and warn_unhinted and not ov.get("time_scale"):
+        import warnings
+
+        warnings.warn(
+            f"state_units='dimensional': no time-scale hint for law(s) {unhinted}; time and time "
+            "derivatives use the default convention of the other laws (or 'convective'). Add "
+            "'time_scale' to the law spec or call moju.registry.register_law_time_scale().",
+            UserWarning,
+            stacklevel=3,
+        )
+    time_scale = str(ov.get("time_scale") or resolve_time_scale_for_laws(law_names, law_specs=law_specs))
     if "time_scale" in ov:
         prov["time_scale"] = "override"
+    elif time_scale == "custom":
+        prov["time_scale"] = "law_hint"
 
     def _pick(
         field: str,
@@ -224,7 +346,24 @@ def infer_nondim_scales(
     if c_ref is not None:
         kwargs["c_ref"] = c_ref
 
-    required = _REQUIRED_BY_TIME_SCALE.get(time_scale, ("L_ref", "U_ref"))
+    if time_scale == "custom":
+        t_override = ov.get("t_ref_override")
+        if t_override is None:
+            if not explicit:
+                raise ValueError(
+                    "time_scale='custom' requires nondim_scales.t_ref_override when no selected law "
+                    "provides an explicit t_ref hint"
+                )
+            if L_ref is None:
+                raise ValueError("Cannot infer L_ref for a custom time scale; provide nondim_scales.L_ref")
+            partial = NondimScales(**{**kwargs, "L_ref": float(L_ref), "time_scale": "convective"})
+            t_override = _explicit_t_ref(explicit, constants, partial)
+            prov["t_ref_override"] = "law_hint"
+        else:
+            prov["t_ref_override"] = "override"
+        kwargs["t_ref_override"] = float(t_override)
+
+    required = _REQUIRED_BY_TIME_SCALE.get(time_scale, ("L_ref",))
     missing = [f for f in required if kwargs.get(f) is None]
     if missing:
         raise ValueError(

@@ -34,6 +34,7 @@ from moju.piratio.laws import Laws
 from moju.piratio.groups import Groups
 from moju.piratio.models import Models
 from moju.piratio.nondim import NondimScales
+from moju.monitor.closure_registry import MODEL_FNS, get_group_fn
 from moju.monitor.law_group_inference import (
     law_parameter_names,
     group_parameter_names,
@@ -201,7 +202,7 @@ class TorchResidualEngine:
             gname = str(gspec["name"])
             output_key = str(gspec.get("output_key", gname))
             state_map: Dict[str, str] = dict(gspec.get("state_map") or {})
-            fn = getattr(Groups, gname)
+            fn = get_group_fn(gname)
             all_params = group_parameter_names(gname)
             self._group_compute_plan.append({
                 "output_key": output_key,
@@ -227,9 +228,10 @@ class TorchResidualEngine:
             mname = str(aspec["name"])
             if mname in self._wrapped_models:
                 continue
-            if not hasattr(Models, mname):
+            reg = MODEL_FNS.get(mname)
+            if reg is None:
                 continue
-            fn = getattr(Models, mname)
+            fn = reg[0]
             all_params = _positional_param_names(fn)
             self._wrapped_models[mname] = wrap_law_torch(fn)
             self._model_all_params[mname] = all_params

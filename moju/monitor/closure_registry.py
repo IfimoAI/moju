@@ -23,7 +23,8 @@ The formula is element-wise, so it works for scalar, vector and tensor ``pred``.
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Mapping
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 import jax.numpy as jnp
 
@@ -221,17 +222,131 @@ def compute_implied_delta(
     return delta
 
 
-MODEL_FNS: Dict[str, Tuple[Callable[..., Any], List[str]]] = {
-    name: _fn_and_args(getattr(Models, name))
-    for name in dir(Models)
-    if not name.startswith("_") and callable(getattr(Models, name))
-}
+class FnTable(Mapping):
+    """
+    Read-only ``name -> (fn, arg_names)`` view: built-ins, then user registrations, then entry points.
 
-GROUP_FNS: Dict[str, Tuple[Callable[..., Any], List[str]]] = {
-    name: _fn_and_args(getattr(Groups, name))
-    for name in dir(Groups)
-    if not name.startswith("_") and callable(getattr(Groups, name))
-}
+    User entries come from :func:`moju.registry.register_model` / ``register_group``. Entry points in
+    group ``entry_point_group`` are loaded once, the first time a lookup misses.
+    """
+
+    def __init__(self, builtin: Dict[str, Tuple[Callable[..., Any], List[str]]], entry_point_group: str):
+        self._builtin = builtin
+        self._user: Dict[str, Tuple[Callable[..., Any], List[str]]] = {}
+        self._entry_point_group = entry_point_group
+        self._entry_points_loaded = False
+
+    def _load_entry_points(self) -> None:
+        if self._entry_points_loaded:
+            return
+        self._entry_points_loaded = True
+        try:
+            from importlib.metadata import entry_points
+        except ImportError:  # pragma: no cover
+            return
+        try:
+            eps = entry_points()
+            selected = (
+                eps.select(group=self._entry_point_group)
+                if hasattr(eps, "select")
+                else eps.get(self._entry_point_group, [])
+            )
+        except Exception:  # noqa: BLE001
+            return
+        for ep in selected:
+            if ep.name in self._builtin or ep.name in self._user:
+                continue
+            try:
+                self._user[ep.name] = _fn_and_args(ep.load())
+            except Exception as err:  # noqa: BLE001
+                import warnings
+
+                warnings.warn(
+                    f"moju: failed to load entry point {ep.name!r} from group "
+                    f"{self._entry_point_group!r}: {err}",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+    def register(self, name: str, fn: Callable[..., Any], *, overwrite: bool = False) -> None:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("registry name must be a non-empty string")
+        if not callable(fn):
+            raise TypeError(f"registry entry {name!r} must be callable")
+        if not overwrite and (name in self._builtin or name in self._user):
+            raise ValueError(f"{name!r} is already registered; pass overwrite=True to replace it")
+        self._user[name] = _fn_and_args(fn)
+
+    def unregister(self, name: str) -> None:
+        if name in self._builtin and name not in self._user:
+            raise ValueError(f"{name!r} is a built-in and cannot be unregistered")
+        self._user.pop(name, None)
+
+    def user_names(self) -> List[str]:
+        return sorted(self._user)
+
+    def is_builtin(self, name: str) -> bool:
+        return name in self._builtin and name not in self._user
+
+    def __getitem__(self, name: str) -> Tuple[Callable[..., Any], List[str]]:
+        if name in self._user:
+            return self._user[name]
+        if name in self._builtin:
+            return self._builtin[name]
+        self._load_entry_points()
+        return self._user[name]
+
+    def __contains__(self, name: object) -> bool:
+        if name in self._user or name in self._builtin:
+            return True
+        self._load_entry_points()
+        return name in self._user
+
+    def __iter__(self) -> Iterator[str]:
+        self._load_entry_points()
+        seen = set(self._builtin)
+        yield from self._builtin
+        for k in self._user:
+            if k not in seen:
+                yield k
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
+MODEL_FNS: FnTable = FnTable(
+    {
+        name: _fn_and_args(getattr(Models, name))
+        for name in dir(Models)
+        if not name.startswith("_") and callable(getattr(Models, name))
+    },
+    "moju.models",
+)
+
+GROUP_FNS: FnTable = FnTable(
+    {
+        name: _fn_and_args(getattr(Groups, name))
+        for name in dir(Groups)
+        if not name.startswith("_") and callable(getattr(Groups, name))
+    },
+    "moju.groups",
+)
+
+
+def get_model_fn(name: str) -> Callable[..., Any]:
+    """``Models.<name>`` or a registered model; raises ``KeyError`` naming the model."""
+    try:
+        return MODEL_FNS[name][0]
+    except KeyError:
+        raise KeyError(f"Unknown constitutive model {name!r}: not in Models.* or the moju registry") from None
+
+
+def get_group_fn(name: str) -> Callable[..., Any]:
+    """``Groups.<name>`` or a registered group; raises ``KeyError`` naming the group."""
+    try:
+        return GROUP_FNS[name][0]
+    except KeyError:
+        raise KeyError(f"Unknown group {name!r}: not in Groups.* or the moju registry") from None
 
 
 def has_model(name: str) -> bool:

@@ -389,14 +389,18 @@ def fill_law_fd_from_primitives(
     constants: Optional[Dict[str, Any]] = None,
     grid: Optional[PathBGridConfig] = None,
     copy: bool = True,
-) -> Tuple[Dict[str, Any], List[str]]:
+    return_provenance: bool = False,
+) -> Any:
     """
     Fill missing **registered** ``Laws.*`` argument keys using FD or spectral spatial ops.
 
-    Returns ``(new_state, warnings)``. Skips targets that are already non-``None``.
+    Returns ``(new_state, warnings)``, or ``(new_state, warnings, provenance)`` when
+    ``return_provenance`` is true, where ``provenance`` maps each filled key to
+    ``"finite_difference"`` or ``"spectral"``. Skips targets that are already non-``None``.
     Unknown law names or unregistered arguments are ignored (no error).
     Temporal ``dt`` / ``dtt`` always use finite differences.
     """
+    provenance: Dict[str, str] = {}
     cfg = grid or PathBGridConfig()
     if cfg.diff_method == "spectral":
         from moju.monitor.path_b_spectral import validate_spectral_grid_config
@@ -472,6 +476,8 @@ def fill_law_fd_from_primitives(
         if arr is not None:
             state[target_sk] = arr
             m[target_sk] = arr
+            spectral = cfg.diff_method == "spectral" and recipe.kind not in ("dt", "dtt")
+            provenance[target_sk] = "spectral" if spectral else "finite_difference"
             return True
         return False
 
@@ -491,6 +497,8 @@ def fill_law_fd_from_primitives(
         if not progressed:
             break
 
+    if return_provenance:
+        return state, warnings, provenance
     return state, warnings
 
 

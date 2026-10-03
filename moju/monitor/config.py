@@ -33,10 +33,13 @@ class AuditSpec:
     include_ref_delta: bool = True
     # Optional reference tensor key for ref_delta denominator (|ref|); else symmetric scale.
     ref_delta_ref_key: Optional[str] = None
+    # Optional user callable (``user_fns[pred_fn_key]``) used instead of ``Models.<name>``.
+    pred_fn_key: Optional[str] = None
+    pred_state_map: Optional[Dict[str, str]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         # implied_fn omitted (not JSON-serializable); use audit_spec_to_engine_dict for engine.
-        return {
+        d = {
             "name": self.name,
             "output_key": self.output_key,
             "state_map": dict(self.state_map),
@@ -45,6 +48,10 @@ class AuditSpec:
             "include_ref_delta": self.include_ref_delta,
             "ref_delta_ref_key": self.ref_delta_ref_key,
         }
+        if self.pred_fn_key is not None:
+            d["pred_fn_key"] = self.pred_fn_key
+            d["pred_state_map"] = dict(self.pred_state_map or {})
+        return d
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "AuditSpec":
@@ -86,6 +93,8 @@ class AuditSpec:
             residual_basename=(d.get("residual_basename") or None),
             include_ref_delta=bool(d.get("include_ref_delta", True)),
             ref_delta_ref_key=(d.get("ref_delta_ref_key") or None),
+            pred_fn_key=(d.get("pred_fn_key") or None),
+            pred_state_map=(dict(d["pred_state_map"]) if d.get("pred_state_map") else None),
         )
 
 
@@ -124,6 +133,16 @@ class MonitorConfig:
     state_units: str = "nondimensional"
     # Partial overrides for :class:`~moju.piratio.nondim.NondimScales` (JSON-serializable).
     nondim_scales: Optional[Dict[str, Any]] = None
+    # Dimensional mode: {state_key: KeyDeclaration | {"base", "time_order", "space_order"}}.
+    state_declarations: Dict[str, Any] = field(default_factory=dict)
+    # Dimensional mode policy for keys with no scaling rule or declaration: "warn" | "error".
+    undeclared_keys: str = "warn"
+    # "auto" (Moju may fill derivatives) or "supplied_only" (every derivative must be supplied).
+    derivatives: str = "auto"
+    # Inequality checks (BoundCheck or dict); callables are not serialized by to_dict().
+    bound_checks: List[Any] = field(default_factory=list)
+    # Callables for user_fns (not serialized).
+    user_fns: Dict[str, Callable[..., Any]] = field(default_factory=dict, repr=False, compare=False)
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {
@@ -140,6 +159,16 @@ class MonitorConfig:
         }
         if self.nondim_scales:
             d["nondim_scales"] = dict(self.nondim_scales)
+        if self.state_declarations:
+            from moju.monitor.types import KeyDeclaration
+
+            d["state_declarations"] = {
+                k: KeyDeclaration.coerce(v).to_dict() for k, v in self.state_declarations.items()
+            }
+        if self.undeclared_keys != "warn":
+            d["undeclared_keys"] = self.undeclared_keys
+        if self.derivatives != "auto":
+            d["derivatives"] = self.derivatives
         return d
 
     @staticmethod
@@ -186,4 +215,7 @@ class MonitorConfig:
             law_scale_mode=validate_law_scale_mode(d.get("law_scale_mode", "auto")),
             state_units=validate_state_units(d.get("state_units", "nondimensional")),
             nondim_scales=(dict(d["nondim_scales"]) if d.get("nondim_scales") else None),
+            state_declarations=dict(d.get("state_declarations") or {}),
+            undeclared_keys=str(d.get("undeclared_keys", "warn")),
+            derivatives=str(d.get("derivatives", "auto")),
         )

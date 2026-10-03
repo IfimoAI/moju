@@ -11,8 +11,7 @@ import inspect
 from collections import defaultdict, deque
 from typing import Any, Dict, Iterable, List, Optional, Set
 
-from moju.monitor.closure_registry import GROUP_FNS
-from moju.piratio.groups import Groups
+from moju.monitor.closure_registry import GROUP_FNS, get_group_fn
 from moju.piratio.laws import Laws
 
 # Law parameter name -> Groups registry name when it differs from the argument name.
@@ -39,8 +38,7 @@ def law_parameter_names(law_name: str) -> List[str]:
 
 
 def group_parameter_names(group_name: str) -> List[str]:
-    fn = getattr(Groups, group_name)
-    return _positional_param_names(fn)
+    return _positional_param_names(get_group_fn(group_name))
 
 
 def build_law_spec_identity(law_name: str) -> Dict[str, Any]:

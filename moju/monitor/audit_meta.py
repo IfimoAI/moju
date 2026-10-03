@@ -22,6 +22,7 @@ _SCALE_SOURCE_PLAIN: Dict[str, str] = {
     "fixed": "Fixed 1e-2 reference gauge (closure-aligned tier calibration).",
     "state_derived": "RMS of related state or reference fields.",
     "r_ref": "Overridden by audit(..., r_ref=...) for this report.",
+    "declared": "Declared by the user via Scoring(scale=...) or Scoring(dimensionless=True).",
     "unknown": "Unknown (legacy log or missing scale_source).",
 }
 
@@ -180,6 +181,7 @@ def _build_pipeline_block(entry: Dict[str, Any]) -> Dict[str, Any]:
         "inferred": list(entry.get("inferred") or []),
         "omitted": list(entry.get("omitted") or []),
         "unresolved_dependencies": list(entry.get("unresolved_dependencies") or []),
+        "derivative_provenance": dict(entry.get("derivative_provenance") or {}),
     }
 
 
@@ -344,6 +346,12 @@ def _build_plain_sections(
     nondim_lines = list((meta.get("nondim") or {}).get("lines") or [])
     pipeline = meta.get("pipeline") or {}
     pipe_lines: List[str] = []
+    prov = pipeline.get("derivative_provenance") or {}
+    if prov:
+        pipe_lines.append(
+            "- Derivatives: "
+            + ", ".join(f"{k} {str(v).replace('_', ' ')}" for k, v in sorted(prov.items()))
+        )
     for msg in (pipeline.get("inferred") or [])[:20]:
         pipe_lines.append(f"- Inferred: {msg}")
     for msg in (pipeline.get("omitted") or [])[:20]:

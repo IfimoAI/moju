@@ -516,7 +516,8 @@ def fill_path_b_derivatives(
     grid: Optional[PathBGridConfig] = None,
     copy: bool = True,
     fill_law_recipes: bool = False,
-) -> Tuple[Dict[str, Any], List[str]]:
+    return_provenance: bool = False,
+) -> Any:
     """
     When ``fill_law_recipes`` is True and ``laws_spec`` is non-empty, fills **registered**
     ``Laws.*`` inputs (gradients, Laplacians, time derivatives) from primitive fields on the
@@ -527,7 +528,8 @@ def fill_path_b_derivatives(
 
     ``constitutive_audit`` is accepted for API compatibility but is not used for derivative fill.
 
-    Returns ``(new_state, warnings)``.
+    Returns ``(new_state, warnings)``, or ``(new_state, warnings, provenance)`` with
+    ``return_provenance=True`` (filled key -> ``"finite_difference"`` | ``"spectral"``).
     """
     cfg = grid or PathBGridConfig()
     if cfg.diff_method == "spectral":
@@ -537,19 +539,23 @@ def fill_path_b_derivatives(
     c = dict(constants or {})
     state: Dict[str, Any] = dict(state_pred) if copy else state_pred
     warnings: List[str] = []
+    provenance: Dict[str, str] = {}
 
     if fill_law_recipes and laws_spec:
         from moju.monitor.law_fd_recipes import fill_law_fd_from_primitives
 
-        state, law_warn = fill_law_fd_from_primitives(
+        state, law_warn, provenance = fill_law_fd_from_primitives(
             state,
             list(laws_spec),
             constants=c,
             grid=cfg,
             copy=False,
+            return_provenance=True,
         )
         warnings.extend(law_warn)
 
+    if return_provenance:
+        return state, warnings, provenance
     return state, warnings
 
 
@@ -561,12 +567,14 @@ def fill_path_b_spectral(
     constants: Optional[Dict[str, Any]] = None,
     grid: Optional[PathBGridConfig] = None,
     copy: bool = True,
-) -> Tuple[Dict[str, Any], List[str]]:
+    return_provenance: bool = False,
+) -> Any:
     """
     Path B law-input fill with **periodic Fourier** spatial derivatives.
 
     Sets ``diff_method=\"spectral\"`` and ``periodic=True`` on ``grid`` (or a default
     ``PathBGridConfig``) and always enables law recipes. Temporal derivatives remain FD.
+    ``return_provenance`` behaves as in :func:`fill_path_b_derivatives`.
     """
     base = grid or PathBGridConfig()
     cfg = replace(base, diff_method="spectral", periodic=True)
@@ -578,6 +586,7 @@ def fill_path_b_spectral(
         grid=cfg,
         copy=copy,
         fill_law_recipes=True,
+        return_provenance=return_provenance,
     )
 
 
