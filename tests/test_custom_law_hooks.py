@@ -39,6 +39,51 @@ def _load(filename):
 osc = _load("cookbook_custom_law_oscillator.py")
 
 
+# ---- law-linked implied checks -------------------------------------------------------------------
+
+
+def test_custom_diffusion_implied_check():
+    out = _load("cookbook_custom_diffusion_implied.py").main()
+    good = out["reports"]["consistent"]["per_key"][out["flat_key"]]
+    bad = out["reports"]["rate off 3%"]["per_key"][out["flat_key"]]
+    assert good["admissibility_level"] == "High Admissibility"
+    assert bad["admissibility_score"] < 0.5
+
+
+def test_registered_implied_rows_merge_and_unregister():
+    from moju.monitor import LawImpliedCheck, implied_by_projection, merge_law_implied_audit_specs
+    from moju.monitor.law_implied_diagnostics import (
+        list_laws_with_implied_diagnostics,
+        register_law_implied_check,
+        supported_auto_implied_laws_for,
+        unregister_law_implied_checks,
+    )
+
+    chk = LawImpliedCheck("thermal_diffusivity", "alpha", {"k": "k"}, implied_by_projection("a", "b"))
+    register_law_implied_check("my_law", chk)
+    register_law_implied_check("my_law", chk)
+    try:
+        rows, _ = merge_law_implied_audit_specs([{"name": "my_law", "state_map": {"k": "kk"}}])
+        assert len(rows) == 1
+        assert rows[0]["residual_basename"] == "thermal_diffusivity/law_my_law"
+        assert rows[0]["state_map"] == {"k": "kk"}
+        assert "my_law" in list_laws_with_implied_diagnostics()
+        assert supported_auto_implied_laws_for([{"name": "my_law"}])[0] == ["my_law"]
+        assert merge_law_implied_audit_specs([{"name": "my_law"}], enabled=False) == ([], [])
+    finally:
+        unregister_law_implied_checks("my_law")
+    assert merge_law_implied_audit_specs([{"name": "my_law", "state_map": {}}])[0] == []
+
+
+def test_implied_by_projection_vector():
+    from moju.monitor import implied_by_projection
+
+    fn = implied_by_projection("lhs", "op", vector=True)({"lhs": "L1", "op": "O1"})
+    op = jnp.array([[1.0, 2.0], [3.0, 4.0]])
+    out = fn({"L1": 2.5 * op, "O1": op}, {})
+    assert jnp.allclose(out, 2.5)
+
+
 # ---- scale recipes -------------------------------------------------------------------------------
 
 

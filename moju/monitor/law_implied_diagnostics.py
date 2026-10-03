@@ -41,6 +41,7 @@ See README "Law-linked implied audits" and :func:`merge_law_implied_audit_specs`
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import jax.numpy as jnp
@@ -588,9 +589,99 @@ _LAW_IMPLIED_UNSUPPORTED_REASONS: Dict[str, str] = {
 }
 
 
+@dataclass(frozen=True)
+class LawImpliedCheck:
+    """
+    Law-linked constitutive check for a (custom or built-in) law, mirroring the built-in rows.
+
+    - ``model``: ``Models.<name>`` or a name registered with :func:`moju.registry.register_model`.
+    - ``output_key``: state key of the model output (used for ``ref_delta``).
+    - ``state_map``: model argument -> state key; keys are resolved through the law ``state_map``
+      when the law maps the same argument name.
+    - ``implied_maker(law_state_map) -> implied_fn(state, constants)``: recovers the model output
+      from the law terms (see :func:`implied_by_projection`).
+    - ``residual_basename``: defaults to ``"<model>/law_<law_name>"``.
+    """
+
+    model: str
+    output_key: str
+    state_map: Dict[str, str]
+    implied_maker: Callable[[Dict[str, str]], Callable[..., Any]] = field(repr=False, compare=False)
+    residual_basename: Optional[str] = None
+    include_ref_delta: bool = True
+
+    def to_row(self, law_name: str) -> Dict[str, Any]:
+        return {
+            "category": "constitutive",
+            "name": self.model,
+            "output_key": self.output_key,
+            "state_map": dict(self.state_map),
+            "implied_maker": self.implied_maker,
+            "residual_basename": self.residual_basename or f"{self.model}/law_{law_name}",
+            "include_ref_delta": bool(self.include_ref_delta),
+        }
+
+
+_USER_LAW_IMPLIED_ROWS: Dict[str, List[LawImpliedCheck]] = {}
+
+
+def register_law_implied_check(law_name: str, check: LawImpliedCheck) -> None:
+    """
+    Add a law-linked implied check for ``law_name`` (custom laws match on the spec ``name``).
+
+    Merged by :func:`merge_law_implied_audit_specs` after the built-in rows whenever
+    ``law_implied_audits`` is enabled. A check with the same ``residual_basename`` replaces the
+    earlier registration.
+    """
+    if not isinstance(check, LawImpliedCheck):
+        raise TypeError("check must be a LawImpliedCheck")
+    rows = _USER_LAW_IMPLIED_ROWS.setdefault(str(law_name), [])
+    bn = check.to_row(law_name)["residual_basename"]
+    rows[:] = [r for r in rows if r.to_row(law_name)["residual_basename"] != bn] + [check]
+
+
+def unregister_law_implied_checks(law_name: str) -> None:
+    _USER_LAW_IMPLIED_ROWS.pop(str(law_name), None)
+
+
+def _implied_rows_for(law_name: str) -> List[Dict[str, Any]]:
+    rows = list(_LAW_IMPLIED_ROWS.get(law_name) or [])
+    rows += [c.to_row(law_name) for c in _USER_LAW_IMPLIED_ROWS.get(law_name, [])]
+    return rows
+
+
+def implied_by_projection(lhs_arg: str, operator_arg: str, *, vector: bool = False) -> Callable[..., Any]:
+    """
+    ``implied_maker`` recovering a linear coefficient ``D`` from ``lhs = D * operator``.
+
+    ``lhs_arg`` / ``operator_arg`` are law argument names (resolved through the law ``state_map``,
+    falling back to state keys of the same name). Scalar fields use the pointwise ratio
+    ``lhs / operator``; ``vector=True`` uses the least-squares projection over the last axis.
+    Ill-conditioned points (``|operator|`` near zero) become NaN and are ignored by the score.
+    """
+
+    def maker(law_sm: Dict[str, str]) -> Callable[..., Any]:
+        def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+            lhs = _val(state, constants, law_sm, lhs_arg)
+            if lhs is None:
+                lhs = _state_or_const(state, constants, lhs_arg)
+            op = _val(state, constants, law_sm, operator_arg)
+            if op is None:
+                op = _state_or_const(state, constants, operator_arg)
+            if lhs is None or op is None:
+                return None
+            if vector:
+                return _project_scalar_coefficient(lhs, op)
+            return _safe_ratio(lhs, op)
+
+        return implied_fn
+
+    return maker
+
+
 def list_laws_with_implied_diagnostics() -> Tuple[str, ...]:
-    """Law registry names that contribute auto implied audits."""
-    return tuple(sorted(_LAW_IMPLIED_ROWS.keys()))
+    """Law registry names that contribute auto implied audits (built-in and registered)."""
+    return tuple(sorted(set(_LAW_IMPLIED_ROWS) | set(_USER_LAW_IMPLIED_ROWS)))
 
 
 def law_implied_unsupported_reasons() -> Dict[str, str]:
@@ -658,6 +749,8 @@ def supported_auto_implied_laws_for(
         if isinstance(law, dict) and str(law.get("name") or "")
     }
     cls = classify_laws_for_implied_diagnostics()
+    for n in _USER_LAW_IMPLIED_ROWS:
+        cls[n] = "supported"
     supported = sorted(n for n in selected if cls.get(n) == "supported")
     manual = sorted(n for n in selected if cls.get(n) == "user_specified_only")
     return supported, manual
@@ -697,7 +790,7 @@ def merge_law_implied_audit_specs(
 
     for law in laws_spec:
         law_name = str(law.get("name") or "")
-        rows = _LAW_IMPLIED_ROWS.get(law_name)
+        rows = _implied_rows_for(law_name)
         if not rows:
             continue
         law_sm = dict(law.get("state_map") or {})

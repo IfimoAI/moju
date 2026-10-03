@@ -133,6 +133,8 @@ NEW_1_2_0_MONITOR_EXPORTS = {
     "LawSpec",
     "Scoring",
     "report_json_schema",
+    "LawImpliedCheck",
+    "implied_by_projection",
 }
 
 
