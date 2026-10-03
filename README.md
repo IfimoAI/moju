@@ -139,7 +139,7 @@ pip install "moju[torch]"
 
 - `TorchResidualEngine` - PyTorch-facing residual engine with parity-oriented behavior. Optional Path B fill: `path_b_fill=True` with `path_b_diff_method="fd"|"spectral"` and `path_b_periodic` (spectral requires periodic grids; see [`docs/path_b_derivatives.md`](https://github.com/IfimoAI/moju/blob/main/docs/path_b_derivatives.md)).
 - `build_loss_torch` and `r_eff_scalar_torch` - Torch-native R_eff loss helpers.
-- `wrap_law_torch` - wrap JAX `Laws.*` functions for use with Torch tensors through a DLPack handoff.
+- `wrap_law_torch` - wrap JAX `Laws.*` functions for use with Torch tensors through a DLPack handoff. CPU tensors stay on CPU. A CUDA tensor stays on that GPU when JAX has a GPU at the same index, which requires a CUDA jaxlib such as `jax[cuda12]` (not installed by `moju[torch]`). Without it, and for Apple MPS, the call copies to CPU and warns once per process.
 - Torch-native nondimensionalization helpers.
 
 Start with [`scripts/torch_laws_example.py`](https://github.com/IfimoAI/moju/blob/main/scripts/torch_laws_example.py). The implementation is covered by `tests/test_torch_engine.py` and `tests/test_torch_interop.py`.

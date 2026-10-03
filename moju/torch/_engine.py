@@ -18,9 +18,10 @@ Eval path (no grad needed):
 - ``audit()`` — delegates to JAX ``ResidualEngine`` + ``moju.monitor.audit``
 - ``visualize()`` — delegates to ``moju.monitor.visualize``
 
-CPU constraint: the DLPack handoff evaluates JAX on CPU.  Tensors on other devices
-are automatically moved to CPU for JAX law evaluation and moved back to their
-original device on return.
+Device placement: native torch steps follow the tensor device. JAX steps go
+through ``wrap_law_torch``, which keeps a CUDA tensor on that GPU when JAX has
+a matching device (a CUDA jaxlib such as ``jax[cuda12]``) and otherwise copies
+to CPU for the call.
 """
 from __future__ import annotations
 
@@ -71,13 +72,6 @@ def _device_of(state: Dict[str, Any]) -> Optional[torch.device]:
         if isinstance(v, torch.Tensor):
             return v.device
     return None
-
-
-def _to_cpu(state: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        k: v.cpu() if isinstance(v, torch.Tensor) else v
-        for k, v in state.items()
-    }
 
 
 def _restore_device(state: Dict[str, Any], device: Optional[torch.device]) -> Dict[str, Any]:
@@ -378,10 +372,10 @@ class TorchResidualEngine:
                 "supply every derivative or use derivatives='auto'"
             )
 
-        # Detect original device to restore outputs
+        # Outputs follow the incoming tensor device. JAX placement is decided
+        # inside wrap_law_torch.
         orig_device = _device_of(state)
-        # Move to CPU for JAX-bridged computations
-        state = _to_cpu(dict(state))
+        state = dict(state)
 
         # 1. user_fns materialisation (physical state)
         state = self._materialise_user_fns(state)
@@ -515,7 +509,7 @@ class TorchResidualEngine:
 
             # Ref delta (eval mode only)
             if run_mode == "eval" and state_ref is not None and aspec.get("include_ref_delta", True):
-                ref_merged = {**self._constants, **_to_cpu(state_ref)}
+                ref_merged = {**self._constants, **state_ref}
                 ref_result = compute_ref_delta_torch(
                     fn_wrapped=fn_wrapped,
                     arg_names=all_model_params,
@@ -566,11 +560,10 @@ class TorchResidualEngine:
         # 8. Data comparison (eval mode)
         data_residuals: Dict[str, Any] = {}
         if run_mode == "eval" and state_ref is not None:
-            ref_cpu = _to_cpu(state_ref)
-            common = set(state.keys()) & set(ref_cpu.keys())
+            common = set(state.keys()) & set(state_ref.keys())
             for k in common:
                 try:
-                    diff = _to_tensor(ref_cpu[k]) - _to_tensor(state[k])
+                    diff = _to_tensor(state_ref[k]) - _to_tensor(state[k])
                     data_residuals[k] = _restore_device({"r": diff}, orig_device)["r"]
                 except Exception:  # noqa: BLE001
                     pass
