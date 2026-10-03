@@ -29,12 +29,16 @@ Usage
     loss = (residual ** 2).mean()
     loss.backward()
 
-Tensors are handed to JAX through DLPack (zero-copy when the storage is already
-contiguous and on CPU). JAX runs on CPU; results are moved back to the device of
-the input tensors. Dict and tuple arguments and return values are preserved.
+Tensors are handed to JAX through DLPack. A CPU tensor stays on CPU. A CUDA tensor
+stays on that GPU when this JAX process has a GPU at the same index, which needs
+a CUDA jaxlib (for example ``jax[cuda12]``). Otherwise the tensor is copied to
+CPU for the JAX call, the result is copied back, and a one-time warning is
+emitted. Apple MPS always uses that CPU fallback. Dict and tuple arguments and
+return values are preserved.
 """
 
 import threading
+import warnings
 from typing import Any, Callable, Dict, List, Sequence, Tuple
 
 import jax
@@ -42,6 +46,7 @@ import jax.numpy as jnp
 from jax.tree_util import tree_flatten, tree_unflatten
 
 _SLOT = object()
+_CPU_FALLBACK_WARNED = False
 
 
 def _import_torch():
@@ -59,14 +64,59 @@ def _is_array(value: Any) -> bool:
     return isinstance(value, (jax.Array, jnp.ndarray))
 
 
-def _torch_to_jax(torch_tensor: Any):
-    cpu = torch_tensor.detach().to("cpu").contiguous()
-    return cpu, jax.dlpack.from_dlpack(cpu)
+def _jax_device_placement(device: Any) -> str:
+    """
+    ``"native"`` when JAX can take this torch device through DLPack.
+
+    CUDA uses ``"native"`` only when ``jax.devices("gpu")`` has a device at that
+    index. Any other non-CPU device, including Apple MPS, is ``"cpu_fallback"``.
+    """
+    kind = getattr(device, "type", None)
+    if kind == "cpu":
+        return "native"
+    if kind == "cuda":
+        index = 0 if getattr(device, "index", None) is None else int(device.index)
+        try:
+            gpus = jax.devices("gpu")
+        except RuntimeError:
+            gpus = ()
+        if index < len(gpus):
+            return "native"
+    _warn_cpu_fallback()
+    return "cpu_fallback"
+
+
+def _warn_cpu_fallback() -> None:
+    global _CPU_FALLBACK_WARNED
+    if _CPU_FALLBACK_WARNED:
+        return
+    _CPU_FALLBACK_WARNED = True
+    warnings.warn(
+        "wrap_law_torch copied a non-CPU tensor to CPU because JAX has no matching GPU. "
+        "Staying on GPU requires a CUDA jaxlib, for example jax[cuda12].",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
+def _require_one_device(devices: Sequence[Any]) -> None:
+    identities = {(getattr(d, "type", None), getattr(d, "index", None)) for d in devices}
+    if len(identities) > 1:
+        raise ValueError("wrap_law_torch received tensors on more than one device")
+
+
+def _torch_to_jax(torch_tensor: Any, *, placement: str):
+    if placement == "cpu_fallback" and getattr(torch_tensor.device, "type", "cpu") != "cpu":
+        held = torch_tensor.detach().to("cpu").contiguous()
+    else:
+        held = torch_tensor.detach().contiguous()
+    return held, jax.dlpack.from_dlpack(held)
 
 
 def _jax_to_torch(torch: Any, value: Any, device: Any):
     if not _is_array(value):
         value = jnp.asarray(value)
+    # DLPack keeps a GPU JAX array on that GPU; `.to` only copies the CPU fallback.
     return torch.from_dlpack(jnp.asarray(value)).to(device)
 
 
@@ -119,8 +169,12 @@ def wrap_law_torch(jax_law_fn: Callable) -> Callable:
     -----
     - This helper requires the optional ``torch`` dependency. If it is missing,
       an ImportError is raised with a short message.
-    - JAX evaluation runs on CPU. Non-CPU tensors are moved to CPU for the JAX
-      call and the result is moved back to the input device.
+    - CPU tensors are evaluated by JAX on CPU. A CUDA tensor stays on that GPU
+      when ``jax.devices("gpu")`` has a device at the same index. That requires
+      a CUDA jaxlib, for example ``jax[cuda12]``, which is not part of the
+      ``moju[torch]`` extra. Otherwise, and for Apple MPS, the tensor is copied
+      to CPU, evaluated there, copied back, and a warning is issued once per
+      process. Tensors on different devices in one call raise ``ValueError``.
     - We apply ``jax.jit`` by default to take advantage of XLA compilation
       on the JAX side.
     """
@@ -132,11 +186,12 @@ def wrap_law_torch(jax_law_fn: Callable) -> Callable:
     class _DlpackBridge(torch.autograd.Function):
         @staticmethod
         def forward(ctx, *tensors):  # type: ignore[override]
-            cpu_held = []
+            held = []
             jax_tensors = []
+            placement = call["placement"]
             for tensor in tensors:
-                cpu, jax_arr = _torch_to_jax(tensor)
-                cpu_held.append(cpu)
+                kept, jax_arr = _torch_to_jax(tensor, placement=placement)
+                held.append(kept)
                 jax_tensors.append(jax_arr)
             jax_tensors_t = tuple(jax_tensors)
             needs = call["needs"]
@@ -170,7 +225,8 @@ def wrap_law_torch(jax_law_fn: Callable) -> Callable:
             ctx.devices = list(call["devices"])
             ctx.n_in = len(tensors)
             ctx.n_leaves = len(leaves)
-            ctx.keep = cpu_held
+            ctx.placement = placement
+            ctx.keep = held
             call["meta"] = {
                 "leaves": leaves,
                 "out_spec": out_spec,
@@ -189,7 +245,7 @@ def wrap_law_torch(jax_law_fn: Callable) -> Callable:
                 if grad is None:
                     cot_leaves[slot] = jnp.zeros(ctx.shapes[slot], dtype=ctx.dtypes[slot])
                 else:
-                    _, cot_leaves[slot] = _torch_to_jax(grad)
+                    _, cot_leaves[slot] = _torch_to_jax(grad, placement=ctx.placement)
             in_grads = ctx.vjp(tree_unflatten(ctx.out_spec, cot_leaves))
             out_grads = []
             for grad, need, device in zip(in_grads, ctx.needs, ctx.devices):
@@ -217,12 +273,15 @@ def wrap_law_torch(jax_law_fn: Callable) -> Callable:
                 template.append(leaf)
         if not tensors:
             return _assemble_raw(torch, jitted(*args, **kwargs), torch.device("cpu"))
+        _require_one_device(devices)
+        placement = _jax_device_placement(devices[0])
         with lock:
             call["in_spec"] = in_spec
             call["template"] = template
             call["tensor_pos"] = tensor_pos
             call["needs"] = needs
             call["devices"] = devices
+            call["placement"] = placement
             raw = _DlpackBridge.apply(*tensors)
             meta = call["meta"]
         if len(meta["tensor_slots"]) == 1:

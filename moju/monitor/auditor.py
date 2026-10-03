@@ -2852,6 +2852,11 @@ def evaluate(
     """
     One :func:`audit` report per candidate; ``engine.log`` is not modified.
 
+    Same-shaped candidates are scored in one :func:`jax.jit` / :func:`jax.vmap` call
+    (``report["execution"] == "batched"``). Mismatched shapes, an untraceable callable, or
+    derivative fill (``auto_path_b_derivatives`` / ``fill_law_fd``) keep the per-candidate
+    loop (``report["execution"] == "loop"``).
+
     ``state_refs``, when given, must have the same length as ``candidates``. Further keywords are
     forwarded to :meth:`ResidualEngine._compute_entry` (``law_scale_mode``, ``state_units``, and so on).
     Set ``return_residuals=True`` to attach each candidate's residual dict under ``"residuals"``.
@@ -2865,6 +2870,22 @@ def evaluate(
                 f"state_refs length {len(state_refs)} does not match candidates length {n}"
             )
         refs = state_refs
+    fd_fill = bool(compute_kwargs.get("auto_path_b_derivatives") or compute_kwargs.get("fill_law_fd"))
+    if not fd_fill:
+        from moju.monitor.evaluate_batch import evaluate_batched
+
+        batched = evaluate_batched(
+            engine,
+            candidates,
+            refs,
+            run_mode=run_mode,
+            r_ref=r_ref,
+            return_residuals=return_residuals,
+        )
+        if batched is not None:
+            for report in batched:
+                report["execution"] = "batched"
+            return batched
     reports: List[Dict[str, Any]] = []
     for i, (state, ref) in enumerate(zip(candidates, refs)):
         residuals, entry = engine._compute_entry(
@@ -2877,6 +2898,7 @@ def evaluate(
         report = audit([entry], r_ref=r_ref)
         if return_residuals:
             report["residuals"] = residuals
+        report["execution"] = "loop"
         reports.append(report)
     return reports
 

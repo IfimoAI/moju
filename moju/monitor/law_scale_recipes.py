@@ -399,6 +399,26 @@ def list_user_law_scale_recipes() -> Tuple[str, ...]:
     return tuple(sorted(_USER_LAW_SCALE_RECIPES))
 
 
+def _term_rms_array(arr: Any, *, vector: bool = False) -> jnp.ndarray:
+    """Traceable RMS. NaN if ``arr`` is missing or empty."""
+    if arr is None:
+        return jnp.asarray(jnp.nan)
+    a = jnp.asarray(arr)
+    if a.size == 0:
+        return jnp.asarray(jnp.nan)
+    if vector and a.ndim >= 1:
+        return jnp.sqrt(jnp.mean(jnp.sum(a**2, axis=-1)) + _SCALE_EPS)
+    return jnp.sqrt(jnp.mean(a**2) + _SCALE_EPS)
+
+
+def _as_host_float(value: Any) -> Any:
+    """Python float outside a trace; the traced value itself under ``jax.jit``."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return value
+
+
 def term_rms(arr: Any, *, vector: bool = False) -> float:
     """
     RMS magnitude of one term; NaN if ``arr`` is ``None`` or empty.
@@ -406,21 +426,18 @@ def term_rms(arr: Any, *, vector: bool = False) -> float:
     With ``vector=True`` the last axis holds vector components and the result is
     ``sqrt(mean(sum of squares over the last axis))``.
     """
-    if arr is None:
-        return float("nan")
-    a = jnp.asarray(arr)
-    if a.size == 0:
-        return float("nan")
-    if vector and a.ndim >= 1:
-        return float(jnp.sqrt(jnp.mean(jnp.sum(a**2, axis=-1)) + _SCALE_EPS))
-    return float(jnp.sqrt(jnp.mean(a**2) + _SCALE_EPS))
+    return _as_host_float(_term_rms_array(arr, vector=vector))
 
 
 def term_max_rms(*terms: Any, vector: bool = False) -> float:
     """Largest finite positive :func:`term_rms` among ``terms`` (``None`` skipped); NaN if none."""
-    vals = [term_rms(t, vector=vector) for t in terms if t is not None]
-    finite = [v for v in vals if math.isfinite(v) and v > 0]
-    return max(finite) if finite else float("nan")
+    vals = [_term_rms_array(t, vector=vector) for t in terms if t is not None]
+    if not vals:
+        return _as_host_float(jnp.nan)
+    stacked = jnp.stack([jnp.asarray(v) for v in vals])
+    positive = jnp.where(jnp.isfinite(stacked) & (stacked > 0), stacked, -jnp.inf)
+    best = jnp.max(positive)
+    return _as_host_float(jnp.where(jnp.isfinite(best), best, jnp.nan))
 
 
 def law_arg_value(
