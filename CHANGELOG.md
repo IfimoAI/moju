@@ -15,13 +15,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Custom-law hooks.** `register_law_scale_recipe`, `register_law_time_scale`, and `register_law_implied_check`, plus `LawImpliedCheck` and `implied_by_projection`.
 - **`derivatives="supplied_only"`.** Every derivative a law needs must be supplied. The log, the report, and the PDF record derivative provenance.
 - **`Scoring` and `BoundCheck`.** Declared scales and metrics, and inequality checks logged as `constitutive/bound/<name>/violation`.
-- **`moju.monitor.evaluate`.** Scores a batch of candidate states without appending to the engine log.
+- **`moju.monitor.evaluate`.** Scores a batch of candidate states and does not modify `engine.log`. Same-shaped candidates are scored in one `jax.jit` / `jax.vmap` call, and each report has `execution="batched"`. Mismatched shapes, an untraceable callable, and derivative fill (`auto_path_b_derivatives` or `fill_law_fd`) keep the per-candidate loop, and each report has `execution="loop"`. `derivatives="supplied_only"` still raises `MissingSuppliedDerivativeError` before any report when a required derivative is missing.
 - **`scale_source="user_recipe"`.** A law scaled by a user-registered or spec scale recipe reports that source instead of `"auto"`.
 - **PyTorch parity for custom laws.** `TorchResidualEngine` resolves a spec `fn`, runs `constitutive_custom` and `BoundCheck`, and forwards scoring, bound checks, and `derivatives` into `audit()`.
 
 ### Changed
 
-- **DLPack handoff.** `wrap_law_torch` no longer uses `jax2torch`. Tensors cross the JAX/PyTorch boundary through DLPack, including dict and tuple arguments. The `torch` extra is `torch>=2.0`.
+- **DLPack handoff.** `wrap_law_torch` no longer uses `jax2torch`. Tensors cross the JAX/PyTorch boundary through DLPack, including dict and tuple arguments. The `torch` extra is `torch>=2.0` and does not install a CUDA jaxlib. A CPU tensor stays on CPU. A CUDA tensor stays on that GPU when `jax.devices("gpu")` has a device at the same index, which requires a CUDA jaxlib such as `jax[cuda12]`; the result and backward gradients come back on that same CUDA device. If the tensor is CUDA and this JAX install has no matching GPU, or the tensor is on Apple MPS, the call copies to CPU, runs there, copies the result back, and warns once per process. Mixed torch devices in one `wrap_law_torch` call raise `ValueError`. `TorchResidualEngine.compute_residuals_torch` no longer copies the whole state to CPU before the pipeline; device placement is decided inside `wrap_law_torch`.
 - **JAX floor.** `jax` and `jaxlib` now require `>=0.4.32`, the release that accepts the DLPack `__dlpack__` protocol. Python `>=3.10` is required (3.9 is no longer tested).
 
 ### Fixed
