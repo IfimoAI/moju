@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-## [1.3.1]
+## [1.3.1] - 2026-10-04
+
+There are no breaking changes. Existing specs and report schema `1.0` stay valid.
 
 ### Fixed
 
