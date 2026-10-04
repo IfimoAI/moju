@@ -13,7 +13,11 @@ moju follows [Semantic Versioning](https://semver.org/) (semver) with one clarif
 ## 0.x vs 1.0
 
 - **0.x:** The library is still evolving. We keep patch releases (0.1.x) backward compatible. Minor releases (0.2, 0.3) may introduce breaking changes after deprecation where feasible.
-- **1.0:** We commit to backward compatibility for the 1.x line: no breaking changes in 1.x without a major (2.0) bump.
+- **1.0 and later:** Breaking changes are a major bump. 1.x minor and patch releases stay backward compatible.
+
+## Releases
+
+Each release is tagged `vX.Y.Z` and published to PyPI. Build, upload, and tag steps are in [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
 
 ## Deprecation
 
@@ -27,5 +31,5 @@ Before removing or changing a public API we will:
 | Release type | Backward compatible? |
 |--------------|----------------------|
 | Patch (x.y.**z**) | Yes |
-| Minor (x.**y**.0) | Aim for yes; 0.x may break after deprecation |
+| Minor (x.**y**.0) | Yes on 1.x; 0.x may break after deprecation |
 | Major (**x**.0.0) | No; breaking changes expected |
