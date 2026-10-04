@@ -21,13 +21,30 @@ from __future__ import annotations
 import inspect
 import warnings
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
-from moju.monitor.closure_registry import GROUP_FNS, MODEL_FNS, get_group_fn, get_model_fn
+from moju.monitor.closure_registry import (
+    GROUP_FNS,
+    MODEL_FNS,
+    get_group_fn,
+    get_model_fn,
+)
 from moju.piratio.laws import Laws
 
 
-def register_model(name: str, fn: Callable[..., Any], *, overwrite: bool = False) -> None:
+def register_model(
+    name: str, fn: Callable[..., Any], *, overwrite: bool = False
+) -> None:
     """
     Register a constitutive model under ``name`` (resolvable wherever ``Models.<name>`` is).
 
@@ -37,7 +54,9 @@ def register_model(name: str, fn: Callable[..., Any], *, overwrite: bool = False
     MODEL_FNS.register(name, fn, overwrite=overwrite)
 
 
-def register_group(name: str, fn: Callable[..., Any], *, overwrite: bool = False) -> None:
+def register_group(
+    name: str, fn: Callable[..., Any], *, overwrite: bool = False
+) -> None:
     """Register a dimensionless group under ``name`` (resolvable wherever ``Groups.<name>`` is)."""
     GROUP_FNS.register(name, fn, overwrite=overwrite)
 
@@ -59,7 +78,9 @@ def list_registered_groups() -> List[str]:
     return GROUP_FNS.user_names()
 
 
-def register_law_scale_recipe(law_name: str, fn: Callable[..., float], *, overwrite: bool = False) -> None:
+def register_law_scale_recipe(
+    law_name: str, fn: Callable[..., float], *, overwrite: bool = False
+) -> None:
     from moju.monitor.law_scale_recipes import register_law_scale_recipe as _r
 
     _r(law_name, fn, overwrite=overwrite)
@@ -83,7 +104,9 @@ def unregister_law_implied_checks(law_name: str) -> None:
     _u(law_name)
 
 
-def register_law_time_scale(law_name: str, time_scale: Any, *, overwrite: bool = False) -> None:
+def register_law_time_scale(
+    law_name: str, time_scale: Any, *, overwrite: bool = False
+) -> None:
     from moju.monitor.nondim_inference import register_law_time_scale as _r
 
     _r(law_name, time_scale, overwrite=overwrite)
@@ -142,13 +165,17 @@ def _positional_parameter_names(fn: Callable[..., Any]) -> Tuple[str, ...]:
         if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD):
             names.append(str(p.name))
         elif p.kind == p.KEYWORD_ONLY:
-            raise TypeError(f"law callable {label!r} must not use keyword-only parameters")
+            raise TypeError(
+                f"law callable {label!r} must not use keyword-only parameters"
+            )
         else:
             raise TypeError(f"law callable {label!r} must not use *args or **kwargs")
     return tuple(names)
 
 
-def _normalize_required_keys(fn: Callable[..., Any], required_keys: Iterable[str]) -> Tuple[str, ...]:
+def _normalize_required_keys(
+    fn: Callable[..., Any], required_keys: Iterable[str]
+) -> Tuple[str, ...]:
     keys = tuple(str(k) for k in required_keys)
     params = _positional_parameter_names(fn)
     if keys != params:
@@ -253,7 +280,11 @@ class _LawTable:
             return
         try:
             eps = entry_points()
-            selected = eps.select(group="moju.laws") if hasattr(eps, "select") else eps.get("moju.laws", [])
+            selected = (
+                eps.select(group="moju.laws")
+                if hasattr(eps, "select")
+                else eps.get("moju.laws", [])
+            )
         except Exception:  # noqa: BLE001
             return
         for ep in selected:
@@ -290,7 +321,9 @@ class _LawTable:
         if not callable(fn):
             raise TypeError(f"law {name!r} must be callable")
         if not overwrite and (name in self._builtin or name in self._user):
-            raise ValueError(f"{name!r} is already registered; pass overwrite=True to replace it")
+            raise ValueError(
+                f"{name!r} is already registered; pass overwrite=True to replace it"
+            )
         keys = _normalize_required_keys(fn, required_keys)
         scale_recipe, time_scale, implied_check = _validate_law_hooks(
             name,
@@ -322,7 +355,9 @@ class _LawTable:
         try:
             return self._user[name]
         except KeyError:
-            raise KeyError(f"Unknown law {name!r}: not in Laws.* or the moju registry") from None
+            raise KeyError(
+                f"Unknown law {name!r}: not in Laws.* or the moju registry"
+            ) from None
 
     def names(self) -> List[str]:
         self.load_entry_points()
@@ -391,7 +426,8 @@ def resolve_law_spec(spec: Mapping[str, Any]) -> Dict[str, Any]:
     """
     Copy a law spec, filling a missing ``state_map`` from the named law's ``required_keys``.
 
-    An explicit ``state_map`` must include every required argument. A spec ``fn`` is left unchanged.
+    An explicit ``state_map`` is kept as written, including a partial map. Omitted arguments
+    are still resolved by parameter name from state and constants. A spec ``fn`` is left unchanged.
     """
     out = dict(spec)
     if out.get("fn") is not None or "name" not in out:
@@ -399,21 +435,20 @@ def resolve_law_spec(spec: Mapping[str, Any]) -> Dict[str, Any]:
     record = law_record_or_none(str(out["name"]))
     if record is None:
         return out
-    state_map = out.get("state_map")
-    if not state_map:
+    if not out.get("state_map"):
         out["state_map"] = {key: key for key in record.required_keys}
-        return out
-    missing = [key for key in record.required_keys if key not in state_map]
-    if missing:
-        raise ValueError(f"law {out['name']!r} state_map is missing required arguments {missing}")
     return out
 
 
-def resolve_law_specs(specs: Optional[Iterable[Mapping[str, Any]]]) -> List[Dict[str, Any]]:
+def resolve_law_specs(
+    specs: Optional[Iterable[Mapping[str, Any]]],
+) -> List[Dict[str, Any]]:
     return [resolve_law_spec(spec) for spec in (specs or [])]
 
 
-def law_sources_for_specs(specs: Sequence[Mapping[str, Any]]) -> Dict[str, Dict[str, str]]:
+def law_sources_for_specs(
+    specs: Sequence[Mapping[str, Any]],
+) -> Dict[str, Dict[str, str]]:
     """Law name to ``{source, package?, version?}`` for a configured spec list."""
     out: Dict[str, Dict[str, str]] = {}
     for spec in specs:

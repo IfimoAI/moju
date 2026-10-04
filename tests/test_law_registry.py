@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from moju.monitor import LawImpliedCheck, ResidualEngine, audit, evaluate, implied_by_projection
+from moju.monitor import (
+    LawImpliedCheck,
+    ResidualEngine,
+    audit,
+    evaluate,
+    implied_by_projection,
+)
 from moju.monitor.law_scale_recipes import characteristic_law_scale_k
 from moju.monitor.nondim_inference import law_time_scale_hint
 from moju.registry import (
@@ -56,10 +62,19 @@ def test_cookbook_registered_heat_law():
 
 
 def test_registered_heat_log_source_and_default_state_map():
-    register_law("heat_1d", heat.heat_1d, required_keys=("T_t", "T_xx", "alpha"), scale_recipe=heat.heat_scale)
+    register_law(
+        "heat_1d",
+        heat.heat_1d,
+        required_keys=("T_t", "T_xx", "alpha"),
+        scale_recipe=heat.heat_scale,
+    )
     try:
         engine = ResidualEngine(laws=[{"name": "heat_1d"}], law_implied_audits=False)
-        assert engine.laws_spec[0]["state_map"] == {"T_t": "T_t", "T_xx": "T_xx", "alpha": "alpha"}
+        assert engine.laws_spec[0]["state_map"] == {
+            "T_t": "T_t",
+            "T_xx": "T_xx",
+            "alpha": "alpha",
+        }
         engine.compute_residuals(heat._state())
         report = audit(engine.log)
         assert engine.log[-1]["law_sources"]["heat_1d"]["source"] == "registered"
@@ -147,18 +162,20 @@ def test_implied_check_on_registered_law():
 
 def test_collision_and_required_keys():
     with pytest.raises(ValueError, match="overwrite=True"):
-        register_law("fourier_conduction", heat.heat_1d, required_keys=("T_t", "T_xx", "alpha"))
+        register_law(
+            "fourier_conduction", heat.heat_1d, required_keys=("T_t", "T_xx", "alpha")
+        )
     with pytest.raises(ValueError, match="positional parameters"):
         register_law("heat_1d", heat.heat_1d, required_keys=("T_t",))
     with pytest.raises(ValueError, match="built-in"):
         unregister_law("fourier_conduction")
     register_law("heat_1d", heat.heat_1d, required_keys=("T_t", "T_xx", "alpha"))
     try:
-        with pytest.raises(ValueError, match="missing required arguments"):
-            ResidualEngine(
-                laws=[{"name": "heat_1d", "state_map": {"T_t": "T_t"}}],
-                law_implied_audits=False,
-            )
+        engine = ResidualEngine(
+            laws=[{"name": "heat_1d", "state_map": {"T_t": "rate"}}],
+            law_implied_audits=False,
+        )
+        assert engine.laws_spec[0]["state_map"] == {"T_t": "rate"}
     finally:
         unregister_law("heat_1d")
 
@@ -174,7 +191,9 @@ def test_entry_point_load_provenance_and_isolation(monkeypatch):
 
         @staticmethod
         def load():
-            return RegisteredLaw(heat.heat_1d, ("T_t", "T_xx", "alpha"), time_scale="fourier")
+            return RegisteredLaw(
+                heat.heat_1d, ("T_t", "T_xx", "alpha"), time_scale="fourier"
+            )
 
     class _Bad:
         name = "broken_law"
@@ -216,7 +235,10 @@ def test_entry_point_load_provenance_and_isolation(monkeypatch):
             "package": "example-laws",
             "version": "0.1.0",
         }
-        assert report["per_key"]["laws/ep_heat"]["admissibility_level"] == "High Admissibility"
+        assert (
+            report["per_key"]["laws/ep_heat"]["admissibility_level"]
+            == "High Admissibility"
+        )
     finally:
         unregister_law("ep_heat")
         _reset_entry_points()
@@ -231,14 +253,25 @@ def test_torch_registered_heat_matches_jax():
     register_law("heat_1d", heat.heat_1d, required_keys=("T_t", "T_xx", "alpha"))
     try:
         jax_state = heat._state()
-        state = {key: torch.as_tensor(np.asarray(value)) for key, value in jax_state.items()}
-        torch_engine = TorchResidualEngine(laws=[{"name": "heat_1d"}], law_implied_audits=False)
+        state = {
+            key: torch.as_tensor(np.asarray(value)) for key, value in jax_state.items()
+        }
+        torch_engine = TorchResidualEngine(
+            laws=[{"name": "heat_1d"}], law_implied_audits=False
+        )
         torch_residual = torch_engine.compute_residuals_torch(state)["laws"]["heat_1d"]
-        jax_engine = ResidualEngine(laws=[{"name": "heat_1d"}], law_implied_audits=False)
+        jax_engine = ResidualEngine(
+            laws=[{"name": "heat_1d"}], law_implied_audits=False
+        )
         jax_residual = jax_engine.compute_residuals(jax_state)["laws"]["heat_1d"]
-        assert torch.allclose(torch_residual.cpu(), torch.as_tensor(np.asarray(jax_residual)), atol=1e-5)
+        assert torch.allclose(
+            torch_residual.cpu(), torch.as_tensor(np.asarray(jax_residual)), atol=1e-5
+        )
         report = torch_engine.audit(state)
         assert report["law_sources"]["heat_1d"]["source"] == "registered"
-        assert report["per_key"]["laws/heat_1d"]["admissibility_level"] == "High Admissibility"
+        assert (
+            report["per_key"]["laws/heat_1d"]["admissibility_level"]
+            == "High Admissibility"
+        )
     finally:
         unregister_law("heat_1d")
