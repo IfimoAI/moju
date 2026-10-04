@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.3.1]
+
+### Fixed
+
+- **Traceable built-in law scale recipes.** Incompressible continuity, and every other built-in term-balance recipe, reduced its scale with `float()` and `math.isfinite`. That broke JAX tracing, so `evaluate` scored same-shaped candidates on the per-candidate loop. The reductions now stay on `jax.numpy`, in the same style as `term_max_rms`. Scores are unchanged.
+
 ## [1.3.0] - 2026-10-04
 
 There are no breaking changes. Existing specs, hooks, and report schema `1.0` stay valid.
