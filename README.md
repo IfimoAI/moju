@@ -144,6 +144,14 @@ pip install "moju[torch]"
 
 Start with [`scripts/torch_laws_example.py`](https://github.com/IfimoAI/moju/blob/main/scripts/torch_laws_example.py). The implementation is covered by `tests/test_torch_engine.py` and `tests/test_torch_interop.py`.
 
+## Registering custom laws
+
+`moju.registry.register_law` names a residual so a spec can be `{"name": "heat_1d"}`. `required_keys` must match the callable's positional parameters and is the default identity `state_map`. Optional `scale_recipe`, `time_scale`, and `implied_check` travel with that law and are removed by `unregister_law`. A spec field still wins, then the law record, then `register_law_scale_recipe`, `register_law_time_scale`, and `register_law_implied_check`.
+
+A third-party package publishes laws through the `moju.laws` entry-point group. Each entry point returns a `RegisteredLaw` or a bare callable. A load error, or a name that collides with a built-in or an already registered law, warns and is skipped.
+
+The log and the audit report record `law_sources` as `builtin`, `registered`, `entry_point`, or `spec_fn`. See [`examples/cookbook_register_law_heat_1d.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_register_law_heat_1d.py).
+
 ## Installation profiles
 
 | Install | Use when |
@@ -162,6 +170,7 @@ Training demos that use **optax** (e.g. [`examples/slab_cooling_demo.py`](https:
 - Training vs eval behavior: [`docs/monitor_training_vs_eval.md`](https://github.com/IfimoAI/moju/blob/main/docs/monitor_training_vs_eval.md)
 - Path B FD / spectral derivative fill: [`docs/path_b_derivatives.md`](https://github.com/IfimoAI/moju/blob/main/docs/path_b_derivatives.md)
 - Law-linked constitutive implied audits: [`docs/law_implied_audits.md`](https://github.com/IfimoAI/moju/blob/main/docs/law_implied_audits.md)
+- Registering custom laws: [Registering custom laws](#registering-custom-laws)
 - Moju Studio: [`apps/moju_studio/README.md`](https://github.com/IfimoAI/moju/blob/main/apps/moju_studio/README.md)
 - Versioning policy: [`VERSIONING.md`](https://github.com/IfimoAI/moju/blob/main/VERSIONING.md)
 - Changelog: [`CHANGELOG.md`](https://github.com/IfimoAI/moju/blob/main/CHANGELOG.md)
@@ -174,6 +183,7 @@ Training demos that use **optax** (e.g. [`examples/slab_cooling_demo.py`](https:
 - Path B finite-difference law fill: [`examples/cookbook_path_b_fd_law_laplace.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_path_b_fd_law_laplace.py)
 - Path B spectral (periodic) Burgers fill: [`examples/cookbook_path_b_spectral_burgers.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_path_b_spectral_burgers.py)
 - Constitutive divergence dashboard: [`examples/cookbook_constitutive_divergence.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_constitutive_divergence.py)
+- Register a named 1D heat law: [`examples/cookbook_register_law_heat_1d.py`](https://github.com/IfimoAI/moju/blob/main/examples/cookbook_register_law_heat_1d.py)
 - Torch interop: [`scripts/torch_laws_example.py`](https://github.com/IfimoAI/moju/blob/main/scripts/torch_laws_example.py)
 
 ## Philosophy

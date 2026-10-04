@@ -397,6 +397,11 @@ def _entry(index, out, residuals, plan: _Plan, provenance: Dict[str, str], *, ru
     }
     if provenance:
         entry["derivative_provenance"] = dict(provenance)
+    from moju.registry import law_sources_for_specs
+
+    law_sources = law_sources_for_specs(plan.laws_spec)
+    if law_sources:
+        entry["law_sources"] = law_sources
     scoring = {k: plan.scoring[k].to_dict() for k in plan.scoring if k in flat_keys}
     if scoring:
         entry["scoring"] = scoring

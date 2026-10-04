@@ -132,9 +132,14 @@ def unregister_law_time_scale(law_name: str) -> None:
 
 
 def law_time_scale_hint(law_name: str, law_spec: Optional[Mapping[str, Any]] = None) -> Any:
-    """Hint for one law: spec ``time_scale`` > registered hint > built-in table; ``None`` if unknown."""
+    """Hint for one law: spec ``time_scale`` > law record > registered hint > built-in table."""
     if law_spec is not None and law_spec.get("time_scale") is not None:
         return _validate_time_scale_hint(law_name, law_spec["time_scale"])
+    from moju.registry import law_record_or_none
+
+    record = law_record_or_none(law_name)
+    if record is not None and record.time_scale is not None:
+        return _validate_time_scale_hint(law_name, record.time_scale)
     if law_name in _USER_LAW_TIME_SCALE:
         return _USER_LAW_TIME_SCALE[law_name]
     return LAW_TIME_SCALE.get(law_name)

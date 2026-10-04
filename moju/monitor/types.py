@@ -126,7 +126,9 @@ class KeyDeclaration:
 @dataclass(frozen=True)
 class LawSpec:
     """
-    Governing-law spec. ``fn`` is optional for built-in ``Laws.<name>``; required for custom laws.
+    Governing-law spec. ``fn`` is optional for a built-in ``Laws.<name>`` or a name from
+    :func:`moju.registry.register_law`. Omit ``state_map`` to use that law's ``required_keys`` as an
+    identity map.
 
     ``time_scale`` (dimensional mode): one of ``"convective"``, ``"fourier"``, ``"mass_fourier"``,
     ``"wave"``, a dict ``{"t_ref": float}``, or a callable ``(constants, scales) -> t_ref``.
@@ -290,6 +292,7 @@ class AuditReport(TypedDict, total=False):
     constitutive_closure_summary: Any
     audit_meta: Dict[str, Any]
     derivative_provenance: Dict[str, str]
+    law_sources: Dict[str, Dict[str, str]]
     execution: str
 
 
@@ -341,6 +344,18 @@ def report_json_schema() -> Dict[str, Any]:
             "derivative_provenance": {
                 "type": "object",
                 "additionalProperties": {"enum": ["supplied", "finite_difference", "spectral"]},
+            },
+            "law_sources": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"enum": ["builtin", "registered", "entry_point", "spec_fn"]},
+                        "package": {"type": "string"},
+                        "version": {"type": "string"},
+                    },
+                    "required": ["source"],
+                },
             },
             "execution": {"type": "string"},
         },

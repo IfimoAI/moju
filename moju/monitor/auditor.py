@@ -227,6 +227,10 @@ def _get_fn(spec: Dict[str, Any], builtin_class: Any) -> Any:
     name = spec["name"]
     if builtin_class is Groups:
         return get_group_fn(name)
+    if builtin_class is Laws:
+        from moju.registry import get_law
+
+        return get_law(name).fn
     fn = getattr(builtin_class, name, None)
     if fn is None:
         raise KeyError(
@@ -899,6 +903,8 @@ def audit(
     }
     if log[-1].get("derivative_provenance"):
         report["derivative_provenance"] = dict(log[-1]["derivative_provenance"])
+    if log[-1].get("law_sources"):
+        report["law_sources"] = dict(log[-1]["law_sources"])
     from moju.monitor.constitutive_closure_summary import build_constitutive_closure_summary
 
     report["constitutive_closure_summary"] = build_constitutive_closure_summary(last_report_per_key)
@@ -1987,9 +1993,10 @@ class ResidualEngine:
                 raise TypeError("config must be a MonitorConfig")
 
         from moju.monitor.types import specs_to_engine_dicts
+        from moju.registry import resolve_law_specs
 
         self.constants = dict(constants or {})
-        self.laws_spec = specs_to_engine_dicts(laws)
+        self.laws_spec = resolve_law_specs(specs_to_engine_dicts(laws))
         self.groups_spec = specs_to_engine_dicts(groups)
         self.constitutive_audit = specs_to_engine_dicts(constitutive_audit)
         li_c, _li_s = merge_law_implied_audit_specs(self.laws_spec, enabled=law_implied_enabled)
@@ -2796,6 +2803,11 @@ class ResidualEngine:
             entry["unresolved_dependencies"] = unresolved_dependencies
         if derivative_provenance:
             entry["derivative_provenance"] = derivative_provenance
+        from moju.registry import law_sources_for_specs
+
+        law_sources = law_sources_for_specs(self.laws_spec)
+        if law_sources:
+            entry["law_sources"] = law_sources
         entry_scoring = {k: s.to_dict() for k, s in self._scoring_by_key.items() if k in flat}
         if entry_scoring:
             entry["scoring"] = entry_scoring

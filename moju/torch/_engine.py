@@ -157,7 +157,9 @@ class TorchResidualEngine:
         if derivatives not in ("auto", "supplied_only"):
             raise ValueError(f"derivatives must be 'auto' or 'supplied_only', got {derivatives!r}")
         self._derivatives = derivatives
-        self._laws_spec: List[Dict[str, Any]] = specs_to_engine_dicts(laws)
+        from moju.registry import resolve_law_specs
+
+        self._laws_spec: List[Dict[str, Any]] = resolve_law_specs(specs_to_engine_dicts(laws))
         self._bound_checks: List[BoundCheck] = [BoundCheck.coerce(b) for b in (bound_checks or [])]
         _bnames = [b.name for b in self._bound_checks]
         if len(set(_bnames)) != len(_bnames):
@@ -425,6 +427,7 @@ class TorchResidualEngine:
                     state,
                     self._constants,
                     self._nondim_scales_overrides,
+                    law_specs=self._laws_spec,
                 )
             state = dimensional_to_nd_torch(state, nd_scales, warn_unknown=False)
             merged = {**self._constants, **state}
