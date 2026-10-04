@@ -23,25 +23,46 @@ _SCALE_EPS = 1e-12
 ScaleSource = str  # "auto" | "user_recipe" | "auto_fallback" | "fixed"
 
 
-def _rms_mag(arr: Any) -> float:
-    """Scalar RMS; vector last-axis uses sqrt(mean(sum sq))."""
+def _as_host_float(value: Any) -> Any:
+    """Python float outside a trace; the traced value itself under ``jax.jit``."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return value
+
+
+def _rms_mag_array(arr: Any) -> jnp.ndarray:
+    """
+    Traceable RMS used by built-in recipes.
+
+    A floating array whose last axis is longer than 1 uses ``sqrt(mean(sum of squares))``.
+    Every other array uses ``sqrt(mean(square))``. That split is what published scores use.
+    """
     if arr is None:
-        return float("nan")
+        return jnp.asarray(jnp.nan)
     a = jnp.asarray(arr)
     if a.size == 0:
-        return float("nan")
+        return jnp.asarray(jnp.nan)
     if a.ndim >= 1 and a.shape[-1] > 1 and jnp.issubdtype(a.dtype, jnp.floating):
         sq = jnp.sum(a**2, axis=-1)
-        return float(jnp.sqrt(jnp.mean(sq) + _SCALE_EPS))
-    return float(jnp.sqrt(jnp.mean(a**2) + _SCALE_EPS))
+        return jnp.sqrt(jnp.mean(sq) + _SCALE_EPS)
+    return jnp.sqrt(jnp.mean(a**2) + _SCALE_EPS)
+
+
+def _rms_mag(arr: Any) -> float:
+    """Scalar RMS; vector last-axis uses sqrt(mean(sum sq))."""
+    return _as_host_float(_rms_mag_array(arr))
 
 
 def _term_max_rms(*terms: Any) -> float:
-    vals = [_rms_mag(t) for t in terms if t is not None]
-    finite = [v for v in vals if math.isfinite(v) and v > 0]
-    if not finite:
-        return float("nan")
-    return max(finite)
+    """Largest finite positive RMS. ``None`` terms are skipped. NaN if none qualify."""
+    vals = [_rms_mag_array(t) for t in terms if t is not None]
+    if not vals:
+        return _as_host_float(jnp.nan)
+    stacked = jnp.stack([jnp.asarray(v) for v in vals])
+    positive = jnp.where(jnp.isfinite(stacked) & (stacked > 0), stacked, -jnp.inf)
+    best = jnp.max(positive)
+    return _as_host_float(jnp.where(jnp.isfinite(best), best, jnp.nan))
 
 
 def _floor_scale(scale: float) -> float:
@@ -76,7 +97,9 @@ def _recipe_laplace_beltrami(merged, constants, law_spec, nondim_scales):
 def _recipe_mass_incompressible(merged, constants, law_spec, nondim_scales):
     sm = law_spec.get("state_map") or {}
     ug = _val(merged, constants, sm, "u_grad")
-    return _term_max_rms(jnp.trace(jnp.asarray(ug), axis1=-2, axis2=-1) if ug is not None else None)
+    return _term_max_rms(
+        jnp.trace(jnp.asarray(ug), axis1=-2, axis2=-1) if ug is not None else None
+    )
 
 
 def _recipe_mass_compressible(merged, constants, law_spec, nondim_scales):
@@ -137,7 +160,11 @@ def _recipe_momentum_comp_newtonian(merged, constants, law_spec, nondim_scales):
     adv = _advection_mag(u, u_grad) if u is not None and u_grad is not None else None
     mom = None
     if rho is not None and adv is not None:
-        mom = jnp.asarray(rho) * (jnp.asarray(u_t) + adv) if u_t is not None else jnp.asarray(rho) * adv
+        mom = (
+            jnp.asarray(rho) * (jnp.asarray(u_t) + adv)
+            if u_t is not None
+            else jnp.asarray(rho) * adv
+        )
     visc = None
     if rho is not None and u_lap is not None and nu is not None:
         visc = jnp.asarray(rho) * jnp.asarray(nu) * jnp.asarray(u_lap)
@@ -242,7 +269,12 @@ def _recipe_wave(merged, constants, law_spec, nondim_scales):
     omega = _val(merged, constants, sm, "omega")
     L = _val(merged, constants, sm, "L")
     lap_term = None
-    if phi_lap is not None and st_wave is not None and omega is not None and L is not None:
+    if (
+        phi_lap is not None
+        and st_wave is not None
+        and omega is not None
+        and L is not None
+    ):
         coeff = (jnp.asarray(st_wave) * jnp.asarray(omega) / jnp.asarray(L)) ** 2
         lap_term = coeff * jnp.asarray(phi_lap)
     return _term_max_rms(phi_tt, lap_term)
@@ -298,10 +330,20 @@ def _recipe_viscous_dissipation(merged, constants, law_spec, nondim_scales):
     U = _val(merged, constants, sm, "U")
     L = _val(merged, constants, sm, "L")
     src = None
-    if u_grad is not None and re is not None and ec is not None and U is not None and L is not None:
+    if (
+        u_grad is not None
+        and re is not None
+        and ec is not None
+        and U is not None
+        and L is not None
+    ):
         strain = 0.5 * (jnp.asarray(u_grad) + jnp.swapaxes(jnp.asarray(u_grad), -2, -1))
         strain_star = strain * (jnp.asarray(L) / jnp.asarray(U))
-        src = (jnp.asarray(ec) / jnp.asarray(re)) * 2.0 * jnp.sum(strain_star**2, axis=(-2, -1))
+        src = (
+            (jnp.asarray(ec) / jnp.asarray(re))
+            * 2.0
+            * jnp.sum(strain_star**2, axis=(-2, -1))
+        )
     return _term_max_rms(u_grad, src)
 
 
@@ -370,12 +412,17 @@ def _generic_state_map_rms(
     return max(finite)
 
 
-LawScaleRecipe = Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any], Optional[NondimScales]], float]
+LawScaleRecipe = Callable[
+    [Mapping[str, Any], Mapping[str, Any], Mapping[str, Any], Optional[NondimScales]],
+    float,
+]
 
 _USER_LAW_SCALE_RECIPES: Dict[str, LawScaleRecipe] = {}
 
 
-def register_law_scale_recipe(law_name: str, fn: LawScaleRecipe, *, overwrite: bool = False) -> None:
+def register_law_scale_recipe(
+    law_name: str, fn: LawScaleRecipe, *, overwrite: bool = False
+) -> None:
     """
     Register a term-balance recipe ``fn(merged, constants, law_spec, nondim_scales) -> float`` for
     ``law_name`` (custom laws match on the spec ``name``). User recipes take precedence over built-in
@@ -387,7 +434,9 @@ def register_law_scale_recipe(law_name: str, fn: LawScaleRecipe, *, overwrite: b
     if not callable(fn):
         raise TypeError("scale recipe must be callable")
     if law_name in _USER_LAW_SCALE_RECIPES and not overwrite:
-        raise ValueError(f"scale recipe for {law_name!r} already registered; pass overwrite=True")
+        raise ValueError(
+            f"scale recipe for {law_name!r} already registered; pass overwrite=True"
+        )
     _USER_LAW_SCALE_RECIPES[str(law_name)] = fn
 
 
@@ -409,14 +458,6 @@ def _term_rms_array(arr: Any, *, vector: bool = False) -> jnp.ndarray:
     if vector and a.ndim >= 1:
         return jnp.sqrt(jnp.mean(jnp.sum(a**2, axis=-1)) + _SCALE_EPS)
     return jnp.sqrt(jnp.mean(a**2) + _SCALE_EPS)
-
-
-def _as_host_float(value: Any) -> Any:
-    """Python float outside a trace; the traced value itself under ``jax.jit``."""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return value
 
 
 def term_rms(arr: Any, *, vector: bool = False) -> float:
@@ -450,7 +491,9 @@ def law_arg_value(
     return _val(merged, constants, law_spec.get("state_map") or {}, arg)
 
 
-def _resolve_scale_recipe(law_name: str, law_spec: Mapping[str, Any]) -> Tuple[Optional[LawScaleRecipe], bool]:
+def _resolve_scale_recipe(
+    law_name: str, law_spec: Mapping[str, Any]
+) -> Tuple[Optional[LawScaleRecipe], bool]:
     spec_recipe = law_spec.get("scale_recipe")
     if spec_recipe is not None:
         return spec_recipe, True
