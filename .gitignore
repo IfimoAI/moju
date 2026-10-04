@@ -206,6 +206,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Generated visualize score tables
+transient_cooling_1d_visualize_exports/
+
 # --- JAX & ML Specific ---
 .ipynb_checkpoints
 *.ipynb
