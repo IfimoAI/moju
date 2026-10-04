@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.3.0]
+
+### Added
+
+- **Named law registry.** `register_law`, `get_law`, `list_laws`, and `unregister_law` name a governing residual the same way `register_model` names a constitutive model. A spec can be `{"name": "heat_1d"}`; `required_keys` fills a missing `state_map`. Optional scale, time-scale, and implied-check hooks live on the law record and leave with `unregister_law`. Third-party packages publish laws through the `moju.laws` entry-point group. Log entries and audit reports include optional `law_sources` (`builtin`, `registered`, `entry_point`, or `spec_fn`). `REPORT_SCHEMA_VERSION` stays `1.0`.
+
 ## [1.2.0] - 2026-10-03
 
 ### Added

@@ -647,6 +647,11 @@ def unregister_law_implied_checks(law_name: str) -> None:
 def _implied_rows_for(law_name: str) -> List[Dict[str, Any]]:
     rows = list(_LAW_IMPLIED_ROWS.get(law_name) or [])
     rows += [c.to_row(law_name) for c in _USER_LAW_IMPLIED_ROWS.get(law_name, [])]
+    from moju.registry import law_record_or_none
+
+    record = law_record_or_none(law_name)
+    if record is not None and record.implied_check is not None:
+        rows.append(record.implied_check.to_row(law_name))
     return rows
 
 

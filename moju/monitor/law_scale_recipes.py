@@ -454,6 +454,11 @@ def _resolve_scale_recipe(law_name: str, law_spec: Mapping[str, Any]) -> Tuple[O
     spec_recipe = law_spec.get("scale_recipe")
     if spec_recipe is not None:
         return spec_recipe, True
+    from moju.registry import law_record_or_none
+
+    record = law_record_or_none(law_name)
+    if record is not None and record.scale_recipe is not None:
+        return record.scale_recipe, True
     if law_name in _USER_LAW_SCALE_RECIPES:
         return _USER_LAW_SCALE_RECIPES[law_name], True
     return LAW_SCALE_RECIPES.get(law_name), False
@@ -470,7 +475,7 @@ def characteristic_law_scale_k(
     """
     Return ``(scale_k, scale_source)`` for a governing law.
 
-    Fallback: spec ``scale_recipe`` → registered user recipe → built-in recipe → generic
+    Fallback: spec ``scale_recipe`` → law-registry recipe → registered user recipe → built-in recipe → generic
     state_map RMS → ``DEFAULT_NONDIM_R_NORM_SCALE_K``.
     """
     recipe, is_user = _resolve_scale_recipe(law_name, law_spec)
