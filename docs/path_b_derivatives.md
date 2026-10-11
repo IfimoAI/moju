@@ -2,7 +2,7 @@
 
 Path B passes a ready `state_pred` into `ResidualEngine`. When law inputs such as `u_grad`, `u_laplacian`, or `T_t` are missing, Moju can **optionally** fill them from primitive fields on a structured grid. This page is the canonical guide for that fill path.
 
-**Related:** [monitor_training_vs_eval.md](monitor_training_vs_eval.md) (training/eval and Path B units) · [law_implied_audits.md](law_implied_audits.md) (constitutive implied δ) · cookbooks below.
+**Related:** [getting_derivatives_right.md](getting_derivatives_right.md) (metadata, term breakdown, error flags) · [monitor_training_vs_eval.md](monitor_training_vs_eval.md) (training/eval and Path B units) · [law_implied_audits.md](law_implied_audits.md) (constitutive implied δ) · cookbooks below.
 
 ## When to fill vs supply derivatives yourself
 
@@ -20,7 +20,7 @@ Implied constitutive audits (especially Burgers **ν-δ**) are **Laplacian-sensi
 
 | Piece | Role |
 |-------|------|
-| [`PathBGridConfig`](../moju/monitor/path_b_derivatives.py) | Layout, dimension, `diff_method`, `periodic` |
+| [`PathBGridConfig`](../moju/monitor/path_b_derivatives.py) | Layout, dimension, `diff_method`, `periodic`, optional `fd_order` / `fd_order_time` (2/4/6), `estimate_derivative_error` |
 | `fill_path_b_derivatives(..., fill_law_recipes=True)` | Generic fill; honors `grid.diff_method` |
 | `fill_path_b_spectral(...)` | Convenience: forces `diff_method="spectral"`, `periodic=True`, recipes on |
 | `fill_law_fd_from_primitives` | Law-recipe fill used under the hood |
@@ -34,8 +34,10 @@ Registered law arguments and kinds live in `moju.monitor.law_fd_recipes.LAW_FD_R
 
 - **`diff_method="fd"`** is the default.
 - Bare **`auto_path_b_derivatives=True`** always uses **FD** — spectral is **never** silent.
-- Spectral requires **`periodic=True`** and **uniform** rectilinear spacing; otherwise Moju raises `ValueError`.
-- **Temporal** `dt` / `dtt` always use FD (time stacks are rarely periodic), even when spatial fill is spectral.
+- **`fd_order=None`** (default) keeps the legacy `jnp.gradient` path. Set `fd_order` to `2`, `4`, or `6` for explicit central stencils with matching one-sided boundaries on **uniform** grids; non-uniform grids warn and fall back.
+- Spectral requires **`periodic=True`** and **uniform** rectilinear spacing; otherwise Moju raises `ValueError` (and emits a diagnostic warning first).
+- **Temporal** `dt` / `dtt` always use FD (time stacks are rarely periodic), even when spatial fill is spectral; optional `fd_order_time` mirrors `fd_order`.
+- **Non-uniform spacing:** supported only via the legacy `jnp.gradient` path (`fd_order=None`). Prefer supplying solver derivatives when spacing varies.
 
 ## Spectral usage (JAX)
 

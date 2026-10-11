@@ -35,6 +35,7 @@ from moju.monitor.path_b_derivatives import (
     _meshgrid_separable_axis_coords,
     _rectilinear_meshgrid_1d_axes,
     _separable_1d_coords,
+    _uniform_1d_spacing,
 )
 
 
@@ -170,10 +171,23 @@ def _scalar_laplacian_steady(
             warnings.append(str(e))
             return None
         try:
-            grads = _jnp_gradient_multi(K, coords)
+            if cfg.fd_order is not None and all(
+                _uniform_1d_spacing(c) is not None for c in coords
+            ):
+                from moju.monitor.fd_stencils import laplacian_uniform_nd, validate_fd_order
+
+                hs = [_uniform_1d_spacing(c) for c in coords]
+                return laplacian_uniform_nd(
+                    K, [float(h) for h in hs], order=validate_fd_order(cfg.fd_order)
+                )
+            grads = _jnp_gradient_multi(
+                K, coords, fd_order=cfg.fd_order, warnings=warnings
+            )
             acc = jnp.zeros_like(K)
             for i, gi in enumerate(grads):
-                parts = _jnp_gradient_multi(gi, coords)
+                parts = _jnp_gradient_multi(
+                    gi, coords, fd_order=cfg.fd_order, warnings=warnings
+                )
                 acc = acc + parts[i]
             return acc
         except Exception as e:  # noqa: BLE001
@@ -185,6 +199,19 @@ def _scalar_laplacian_steady(
         if aligned is None:
             return None
         K1, c1, orig_shape = aligned
+        if cfg.fd_order is not None:
+            h = _uniform_1d_spacing(c1)
+            if h is not None:
+                from moju.monitor.fd_stencils import diff2_uniform, validate_fd_order
+
+                lap = diff2_uniform(
+                    K1, float(h), order=validate_fd_order(cfg.fd_order), axis=0
+                )
+                return jnp.reshape(lap, orig_shape)
+            warnings.append(
+                f"fd_order={cfg.fd_order} requires uniform spacing for laplacian; "
+                "falling back to composed gradients"
+            )
         g = _fill_spatial_derivative_steady(K1, "x", cfg, c1, y, z, dim, warnings)
         if g is None:
             return None
@@ -195,10 +222,23 @@ def _scalar_laplacian_steady(
     rect1d = _rectilinear_meshgrid_1d_axes(K, x, y, z, dim)
     if rect1d is not None:
         try:
-            grads = _jnp_gradient_multi(K, rect1d)
+            if cfg.fd_order is not None and all(
+                _uniform_1d_spacing(c) is not None for c in rect1d
+            ):
+                from moju.monitor.fd_stencils import laplacian_uniform_nd, validate_fd_order
+
+                hs = [_uniform_1d_spacing(c) for c in rect1d]
+                return laplacian_uniform_nd(
+                    K, [float(h) for h in hs], order=validate_fd_order(cfg.fd_order)
+                )
+            grads = _jnp_gradient_multi(
+                K, rect1d, fd_order=cfg.fd_order, warnings=warnings
+            )
             acc = jnp.zeros_like(K)
             for i, gi in enumerate(grads):
-                parts = _jnp_gradient_multi(gi, rect1d)
+                parts = _jnp_gradient_multi(
+                    gi, rect1d, fd_order=cfg.fd_order, warnings=warnings
+                )
                 acc = acc + parts[i]
             return acc
         except Exception as e:  # noqa: BLE001
@@ -207,10 +247,23 @@ def _scalar_laplacian_steady(
     sep_axes = _meshgrid_separable_axis_coords(K, x, y, z, dim)
     if sep_axes is not None:
         try:
-            grads = _jnp_gradient_multi(K, sep_axes)
+            if cfg.fd_order is not None and all(
+                _uniform_1d_spacing(c) is not None for c in sep_axes
+            ):
+                from moju.monitor.fd_stencils import laplacian_uniform_nd, validate_fd_order
+
+                hs = [_uniform_1d_spacing(c) for c in sep_axes]
+                return laplacian_uniform_nd(
+                    K, [float(h) for h in hs], order=validate_fd_order(cfg.fd_order)
+                )
+            grads = _jnp_gradient_multi(
+                K, sep_axes, fd_order=cfg.fd_order, warnings=warnings
+            )
             acc = jnp.zeros_like(K)
             for i, gi in enumerate(grads):
-                parts = _jnp_gradient_multi(gi, sep_axes)
+                parts = _jnp_gradient_multi(
+                    gi, sep_axes, fd_order=cfg.fd_order, warnings=warnings
+                )
                 acc = acc + parts[i]
             return acc
         except Exception as e:  # noqa: BLE001
