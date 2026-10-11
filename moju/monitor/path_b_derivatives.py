@@ -36,18 +36,19 @@ class PathBGridConfig:
         ``auto_path_b_derivatives=True`` — pass an explicit ``PathBGridConfig``.
 
     ``fd_order``:
-      - ``None`` (default): legacy ``jnp.gradient`` (≈ 2nd-order central; unchanged from 1.3).
-      - ``2``, ``4``, or ``6``: explicit central stencils with matching one-sided boundaries
-        on **uniform** grids (:mod:`moju.monitor.fd_stencils`). Non-uniform grids warn and
-        fall back to ``jnp.gradient``.
+      - ``None`` (default): legacy ``jnp.gradient`` (≈ 2nd-order central; unchanged from 1.x).
+      - ``2``, ``4``, or ``6``: explicit stencils of that order. Uniform grids use centred /
+        one-sided formulas; **non-uniform** grids use Fornberg finite-difference weights
+        (:mod:`moju.monitor.fd_stencils`). Defaults are unchanged in 1.4 / until 2.0.
 
     ``fd_order_time``: same convention for temporal ``dt`` / ``dtt`` (default ``None`` = legacy).
 
-    ``estimate_derivative_error``: when True, Path B also fills a coarser (every-other-point)
-    approximation used only for diagnostic error estimates; never changes residual values.
+    ``estimate_derivative_error``: when True, also build a coarser (every-other-point) fill
+    for diagnostic error estimates; never changes residual values. Pair with
+    ``derivative_error_method`` on :meth:`ResidualEngine.compute_residuals`.
 
-    Non-uniform spacing: supported only through the legacy ``jnp.gradient`` path (``fd_order``
-    is ``None``). Explicit ``fd_order`` requires uniform spacing per axis.
+    Spectral ``diff_method`` still requires ``periodic=True`` and uniform spacing, else
+    :class:`ValueError`.
     """
 
     layout: Literal["meshgrid", "separable"] = "meshgrid"
@@ -143,7 +144,11 @@ def _jnp_gradient_multi(
     coords = [jnp.asarray(x) for x in coord_list]
     hs = [_uniform_1d_spacing(c) for c in coords]
     if fd_order is not None:
-        from moju.monitor.fd_stencils import diff1_uniform, validate_fd_order
+        from moju.monitor.fd_stencils import (
+            diff1_nonuniform,
+            diff1_uniform,
+            validate_fd_order,
+        )
 
         order = validate_fd_order(fd_order)
         if len(hs) == len(coords) and all(h is not None for h in hs):
@@ -152,13 +157,11 @@ def _jnp_gradient_multi(
                 for i, h in enumerate(hs)
             ]
             return tuple(parts)
-        msg = (
-            f"fd_order={order} requires uniform spacing on every axis; "
-            "falling back to jnp.gradient (≈ order 2)"
-        )
-        if warnings is not None:
-            warnings.append(msg)
-        # fall through
+        # Non-uniform: Fornberg weights per axis
+        parts = []
+        for i, c in enumerate(coords):
+            parts.append(diff1_nonuniform(K, c, order=order, axis=i))
+        return tuple(parts)
     if len(hs) == len(coords) and all(h is not None for h in hs):
         return jnp.gradient(K, *tuple(hs))
     return jnp.gradient(K, *coords)
@@ -176,9 +179,11 @@ def _grad_1d_nonuniform(
         from moju.monitor.fd_stencils import diff1_uniform, validate_fd_order
 
         return diff1_uniform(values, float(h), order=validate_fd_order(fd_order), axis=0)
-    if fd_order is not None and h is None and warnings is not None:
-        warnings.append(
-            f"fd_order={fd_order} requires uniform spacing; falling back to jnp.gradient"
+    if fd_order is not None and h is None:
+        from moju.monitor.fd_stencils import diff1_nonuniform, validate_fd_order
+
+        return diff1_nonuniform(
+            values, coord, order=validate_fd_order(fd_order), axis=0
         )
     if h is not None:
         return jnp.asarray(jnp.gradient(values, h))
@@ -566,9 +571,10 @@ def _fill_temporal_derivative(
 
             return diff1_uniform(col, float(ht), order=validate_fd_order(order_t), axis=0)
         if order_t is not None and ht is None:
-            warnings.append(
-                f"fd_order_time={order_t} requires uniform time samples; "
-                "falling back to jnp.gradient"
+            from moju.monitor.fd_stencils import diff1_nonuniform, validate_fd_order
+
+            return diff1_nonuniform(
+                col, t, order=validate_fd_order(order_t), axis=0
             )
         if ht is not None:
             return jnp.asarray(jnp.gradient(col, ht))
@@ -607,16 +613,8 @@ def fill_path_b_derivatives(
     if cfg.diff_method == "spectral":
         from moju.monitor.path_b_spectral import validate_spectral_grid_config
 
-        if not cfg.periodic:
-            warnings.append(
-                "spectral differentiation requested with periodic=False; "
-                "spectral Path B requires periodic=True on a uniform grid"
-            )
-        try:
-            validate_spectral_grid_config(cfg)
-        except ValueError as err:
-            warnings.append(f"spectral guard: {err}")
-            raise
+        # Hard error (not a soft warning) when spectral requirements are not met.
+        validate_spectral_grid_config(cfg)
     if cfg.fd_order is not None and cfg.diff_method == "spectral":
         warnings.append(
             "fd_order is ignored when diff_method='spectral' (spatial derivatives use FFT)"

@@ -80,6 +80,130 @@ def estimate_derivative_errors(
     return out
 
 
+def estimate_dual_spacing_on_axis(
+    fine_deriv: Any,
+    coarse_deriv: Any,
+    fine_index: Any,
+    *,
+    order: Optional[int] = None,
+    axis: int = -1,
+) -> Dict[str, float]:
+    """
+    Compare a fine-grid derivative to a coarse (every-other-point) derivative.
+
+    ``coarse_deriv`` lives on the subsampled axis; ``fine_index`` maps those samples
+    onto the fine axis. Comparison uses the fine values at ``fine_index``.
+    """
+    f = jnp.moveaxis(jnp.asarray(fine_deriv), axis, -1)
+    c = jnp.moveaxis(jnp.asarray(coarse_deriv), axis, -1)
+    idx = jnp.asarray(fine_index)
+    f_at = f[..., idx]
+    if f_at.shape != c.shape:
+        raise ValueError(
+            f"dual-spacing shape mismatch fine_at={f_at.shape} coarse={c.shape}"
+        )
+    return estimate_from_pair(f_at, c, order=order)
+
+
+def _subsample_like_mesh(arr: Any, ndim: int) -> Any:
+    a = jnp.asarray(arr)
+    slices = tuple(slice(None, None, 2) for _ in range(ndim))
+    if a.ndim > ndim:
+        return a[slices]
+    return a[slices]
+
+
+def estimate_errors_dual_spacing(
+    fine_state: Mapping[str, Any],
+    coarse_state: Mapping[str, Any],
+    *,
+    keys: Optional[Sequence[str]] = None,
+    spatial_ndim: int = 2,
+    order: Optional[int] = None,
+) -> Dict[str, Dict[str, float]]:
+    """
+    Per-key dual-spacing errors: compare fine[::2, ::2, ...] to coarse derivatives.
+
+    ``spatial_ndim`` is the number of leading axes subsampled (meshgrid convention).
+    """
+    deriv_suffixes = ("_t", "_tt", "_grad", "_laplacian")
+    if keys is None:
+        keys = sorted(
+            k
+            for k in set(fine_state) & set(coarse_state)
+            if any(str(k).endswith(s) for s in deriv_suffixes)
+        )
+    out: Dict[str, Dict[str, float]] = {}
+    for k in keys:
+        if fine_state.get(k) is None or coarse_state.get(k) is None:
+            continue
+        try:
+            fine_sub = _subsample_like_mesh(fine_state[k], spatial_ndim)
+            coarse = jnp.asarray(coarse_state[k])
+            if fine_sub.shape != coarse.shape:
+                # Try 1D subsample on axis 0
+                fine_sub = jnp.asarray(fine_state[k])[::2]
+            if fine_sub.shape != coarse.shape:
+                continue
+            out[str(k)] = estimate_from_pair(fine_sub, coarse, order=order)
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def fill_dual_spacing_alternate(
+    state_pred: Mapping[str, Any],
+    *,
+    laws_spec: Sequence[Mapping[str, Any]],
+    constants: Optional[Mapping[str, Any]] = None,
+    grid: Any = None,
+    fill_law_recipes: bool = True,
+) -> Dict[str, Any]:
+    """
+    Path B fill on an every-other-point spatial subsample of ``state_pred``.
+
+    Used only for diagnostics; does not replace the primary fill.
+    """
+    from dataclasses import replace
+
+    from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
+
+    cfg: PathBGridConfig = grid or PathBGridConfig()
+    coarse_state: Dict[str, Any] = {}
+    xk = cfg.key_x
+    xref = jnp.asarray(state_pred[xk]) if xk in state_pred and state_pred[xk] is not None else None
+    spatial_ndim = int(xref.ndim) if xref is not None else 1
+    if xref is not None and xref.ndim == 1:
+        spatial_ndim = 1
+    elif xref is not None:
+        spatial_ndim = int(xref.ndim)
+
+    deriv_suffixes = ("_t", "_tt", "_grad", "_laplacian")
+    for k, v in state_pred.items():
+        if v is None or any(str(k).endswith(s) for s in deriv_suffixes):
+            continue
+        arr = jnp.asarray(v)
+        if xref is not None and arr.shape[: xref.ndim] == xref.shape:
+            coarse_state[k] = _subsample_like_mesh(arr, xref.ndim)
+        elif arr.ndim == 1 and int(arr.shape[0]) >= 4:
+            coarse_state[k] = arr[::2]
+        else:
+            coarse_state[k] = v
+
+    filled, _, _ = fill_path_b_derivatives(
+        coarse_state,
+        laws_spec=list(laws_spec),
+        constants=dict(constants or {}),
+        grid=replace(cfg, estimate_derivative_error=False),
+        copy=True,
+        fill_law_recipes=fill_law_recipes,
+        return_provenance=True,
+    )
+    out = dict(filled)
+    out["_dual_spacing_meta"] = {"spatial_ndim": spatial_ndim}
+    return out
+
+
 def law_derivative_error_contribution(
     law_name: str,
     residual: Any,

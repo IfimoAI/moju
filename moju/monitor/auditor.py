@@ -2202,6 +2202,7 @@ class ResidualEngine:
         state_pred_alt: Optional[Dict[str, Any]] = None,
         estimate_derivative_error: Optional[bool] = None,
         derivative_error_threshold: Optional[float] = None,
+        derivative_error_method: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Compute residuals.
@@ -2239,6 +2240,8 @@ class ResidualEngine:
             and per-law ``residual_may_be_dominated_by_derivative_error`` flags.
           - ``derivative_error_threshold``: ratio of estimated derivative-error RMS to residual
             RMS at which the flag fires (default 0.5).
+          - ``derivative_error_method``: ``\"stencil_order\"`` (default), ``\"dual_spacing\"``
+            (every-other-point subsample), or ``\"both\"``.
         """
         residuals, entry = self._compute_entry(
             state_pred,
@@ -2258,6 +2261,7 @@ class ResidualEngine:
             state_pred_alt=state_pred_alt,
             estimate_derivative_error=estimate_derivative_error,
             derivative_error_threshold=derivative_error_threshold,
+            derivative_error_method=derivative_error_method,
         )
         self._log.append(entry)
         self._index += 1
@@ -2284,6 +2288,7 @@ class ResidualEngine:
         state_pred_alt: Optional[Dict[str, Any]] = None,
         estimate_derivative_error: Optional[bool] = None,
         derivative_error_threshold: Optional[float] = None,
+        derivative_error_method: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Compute residuals and one log entry without touching the engine log."""
         if run_mode not in ("training", "eval"):
@@ -2862,6 +2867,8 @@ class ResidualEngine:
                 DEFAULT_DERIVATIVE_ERROR_RATIO,
                 build_derivative_error_report,
                 estimate_derivative_errors,
+                estimate_errors_dual_spacing,
+                fill_dual_spacing_alternate,
             )
             from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
             from dataclasses import replace
@@ -2871,72 +2878,112 @@ class ResidualEngine:
                 if derivative_error_threshold is not None
                 else DEFAULT_DERIVATIVE_ERROR_RATIO
             )
-            secondary: Dict[str, Any] = {}
-            primary_for_err: Dict[str, Any] = dict(state_pred_built)
-            if state_pred_alt is not None:
-                secondary = dict(state_pred_alt)
-            elif do_err and auto_path_b_derivatives:
-                if auto_path_b_derivatives is True:
-                    grid_hi = PathBGridConfig(spatial_dimension=self.default_coord_dimension)
-                elif isinstance(auto_path_b_derivatives, PathBGridConfig):
-                    grid_hi = auto_path_b_derivatives
-                else:
-                    grid_hi = None
-                if grid_hi is not None:
-                    # Compare against a different stencil order for a second approximation.
-                    if grid_hi.fd_order in (4, 6):
-                        grid_alt = replace(
-                            grid_hi, fd_order=2, estimate_derivative_error=False
-                        )
-                    else:
-                        grid_alt = replace(
-                            grid_hi, fd_order=4, estimate_derivative_error=False
-                        )
-                    prim = {
-                        k: v
-                        for k, v in state_pred_built.items()
-                        if not any(
-                            str(k).endswith(s)
-                            for s in ("_t", "_tt", "_grad", "_laplacian")
-                        )
-                    }
-                    try:
-                        filled_alt, _, _ = fill_path_b_derivatives(
-                            prim,
-                            laws_spec=self.laws_spec,
-                            constants=self.constants,
-                            grid=grid_alt,
-                            copy=True,
-                            fill_law_recipes=bool(fill_law_fd),
-                            return_provenance=True,
-                        )
-                        secondary = filled_alt
-                    except Exception as err:  # noqa: BLE001
-                        diagnostic_warnings.append(
-                            f"derivative_error: alternate fill failed: {err}"
-                        )
-
-            if secondary:
-                err_keys = estimate_derivative_errors(
-                    primary_for_err,
-                    secondary,
-                    order=2,
+            err_method = (derivative_error_method or "stencil_order").strip().lower()
+            if err_method not in ("stencil_order", "dual_spacing", "both"):
+                raise ValueError(
+                    "derivative_error_method must be 'stencil_order', 'dual_spacing', or 'both'"
                 )
-                if err_keys:
-                    derivative_error_report = build_derivative_error_report(
-                        self.laws_spec,
-                        residuals.get("laws") or {},
-                        err_keys,
-                        threshold=thr,
+            primary_for_err: Dict[str, Any] = dict(state_pred_built)
+            err_keys: Dict[str, Dict[str, float]] = {}
+            methods_run: List[str] = []
+
+            if state_pred_alt is not None:
+                err_keys.update(
+                    estimate_derivative_errors(
+                        primary_for_err, dict(state_pred_alt), order=2
                     )
-                    for law_n, info in (derivative_error_report.get("per_law") or {}).items():
-                        if info.get("residual_may_be_dominated_by_derivative_error"):
-                            diagnostic_warnings.append(
-                                f"derivative_error: law {law_n!r} residual may be dominated "
-                                f"by derivative error "
-                                f"(error/residual="
-                                f"{info.get('error_over_residual')}, threshold={thr})."
-                            )
+                )
+                methods_run.append("state_pred_alt")
+
+            grid_hi = None
+            if auto_path_b_derivatives is True:
+                grid_hi = PathBGridConfig(spatial_dimension=self.default_coord_dimension)
+            elif isinstance(auto_path_b_derivatives, PathBGridConfig):
+                grid_hi = auto_path_b_derivatives
+
+            prim = {
+                k: v
+                for k, v in state_pred_built.items()
+                if not any(
+                    str(k).endswith(s) for s in ("_t", "_tt", "_grad", "_laplacian")
+                )
+            }
+
+            if do_err and grid_hi is not None and err_method in ("stencil_order", "both"):
+                if grid_hi.fd_order in (4, 6):
+                    grid_alt = replace(
+                        grid_hi, fd_order=2, estimate_derivative_error=False
+                    )
+                else:
+                    grid_alt = replace(
+                        grid_hi, fd_order=4, estimate_derivative_error=False
+                    )
+                try:
+                    filled_alt, _, _ = fill_path_b_derivatives(
+                        prim,
+                        laws_spec=self.laws_spec,
+                        constants=self.constants,
+                        grid=grid_alt,
+                        copy=True,
+                        fill_law_recipes=bool(fill_law_fd),
+                        return_provenance=True,
+                    )
+                    err_keys.update(
+                        estimate_derivative_errors(
+                            primary_for_err, filled_alt, order=2
+                        )
+                    )
+                    methods_run.append("stencil_order")
+                except Exception as err:  # noqa: BLE001
+                    diagnostic_warnings.append(
+                        f"derivative_error: stencil_order alternate fill failed: {err}"
+                    )
+
+            if do_err and grid_hi is not None and err_method in ("dual_spacing", "both"):
+                try:
+                    coarse = fill_dual_spacing_alternate(
+                        prim,
+                        laws_spec=self.laws_spec,
+                        constants=self.constants,
+                        grid=grid_hi,
+                        fill_law_recipes=bool(fill_law_fd),
+                    )
+                    meta = coarse.pop("_dual_spacing_meta", {}) or {}
+                    ndim = int(meta.get("spatial_ndim", self.default_coord_dimension))
+                    dual = estimate_errors_dual_spacing(
+                        primary_for_err,
+                        coarse,
+                        spatial_ndim=ndim,
+                        order=2,
+                    )
+                    # Prefer max error when both methods report the same key
+                    for k, stats in dual.items():
+                        if k not in err_keys or float(stats.get("error_rms", 0)) > float(
+                            err_keys[k].get("error_rms", 0)
+                        ):
+                            err_keys[k] = stats
+                    methods_run.append("dual_spacing")
+                except Exception as err:  # noqa: BLE001
+                    diagnostic_warnings.append(
+                        f"derivative_error: dual_spacing alternate fill failed: {err}"
+                    )
+
+            if err_keys:
+                derivative_error_report = build_derivative_error_report(
+                    self.laws_spec,
+                    residuals.get("laws") or {},
+                    err_keys,
+                    threshold=thr,
+                )
+                derivative_error_report["methods"] = methods_run
+                for law_n, info in (derivative_error_report.get("per_law") or {}).items():
+                    if info.get("residual_may_be_dominated_by_derivative_error"):
+                        diagnostic_warnings.append(
+                            f"derivative_error: law {law_n!r} residual may be dominated "
+                            f"by derivative error "
+                            f"(error/residual="
+                            f"{info.get('error_over_residual')}, threshold={thr})."
+                        )
 
         entry: Dict[str, Any] = {
             "index": self._index,

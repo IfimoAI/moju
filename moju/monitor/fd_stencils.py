@@ -256,3 +256,144 @@ def laplacian_uniform_nd(
     for h, ax in zip(spacings, axes):
         acc = acc + diff2_uniform(f, float(h), order=order, axis=int(ax))
     return acc
+
+
+def fornberg_weights(z: float, x: Sequence[float], m: int) -> Any:
+    """
+    Fornberg (1988) finite-difference weights for derivatives ``0..m`` at ``z``.
+
+    ``x`` is the stencil abscissae. Returns array ``c`` with shape ``(m + 1, len(x))``
+    where ``c[k, j]`` multiplies ``f(x[j])`` for the ``k``-th derivative.
+    """
+    import numpy as np
+
+    x_arr = np.asarray(x, dtype=float)
+    n = int(x_arr.size) - 1
+    if n < 0:
+        raise ValueError("fornberg_weights: empty stencil")
+    if m < 0:
+        raise ValueError("fornberg_weights: m must be non-negative")
+    c = np.zeros((m + 1, n + 1), dtype=float)
+    c1 = 1.0
+    c4 = x_arr[0] - float(z)
+    c[0, 0] = 1.0
+    for i in range(1, n + 1):
+        mn = min(i, m)
+        c2 = 1.0
+        c5 = c4
+        c4 = x_arr[i] - float(z)
+        for j in range(i):
+            c3 = x_arr[i] - x_arr[j]
+            if abs(c3) < 1e-30:
+                raise ValueError("fornberg_weights: duplicate stencil abscissae")
+            c2 *= c3
+            if j == i - 1:
+                for k in range(mn, 0, -1):
+                    c[k, i] = c1 * (k * c[k - 1, i - 1] - c5 * c[k, i - 1]) / c2
+                c[0, i] = -c1 * c5 * c[0, i - 1] / c2
+            for k in range(mn, 0, -1):
+                c[k, j] = (c4 * c[k, j] - k * c[k - 1, j]) / c3
+            c[0, j] = c4 * c[0, j] / c3
+        c1 = c2
+    return c
+
+
+def differentiation_matrix_1d(
+    coord: Any,
+    *,
+    deriv_order: int = 1,
+    fd_order: int = 2,
+) -> Any:
+    """
+    Dense 1D differentiation matrix using Fornberg weights on a (possibly non-uniform) grid.
+
+    Stencil width is ``fd_order + 1`` (3/5/7 for orders 2/4/6). Near boundaries the stencil
+    is shifted to stay inside the domain (one-sided of matching width).
+    """
+    import numpy as np
+
+    order = validate_fd_order(fd_order)
+    if deriv_order not in (1, 2):
+        raise ValueError(f"deriv_order must be 1 or 2, got {deriv_order}")
+    x = np.asarray(jnp.asarray(coord).reshape(-1), dtype=float)
+    n = int(x.size)
+    width = order + 1
+    if n < width:
+        raise ValueError(
+            f"need at least {width} points for fd_order={order}, got {n}"
+        )
+    D = np.zeros((n, n), dtype=float)
+    half = width // 2
+    for i in range(n):
+        left = i - half
+        right = left + width
+        if left < 0:
+            left, right = 0, width
+        elif right > n:
+            left, right = n - width, n
+        idx = np.arange(left, right)
+        w = fornberg_weights(float(x[i]), x[idx], deriv_order)
+        D[i, idx] = w[deriv_order, :]
+    return jnp.asarray(D)
+
+
+def diff1_nonuniform(
+    values: jnp.ndarray,
+    coord: jnp.ndarray,
+    *,
+    order: int = 2,
+    axis: int = -1,
+) -> jnp.ndarray:
+    """First derivative along ``axis`` on a (possibly non-uniform) 1D coordinate."""
+    order = validate_fd_order(order)
+    a = jnp.moveaxis(jnp.asarray(values), axis, -1)
+    c = jnp.reshape(jnp.asarray(coord), (-1,))
+    if int(c.shape[0]) != int(a.shape[-1]):
+        raise ValueError(
+            f"diff1_nonuniform: coord length {int(c.shape[0])} != axis length {int(a.shape[-1])}"
+        )
+    D = differentiation_matrix_1d(c, deriv_order=1, fd_order=order)
+    flat = a.reshape(-1, a.shape[-1])
+    out = flat @ D.T
+    return jnp.moveaxis(out.reshape(a.shape), -1, axis)
+
+
+def diff2_nonuniform(
+    values: jnp.ndarray,
+    coord: jnp.ndarray,
+    *,
+    order: int = 2,
+    axis: int = -1,
+) -> jnp.ndarray:
+    """Second derivative along ``axis`` on a (possibly non-uniform) 1D coordinate."""
+    order = validate_fd_order(order)
+    a = jnp.moveaxis(jnp.asarray(values), axis, -1)
+    c = jnp.reshape(jnp.asarray(coord), (-1,))
+    if int(c.shape[0]) != int(a.shape[-1]):
+        raise ValueError(
+            f"diff2_nonuniform: coord length {int(c.shape[0])} != axis length {int(a.shape[-1])}"
+        )
+    D = differentiation_matrix_1d(c, deriv_order=2, fd_order=order)
+    flat = a.reshape(-1, a.shape[-1])
+    out = flat @ D.T
+    return jnp.moveaxis(out.reshape(a.shape), -1, axis)
+
+
+def subsample_every_other(values: jnp.ndarray, coord: jnp.ndarray, *, axis: int = -1):
+    """
+    Every-other-point coarse grid along ``axis`` (even indices).
+
+    Returns ``(values_coarse, coord_coarse, fine_index)`` where ``fine_index`` maps
+    coarse samples back onto the fine axis for error comparison.
+    """
+    a = jnp.moveaxis(jnp.asarray(values), axis, -1)
+    c = jnp.reshape(jnp.asarray(coord), (-1,))
+    n = int(c.shape[0])
+    if n < 4:
+        raise ValueError("subsample_every_other: need at least 4 points")
+    idx = jnp.arange(0, n, 2)
+    if int(idx.shape[0]) < 3:
+        raise ValueError("subsample_every_other: coarse grid too short")
+    ac = a[..., idx]
+    cc = c[idx]
+    return jnp.moveaxis(ac, -1, axis), cc, idx
