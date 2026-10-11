@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.4.0] - Unreleased
+
+There are no breaking changes. Existing specs and report schema `1.0` stay valid.
+Diagnostics add optional report sections and warnings; they never change tier cutoffs
+or scoring formulas. Omitting the new kwargs preserves 1.3 behaviour.
+
+### Added
+
+- **Per-term residual breakdown.** Every law that runs contributes `term_breakdown` on the
+  log entry and audit report (term RMS/max, residual RMS/max, residual / largest term,
+  and the law `scale_k`). Also rendered in the PDF report.
+- **Derivative metadata and consistency checks.** Optional `derivative_metadata` on
+  `compute_residuals` records source, method/stencil order, spacing, evaluation time, and
+  time stencil. Mixed evaluation times or time derivatives without a stencil emit
+  `diagnostic_warnings` only (no tier change). Extended provenance is stored as
+  `derivative_provenance_ext`.
+- **Opt-in derivative-error estimation.** `estimate_derivative_error` / `state_pred_alt`
+  and `derivative_error_threshold` (default 0.5) produce per-key error estimates and a
+  per-law `residual_may_be_dominated_by_derivative_error` flag. Flags only.
+- **Selectable FD stencil order.** `PathBGridConfig.fd_order` and `fd_order_time` accept
+  2, 4, or 6 (explicit central + one-sided boundaries on uniform grids). Default `None`
+  keeps the legacy `jnp.gradient` path. Spectral fill warns when `periodic=False` or
+  spacing is non-uniform.
+- **Evaluation-point masking.** Optional `eval_mask` excludes points from RMS/max for that
+  call; mask statistics appear under `eval_mask` in the report. `boundary_distance_mask`
+  helper included.
+- **Analytic NS helpers and docs.** `moju.monitor.analytic_flows` (Taylor–Green 2D,
+  Kovasznay), `docs/getting_derivatives_right.md`, and
+  `examples/cookbook_taylor_green_diagnostics.py`.
+
 ## [1.3.1] - 2026-10-04
 
 There are no breaking changes. Existing specs and report schema `1.0` stay valid.
