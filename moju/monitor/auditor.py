@@ -905,6 +905,16 @@ def audit(
         report["derivative_provenance"] = dict(log[-1]["derivative_provenance"])
     if log[-1].get("law_sources"):
         report["law_sources"] = dict(log[-1]["law_sources"])
+    for opt_key in (
+        "term_breakdown",
+        "derivative_metadata",
+        "derivative_provenance_ext",
+        "derivative_error",
+        "eval_mask",
+        "diagnostic_warnings",
+    ):
+        if log[-1].get(opt_key) is not None:
+            report[opt_key] = log[-1][opt_key]
     from moju.monitor.constitutive_closure_summary import build_constitutive_closure_summary
 
     report["constitutive_closure_summary"] = build_constitutive_closure_summary(last_report_per_key)
@@ -2187,6 +2197,11 @@ class ResidualEngine:
         law_scale_mode: Optional[str] = None,
         state_units: Optional[str] = None,
         nondim_scales: Any = None,
+        derivative_metadata: Optional[Dict[str, Any]] = None,
+        eval_mask: Any = None,
+        state_pred_alt: Optional[Dict[str, Any]] = None,
+        estimate_derivative_error: Optional[bool] = None,
+        derivative_error_threshold: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Compute residuals.
@@ -2215,6 +2230,15 @@ class ResidualEngine:
         Warnings are appended to the log ``inferred`` list when enabled.
 
         If ``fill_law_fd`` is True, ``auto_path_b_derivatives`` must also be enabled.
+
+        Additive diagnostics (1.4+; never change tier *thresholds*):
+          - ``derivative_metadata``: optional per-key metadata for consistency warnings.
+          - ``eval_mask``: boolean array (True = keep). When set, RMS/max for this call use
+            masked points only; omit for identical scoring to prior releases.
+          - ``state_pred_alt`` / ``estimate_derivative_error``: opt-in derivative-error estimates
+            and per-law ``residual_may_be_dominated_by_derivative_error`` flags.
+          - ``derivative_error_threshold``: ratio of estimated derivative-error RMS to residual
+            RMS at which the flag fires (default 0.5).
         """
         residuals, entry = self._compute_entry(
             state_pred,
@@ -2229,6 +2253,11 @@ class ResidualEngine:
             law_scale_mode=law_scale_mode,
             state_units=state_units,
             nondim_scales=nondim_scales,
+            derivative_metadata=derivative_metadata,
+            eval_mask=eval_mask,
+            state_pred_alt=state_pred_alt,
+            estimate_derivative_error=estimate_derivative_error,
+            derivative_error_threshold=derivative_error_threshold,
         )
         self._log.append(entry)
         self._index += 1
@@ -2250,6 +2279,11 @@ class ResidualEngine:
         law_scale_mode: Optional[str] = None,
         state_units: Optional[str] = None,
         nondim_scales: Any = None,
+        derivative_metadata: Optional[Dict[str, Any]] = None,
+        eval_mask: Any = None,
+        state_pred_alt: Optional[Dict[str, Any]] = None,
+        estimate_derivative_error: Optional[bool] = None,
+        derivative_error_threshold: Optional[float] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Compute residuals and one log entry without touching the engine log."""
         if run_mode not in ("training", "eval"):
@@ -2760,6 +2794,12 @@ class ResidualEngine:
             }
 
         flat = _flatten_residual_dict(residuals)
+        mask_meta: Dict[str, Any] = {}
+        if eval_mask is not None:
+            from moju.monitor.eval_mask import mask_flat_residuals, mask_provenance
+
+            flat = mask_flat_residuals(flat, eval_mask)
+            mask_meta = mask_provenance(eval_mask)
         rms_per_key = _rms_per_key(flat, to_python=log_to_python)
         r_max_per_key = _max_per_key(flat, to_python=log_to_python, scoring=self._scoring_by_key)
         state_ref_built_for_scale = None
@@ -2779,6 +2819,125 @@ class ResidualEngine:
             constants=self.constants,
             scoring=self._scoring_by_key,
         )
+
+        # --- Additive diagnostics (sidecars; do not alter tier cutoffs) ---
+        diagnostic_warnings: List[str] = []
+        from moju.monitor.derivative_metadata import (
+            check_derivative_consistency,
+            merge_provenance_with_metadata,
+            normalize_derivative_metadata,
+        )
+        from moju.monitor.term_breakdown import build_term_breakdown
+
+        meta_norm = normalize_derivative_metadata(derivative_metadata)
+        if meta_norm:
+            diagnostic_warnings.extend(
+                check_derivative_consistency(self.laws_spec, meta_norm)
+            )
+
+        term_breakdown = build_term_breakdown(
+            self.laws_spec,
+            residuals.get("laws") or {},
+            merged,
+            self.constants,
+            scale_per_key=scale_per_key,
+            scale_source_per_key=scale_source_per_key,
+            mask=eval_mask,
+            nondim_scales=effective_nd_scales or self.nondim_scales,
+        )
+
+        do_err = bool(estimate_derivative_error) if estimate_derivative_error is not None else False
+        if not do_err:
+            try:
+                from moju.monitor.path_b_derivatives import PathBGridConfig as _PBC
+
+                if isinstance(auto_path_b_derivatives, _PBC):
+                    do_err = bool(auto_path_b_derivatives.estimate_derivative_error)
+            except Exception:  # noqa: BLE001
+                pass
+
+        derivative_error_report: Optional[Dict[str, Any]] = None
+        if do_err or state_pred_alt is not None:
+            from moju.monitor.derivative_error import (
+                DEFAULT_DERIVATIVE_ERROR_RATIO,
+                build_derivative_error_report,
+                estimate_derivative_errors,
+            )
+            from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
+            from dataclasses import replace
+
+            thr = (
+                float(derivative_error_threshold)
+                if derivative_error_threshold is not None
+                else DEFAULT_DERIVATIVE_ERROR_RATIO
+            )
+            secondary: Dict[str, Any] = {}
+            primary_for_err: Dict[str, Any] = dict(state_pred_built)
+            if state_pred_alt is not None:
+                secondary = dict(state_pred_alt)
+            elif do_err and auto_path_b_derivatives:
+                if auto_path_b_derivatives is True:
+                    grid_hi = PathBGridConfig(spatial_dimension=self.default_coord_dimension)
+                elif isinstance(auto_path_b_derivatives, PathBGridConfig):
+                    grid_hi = auto_path_b_derivatives
+                else:
+                    grid_hi = None
+                if grid_hi is not None:
+                    # Compare against a different stencil order for a second approximation.
+                    if grid_hi.fd_order in (4, 6):
+                        grid_alt = replace(
+                            grid_hi, fd_order=2, estimate_derivative_error=False
+                        )
+                    else:
+                        grid_alt = replace(
+                            grid_hi, fd_order=4, estimate_derivative_error=False
+                        )
+                    prim = {
+                        k: v
+                        for k, v in state_pred_built.items()
+                        if not any(
+                            str(k).endswith(s)
+                            for s in ("_t", "_tt", "_grad", "_laplacian")
+                        )
+                    }
+                    try:
+                        filled_alt, _, _ = fill_path_b_derivatives(
+                            prim,
+                            laws_spec=self.laws_spec,
+                            constants=self.constants,
+                            grid=grid_alt,
+                            copy=True,
+                            fill_law_recipes=bool(fill_law_fd),
+                            return_provenance=True,
+                        )
+                        secondary = filled_alt
+                    except Exception as err:  # noqa: BLE001
+                        diagnostic_warnings.append(
+                            f"derivative_error: alternate fill failed: {err}"
+                        )
+
+            if secondary:
+                err_keys = estimate_derivative_errors(
+                    primary_for_err,
+                    secondary,
+                    order=2,
+                )
+                if err_keys:
+                    derivative_error_report = build_derivative_error_report(
+                        self.laws_spec,
+                        residuals.get("laws") or {},
+                        err_keys,
+                        threshold=thr,
+                    )
+                    for law_n, info in (derivative_error_report.get("per_law") or {}).items():
+                        if info.get("residual_may_be_dominated_by_derivative_error"):
+                            diagnostic_warnings.append(
+                                f"derivative_error: law {law_n!r} residual may be dominated "
+                                f"by derivative error "
+                                f"(error/residual="
+                                f"{info.get('error_over_residual')}, threshold={thr})."
+                            )
+
         entry: Dict[str, Any] = {
             "index": self._index,
             "rms": rms_per_key,
@@ -2803,6 +2962,21 @@ class ResidualEngine:
             entry["unresolved_dependencies"] = unresolved_dependencies
         if derivative_provenance:
             entry["derivative_provenance"] = derivative_provenance
+        if meta_norm:
+            entry["derivative_metadata"] = meta_norm
+            entry["derivative_provenance_ext"] = merge_provenance_with_metadata(
+                derivative_provenance, meta_norm
+            )
+        if term_breakdown:
+            entry["term_breakdown"] = term_breakdown
+        if derivative_error_report is not None:
+            entry["derivative_error"] = derivative_error_report
+        if mask_meta:
+            entry["eval_mask"] = mask_meta
+        if diagnostic_warnings:
+            entry["diagnostic_warnings"] = diagnostic_warnings
+            for w in diagnostic_warnings:
+                _maybe_log_infer(w)
         from moju.registry import law_sources_for_specs
 
         law_sources = law_sources_for_specs(self.laws_spec)

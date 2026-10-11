@@ -319,6 +319,120 @@ def write_audit_pdf(
         story.append(t)
         story.append(Spacer(1, 16))
 
+    diag_warn = report.get("diagnostic_warnings") or []
+    if diag_warn:
+        story.append(Paragraph("Diagnostic warnings", heading_style))
+        story.append(
+            Paragraph(
+                "These warnings do not change admissibility tiers.",
+                body_style,
+            )
+        )
+        for w in diag_warn:
+            story.append(Paragraph(f"• {w}", body_style))
+        story.append(Spacer(1, 12))
+
+    term_bd = report.get("term_breakdown") or {}
+    if term_bd:
+        story.append(Paragraph("Per-term residual breakdown", heading_style))
+        story.append(
+            Paragraph(
+                "RMS and max of each PDE term, residual, residual / largest term, "
+                "and the law scale_k. Diagnostics only — tiers are unchanged.",
+                body_style,
+            )
+        )
+        for law_name, bd in sorted(term_bd.items()):
+            story.append(Paragraph(str(law_name), heading_style))
+            rows = [["Quantity", "RMS", "Max"]]
+            for tname, st in (bd.get("terms") or {}).items():
+                rows.append(
+                    [
+                        str(tname),
+                        f"{float(st.get('rms', float('nan'))):.4e}",
+                        f"{float(st.get('max', float('nan'))):.4e}",
+                    ]
+                )
+            resid = bd.get("residual") or {}
+            rows.append(
+                [
+                    "residual",
+                    f"{float(resid.get('rms', float('nan'))):.4e}",
+                    f"{float(resid.get('max', float('nan'))):.4e}",
+                ]
+            )
+            t = Table(rows, colWidths=[2.4 * inch, 1.4 * inch, 1.4 * inch])
+            t.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e0e0e0")),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTSIZE", (0, 0), (-1, -1), 9),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ]
+                )
+            )
+            story.append(t)
+            story.append(
+                Paragraph(
+                    f"residual / largest term = "
+                    f"{bd.get('residual_over_largest_term')}; "
+                    f"scale_k = {bd.get('scale_k')} ({bd.get('scale_source')})",
+                    body_style,
+                )
+            )
+            story.append(Spacer(1, 10))
+
+    der_err = report.get("derivative_error") or {}
+    if der_err.get("per_law"):
+        story.append(Paragraph("Derivative-error estimates", heading_style))
+        story.append(
+            Paragraph(
+                f"Flag threshold (error/residual) = {der_err.get('threshold')}. "
+                "Flags do not change tiers.",
+                body_style,
+            )
+        )
+        rows = [["Law", "err RMS", "resid RMS", "ratio", "flagged"]]
+        for law_name, info in sorted((der_err.get("per_law") or {}).items()):
+            rows.append(
+                [
+                    str(law_name),
+                    f"{float(info.get('estimated_derivative_error_rms', float('nan'))):.3e}",
+                    f"{float(info.get('residual_rms', float('nan'))):.3e}",
+                    f"{float(info.get('error_over_residual', float('nan'))):.3e}",
+                    "yes"
+                    if info.get("residual_may_be_dominated_by_derivative_error")
+                    else "no",
+                ]
+            )
+        t = Table(rows, colWidths=[1.8 * inch, 1.0 * inch, 1.0 * inch, 0.9 * inch, 0.7 * inch])
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e0e0e0")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ]
+            )
+        )
+        story.append(t)
+        story.append(Spacer(1, 12))
+
+    ev_mask = report.get("eval_mask") or {}
+    if ev_mask:
+        story.append(Paragraph("Evaluation mask", heading_style))
+        story.append(
+            Paragraph(
+                f"kind={ev_mask.get('kind')}; kept {ev_mask.get('n_kept')} / "
+                f"{ev_mask.get('n_points')} points "
+                f"(fraction {ev_mask.get('fraction_kept')}).",
+                body_style,
+            )
+        )
+        story.append(Spacer(1, 12))
+
     closure_summary = report.get("constitutive_closure_summary")
     if closure_summary:
         story.append(Paragraph("Constitutive closure summary", heading_style))
