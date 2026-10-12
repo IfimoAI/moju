@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import jax
 import jax.numpy as jnp
 
+from moju.monitor.fd_stencils import effective_fd_order
 from moju.monitor.path_b_derivatives import (
     PathBGridConfig,
     _align_1d_field_and_coord,
@@ -164,6 +165,9 @@ def _scalar_laplacian_steady(
 
         return spectral_scalar_laplacian_steady(K, cfg, x, y, z, dim, warnings)
 
+    order = effective_fd_order(cfg.fd_order)
+    pflags = cfg.spatial_periodic_flags(dim)
+
     if cfg.layout == "separable":
         try:
             coords = _separable_1d_coords(K.shape, x, y, z, dim)
@@ -171,22 +175,45 @@ def _scalar_laplacian_steady(
             warnings.append(str(e))
             return None
         try:
-            if cfg.fd_order is not None and all(
+            if order is not None and all(
                 _uniform_1d_spacing(c) is not None for c in coords
             ):
-                from moju.monitor.fd_stencils import laplacian_uniform_nd, validate_fd_order
+                from moju.monitor.fd_stencils import laplacian_uniform_nd
 
                 hs = [_uniform_1d_spacing(c) for c in coords]
                 return laplacian_uniform_nd(
-                    K, [float(h) for h in hs], order=validate_fd_order(cfg.fd_order)
+                    K,
+                    [float(h) for h in hs],
+                    order=order,
+                    boundary_closure=getattr(cfg, "boundary_closure", "matching"),
+                    use_field_boundary_values=bool(
+                        getattr(cfg, "use_field_boundary_values", False)
+                    ),
+                    periodic=pflags,
                 )
             grads = _jnp_gradient_multi(
-                K, coords, fd_order=cfg.fd_order, warnings=warnings
+                K,
+                coords,
+                fd_order=order,
+                warnings=warnings,
+                boundary_closure=getattr(cfg, "boundary_closure", "matching"),
+                use_field_boundary_values=bool(
+                    getattr(cfg, "use_field_boundary_values", False)
+                ),
+                periodic=pflags,
             )
             acc = jnp.zeros_like(K)
             for i, gi in enumerate(grads):
                 parts = _jnp_gradient_multi(
-                    gi, coords, fd_order=cfg.fd_order, warnings=warnings
+                    gi,
+                    coords,
+                    fd_order=order,
+                    warnings=warnings,
+                    boundary_closure=getattr(cfg, "boundary_closure", "matching"),
+                    use_field_boundary_values=bool(
+                        getattr(cfg, "use_field_boundary_values", False)
+                    ),
+                    periodic=pflags,
                 )
                 acc = acc + parts[i]
             return acc
@@ -199,13 +226,21 @@ def _scalar_laplacian_steady(
         if aligned is None:
             return None
         K1, c1, orig_shape = aligned
-        if cfg.fd_order is not None:
+        if order is not None:
             h = _uniform_1d_spacing(c1)
             if h is not None:
-                from moju.monitor.fd_stencils import diff2_uniform, validate_fd_order
+                from moju.monitor.fd_stencils import diff2_uniform
 
                 lap = diff2_uniform(
-                    K1, float(h), order=validate_fd_order(cfg.fd_order), axis=0
+                    K1,
+                    float(h),
+                    order=order,
+                    axis=0,
+                    boundary_closure=getattr(cfg, "boundary_closure", "matching"),
+                    use_field_boundary_values=bool(
+                        getattr(cfg, "use_field_boundary_values", False)
+                    ),
+                    periodic=pflags[0],
                 )
                 return jnp.reshape(lap, orig_shape)
             warnings.append(
@@ -222,22 +257,45 @@ def _scalar_laplacian_steady(
     rect1d = _rectilinear_meshgrid_1d_axes(K, x, y, z, dim)
     if rect1d is not None:
         try:
-            if cfg.fd_order is not None and all(
+            if order is not None and all(
                 _uniform_1d_spacing(c) is not None for c in rect1d
             ):
-                from moju.monitor.fd_stencils import laplacian_uniform_nd, validate_fd_order
+                from moju.monitor.fd_stencils import laplacian_uniform_nd
 
                 hs = [_uniform_1d_spacing(c) for c in rect1d]
                 return laplacian_uniform_nd(
-                    K, [float(h) for h in hs], order=validate_fd_order(cfg.fd_order)
+                    K,
+                    [float(h) for h in hs],
+                    order=order,
+                    boundary_closure=getattr(cfg, "boundary_closure", "matching"),
+                    use_field_boundary_values=bool(
+                        getattr(cfg, "use_field_boundary_values", False)
+                    ),
+                    periodic=pflags,
                 )
             grads = _jnp_gradient_multi(
-                K, rect1d, fd_order=cfg.fd_order, warnings=warnings
+                K,
+                rect1d,
+                fd_order=order,
+                warnings=warnings,
+                boundary_closure=getattr(cfg, "boundary_closure", "matching"),
+                use_field_boundary_values=bool(
+                    getattr(cfg, "use_field_boundary_values", False)
+                ),
+                periodic=pflags,
             )
             acc = jnp.zeros_like(K)
             for i, gi in enumerate(grads):
                 parts = _jnp_gradient_multi(
-                    gi, rect1d, fd_order=cfg.fd_order, warnings=warnings
+                    gi,
+                    rect1d,
+                    fd_order=order,
+                    warnings=warnings,
+                    boundary_closure=getattr(cfg, "boundary_closure", "matching"),
+                    use_field_boundary_values=bool(
+                        getattr(cfg, "use_field_boundary_values", False)
+                    ),
+                    periodic=pflags,
                 )
                 acc = acc + parts[i]
             return acc
@@ -247,22 +305,45 @@ def _scalar_laplacian_steady(
     sep_axes = _meshgrid_separable_axis_coords(K, x, y, z, dim)
     if sep_axes is not None:
         try:
-            if cfg.fd_order is not None and all(
+            if order is not None and all(
                 _uniform_1d_spacing(c) is not None for c in sep_axes
             ):
-                from moju.monitor.fd_stencils import laplacian_uniform_nd, validate_fd_order
+                from moju.monitor.fd_stencils import laplacian_uniform_nd
 
                 hs = [_uniform_1d_spacing(c) for c in sep_axes]
                 return laplacian_uniform_nd(
-                    K, [float(h) for h in hs], order=validate_fd_order(cfg.fd_order)
+                    K,
+                    [float(h) for h in hs],
+                    order=order,
+                    boundary_closure=getattr(cfg, "boundary_closure", "matching"),
+                    use_field_boundary_values=bool(
+                        getattr(cfg, "use_field_boundary_values", False)
+                    ),
+                    periodic=pflags,
                 )
             grads = _jnp_gradient_multi(
-                K, sep_axes, fd_order=cfg.fd_order, warnings=warnings
+                K,
+                sep_axes,
+                fd_order=order,
+                warnings=warnings,
+                boundary_closure=getattr(cfg, "boundary_closure", "matching"),
+                use_field_boundary_values=bool(
+                    getattr(cfg, "use_field_boundary_values", False)
+                ),
+                periodic=pflags,
             )
             acc = jnp.zeros_like(K)
             for i, gi in enumerate(grads):
                 parts = _jnp_gradient_multi(
-                    gi, sep_axes, fd_order=cfg.fd_order, warnings=warnings
+                    gi,
+                    sep_axes,
+                    fd_order=order,
+                    warnings=warnings,
+                    boundary_closure=getattr(cfg, "boundary_closure", "matching"),
+                    use_field_boundary_values=bool(
+                        getattr(cfg, "use_field_boundary_values", False)
+                    ),
+                    periodic=pflags,
                 )
                 acc = acc + parts[i]
             return acc

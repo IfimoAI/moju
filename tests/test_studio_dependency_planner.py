@@ -114,7 +114,7 @@ def test_plan_fourier_t_laplacian_derivable_with_fd():
         constant_keys={"k", "rho", "cp"},
         auto_path_b_derivatives=True,
         fill_law_fd=True,
-        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
     )
     assert "T_laplacian" in p.derivable_law_fd_if_enabled
     assert not p.has_blocking_gaps()
@@ -130,7 +130,7 @@ def test_plan_fourier_fo_not_required_in_npz_when_implied_group():
         constant_keys={"k", "rho", "cp"},
         auto_path_b_derivatives=True,
         fill_law_fd=True,
-        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
     )
     assert "fo" not in p.missing_state_direct
     assert not p.has_blocking_gaps()
@@ -145,7 +145,7 @@ def test_plan_markdown_coordinate_t_hint_when_t_missing():
         constant_keys=set(),
         auto_path_b_derivatives=True,
         fill_law_fd=True,
-        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
     )
     assert "t" in p.missing_state_direct
     md = p.to_markdown()
@@ -213,7 +213,7 @@ def test_alias_temperature_satisfies_T_primitive():
         constant_keys=set(),
         auto_path_b_derivatives=True,
         fill_law_fd=True,
-        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
     )
     assert any("temperature" in w for w in p.alias_warnings)
     assert "T_laplacian" in p.derivable_law_fd_if_enabled
@@ -231,10 +231,10 @@ def test_builtin_alias_map_has_temperature():
 
 def test_coord_keys_laplacian_respects_spatial_dimension():
     recipe = LawFDArgRecipe("laplacian")
-    g1 = PathBGridConfig(spatial_dimension=1)
-    g2 = PathBGridConfig(spatial_dimension=2)
-    g3 = PathBGridConfig(spatial_dimension=3)
-    g_auto = PathBGridConfig(spatial_dimension="auto")
+    g1 = PathBGridConfig(spatial_dimension=1, fd_order=None, fd_order_time=None)
+    g2 = PathBGridConfig(spatial_dimension=2, fd_order=None, fd_order_time=None)
+    g3 = PathBGridConfig(spatial_dimension=3, fd_order=None, fd_order_time=None)
+    g_auto = PathBGridConfig(spatial_dimension="auto", fd_order=None, fd_order_time=None)
     assert coord_keys_for_law_fd_recipe(recipe, g1) == {"x"}
     assert coord_keys_for_law_fd_recipe(recipe, g2) == {"x", "y"}
     assert coord_keys_for_law_fd_recipe(recipe, g3) == {"x", "y", "z"}
@@ -244,7 +244,7 @@ def test_coord_keys_laplacian_respects_spatial_dimension():
 def test_coord_keys_dt_and_dtt_include_time_key():
     for kind in ("dt", "dtt"):
         recipe = LawFDArgRecipe(kind)
-        g = PathBGridConfig(key_t="tau")
+        g = PathBGridConfig(key_t="tau", fd_order=None, fd_order_time=None)
         assert coord_keys_for_law_fd_recipe(recipe, g) == {"tau"}
 
 
@@ -277,7 +277,7 @@ def test_dependency_plan_for_path_b_run_wraps_monitor_config():
         {"T", "x", "t", "alpha", "L"},
         auto_path_b_derivatives=True,
         fill_law_fd=True,
-        path_b_grid=PathBGridConfig(spatial_dimension=1, steady=True),
+        path_b_grid=PathBGridConfig(spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
     )
     assert "T_laplacian" in p.derivable_law_fd_if_enabled
 
@@ -332,7 +332,7 @@ def test_fourier_pred_plus_constants_no_false_missing_state():
         constant_keys={"alpha", "L", "k", "rho", "cp"},
         auto_path_b_derivatives=True,
         fill_law_fd=True,
-        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
     )
     assert "T_t" in p.derivable_law_fd_if_enabled
     assert not p.missing_state_direct

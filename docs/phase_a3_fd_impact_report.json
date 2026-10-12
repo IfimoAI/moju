@@ -1,0 +1,2303 @@
+{
+  "phase": "A3",
+  "cases": {
+    "clustered_kovasznay": {
+      "legacy": {
+        "overall_score": 0.8426501202387032,
+        "overall_tier": "Moderate Admissibility",
+        "below_high": true,
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.1550491452217102,
+            "residual_max": 0.7516781687736511,
+            "score": 0.8426501202387032,
+            "tier": "Moderate Admissibility",
+            "rms_weighted": 0.164727583527565
+          }
+        },
+        "fd_order": null,
+        "weight_sum": 6.1261091232299805,
+        "dx_min": 6.603213114431128e-05,
+        "dx_max": 0.052345871925354004
+      },
+      "fd4_unweighted": {
+        "overall_score": 0.8710391529882713,
+        "overall_tier": "Moderate Admissibility",
+        "below_high": true,
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.12774315476417542,
+            "residual_max": 2.1342110633850098,
+            "score": 0.8710391529882713,
+            "tier": "Moderate Admissibility",
+            "rms_weighted": 0.061181362718343735
+          }
+        },
+        "fd_order": 4,
+        "weight_sum": 6.1261091232299805,
+        "dx_min": 6.603213114431128e-05,
+        "dx_max": 0.052345871925354004
+      },
+      "fd4_weighted": {
+        "overall_score": 0.9337861150478924,
+        "overall_tier": "High Admissibility",
+        "below_high": false,
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.12774315476417542,
+            "residual_max": 2.1342110633850098,
+            "score": 0.9337861150478924,
+            "tier": "High Admissibility",
+            "rms_weighted": 0.061181362718343735,
+            "rms_unweighted": 0.1277431696653366
+          }
+        },
+        "fd_order": 4,
+        "weight_sum": 6.1261091232299805,
+        "dx_min": 6.603213114431128e-05,
+        "dx_max": 0.052345871925354004
+      },
+      "exact_derivatives": {
+        "overall_score": 0.9999996116801733,
+        "overall_tier": "High Admissibility",
+        "below_high": false,
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 3.376843835667387e-07,
+            "residual_max": 1.010958385450067e-06,
+            "score": 0.9999996116801733,
+            "tier": "High Admissibility",
+            "rms_weighted": 3.896275586612319e-07
+          }
+        }
+      },
+      "meta": {
+        "nx": 48,
+        "ny": 40,
+        "stretch_power": 2.5,
+        "cluster_toward": "x=0",
+        "note": "Path B FD fill on stretched x; y uniform periodic"
+      }
+    },
+    "clustered_couette": {
+      "legacy": {
+        "overall_score": 0.9937150258671497,
+        "overall_tier": "High Admissibility",
+        "below_high": false,
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.0038862077053636312,
+            "residual_max": 0.02728724665939808,
+            "score": 0.9937150258671497,
+            "tier": "High Admissibility",
+            "rms_weighted": 0.0014350342098623514
+          }
+        }
+      },
+      "fd4_unweighted": {
+        "overall_score": 0.9932338017083493,
+        "overall_tier": "High Admissibility",
+        "below_high": false,
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.00418394710868597,
+            "residual_max": 0.03836089372634888,
+            "score": 0.9932338017083493,
+            "tier": "High Admissibility",
+            "rms_weighted": 0.00036846078000962734
+          }
+        }
+      },
+      "fd4_weighted": {
+        "overall_score": 0.9994004332298952,
+        "overall_tier": "High Admissibility",
+        "below_high": false,
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.00418394710868597,
+            "residual_max": 0.03836089372634888,
+            "score": 0.9994004332298952,
+            "tier": "High Admissibility",
+            "rms_weighted": 0.00036846078000962734,
+            "rms_unweighted": 0.004183949902653694
+          }
+        }
+      },
+      "exact_derivatives": {
+        "overall_score": 0.9999999391416347,
+        "overall_tier": "High Admissibility",
+        "below_high": false,
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 3.7377994033249706e-08,
+            "residual_max": 2.384185791015625e-07,
+            "score": 0.9999999391416347,
+            "tier": "High Admissibility",
+            "rms_weighted": 2.750448580002285e-08
+          }
+        }
+      },
+      "meta": {
+        "nr": 36,
+        "nt": 48,
+        "stretch_power": 2.5,
+        "cluster_toward": "r_inner",
+        "dr_min": 0.0001379251480102539,
+        "dr_max": 0.06990528106689453,
+        "note": "Polar physical (r,\u03b8) Fornberg/central diffs via curvilinear helpers; legacy column = order 2, fd4 = order 4"
+      }
+    },
+    "localized_kovasznay": {
+      "baseline": {
+        "unweighted": {
+          "overall_score": 0.9999996116801733,
+          "overall_tier": "High Admissibility",
+          "below_high": false,
+          "laws": {
+            "momentum_navier_stokes": {
+              "residual_rms": 3.376843835667387e-07,
+              "residual_max": 1.010958385450067e-06,
+              "score": 0.9999996116801733,
+              "tier": "High Admissibility",
+              "rms_weighted": 3.896275586612319e-07
+            }
+          }
+        },
+        "weighted": {
+          "overall_score": 0.9999995519482721,
+          "overall_tier": "High Admissibility",
+          "below_high": false,
+          "laws": {
+            "momentum_navier_stokes": {
+              "residual_rms": 3.376843835667387e-07,
+              "residual_max": 1.010958385450067e-06,
+              "score": 0.9999995519482721,
+              "tier": "High Admissibility",
+              "rms_weighted": 3.896275586612319e-07,
+              "rms_unweighted": 3.3768444041015755e-07
+            }
+          }
+        }
+      },
+      "sweeps": [
+        {
+          "magnitude": 0.02,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.992631809181401,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.006454966962337494,
+                "residual_max": 0.02000095695257187,
+                "score": 0.992631809181401,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.0027176025323569775
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.007367802498772225,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.01999998278915882,
+                "max": 0.02000095695257187,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.009128701873123646,
+                "max": 0.02000095695257187,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.9839975197686812,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.006454966962337494,
+                  "residual_max": 0.02000095695257187,
+                  "score": 0.9839975197686812,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 0.019999949261546135
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999996404930642,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.006454966962337494,
+                  "residual_max": 0.02000095695257187,
+                  "score": 0.9999996404930642,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.9968846307935568,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.006454966962337494,
+                "residual_max": 0.02000095695257187,
+                "score": 0.9968846307935568,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.0027176025323569775,
+                "rms_unweighted": 0.006454966496676207
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.0031149211547152333,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.01999998278915882,
+                "max": 0.02000095695257187,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.009128701873123646,
+                "max": 0.02000095695257187,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.9775181316930759,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.006454966962337494,
+                  "residual_max": 0.02000095695257187,
+                  "score": 0.9775181316930759,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 0.019999949261546135,
+                  "rms_unweighted": 0.01414212305098772
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999995573199353,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.006454966962337494,
+                  "residual_max": 0.02000095695257187,
+                  "score": 0.9999995573199353,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07,
+                  "rms_unweighted": 3.12628628762468e-07
+                }
+              }
+            }
+          }
+        },
+        {
+          "magnitude": 0.05,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.9817808742048287,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.01613742858171463,
+                "residual_max": 0.05000098794698715,
+                "score": 0.9817808742048287,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.006794019602239132
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.018218737475344526,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.04999999329447746,
+                "max": 0.05000098794698715,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.02282176911830902,
+                "max": 0.05000098794698715,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.9609315594937536,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.01613742858171463,
+                  "residual_max": 0.05000098794698715,
+                  "score": 0.9609315594937536,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 0.04999997094273567
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999996404930642,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.01613742858171463,
+                  "residual_max": 0.05000098794698715,
+                  "score": 0.9999996404930642,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.9922477883899996,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.01613742858171463,
+                "residual_max": 0.05000098794698715,
+                "score": 0.9922477883899996,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.006794019602239132,
+                "rms_unweighted": 0.01613742671906948
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.007751763558272451,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.04999999329447746,
+                "max": 0.05000098794698715,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.02282176911830902,
+                "max": 0.05000098794698715,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.9456287753535744,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.01613742858171463,
+                  "residual_max": 0.05000098794698715,
+                  "score": 0.9456287753535744,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 0.04999997094273567,
+                  "rms_unweighted": 0.0353553332388401
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999995573199353,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.01613742858171463,
+                  "residual_max": 0.05000098794698715,
+                  "score": 0.9999995573199353,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07,
+                  "rms_unweighted": 3.12628628762468e-07
+                }
+              }
+            }
+          }
+        },
+        {
+          "magnitude": 0.1,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.964213730784236,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.03227486088871956,
+                "residual_max": 0.10000094026327133,
+                "score": 0.964213730784236,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.013588041998445988
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.03578588089593726,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.10000000149011612,
+                "max": 0.10000094026327133,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.04564354941248894,
+                "max": 0.10000094026327133,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.92480101098797,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.03227486088871956,
+                  "residual_max": 0.10000094026327133,
+                  "score": 0.92480101098797,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 0.09999997168779373
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999996404930642,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.03227486088871956,
+                  "residual_max": 0.10000094026327133,
+                  "score": 0.9999996404930642,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.9846148426365677,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.03227486088871956,
+                "residual_max": 0.10000094026327133,
+                "score": 0.9846148426365677,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.013588041998445988,
+                "rms_unweighted": 0.03227486461400986
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.015384709311704325,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.10000000149011612,
+                "max": 0.10000094026327133,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.04564354941248894,
+                "max": 0.10000094026327133,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.8968650928474112,
+              "overall_tier": "Moderate Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.03227486088871956,
+                  "residual_max": 0.10000094026327133,
+                  "score": 0.8968650928474112,
+                  "tier": "Moderate Admissibility",
+                  "rms_weighted": 0.09999997168779373,
+                  "rms_unweighted": 0.0707106813788414
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999995573199353,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.03227486088871956,
+                  "residual_max": 0.10000094026327133,
+                  "score": 0.9999995573199353,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07,
+                  "rms_unweighted": 3.12628628762468e-07
+                }
+              }
+            }
+          }
+        },
+        {
+          "magnitude": 0.2,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.9309002826560747,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.06454973667860031,
+                "residual_max": 0.20000095665454865,
+                "score": 0.9309002826560747,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.027176091447472572
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.06909932902409854,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.20000003278255463,
+                "max": 0.20000095665454865,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.09128710627555847,
+                "max": 0.20000095665454865,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.8601207966515514,
+              "overall_tier": "Moderate Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.06454973667860031,
+                  "residual_max": 0.20000095665454865,
+                  "score": 0.8601207966515514,
+                  "tier": "Moderate Admissibility",
+                  "rms_weighted": 0.20000000298023224
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999996404930642,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.06454973667860031,
+                  "residual_max": 0.20000095665454865,
+                  "score": 0.9999996404930642,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.9696959102818759,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.06454973667860031,
+                "residual_max": 0.20000095665454865,
+                "score": 0.9696959102818759,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.027176091447472572,
+                "rms_unweighted": 0.06454972922801971
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.030303641666396208,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.20000003278255463,
+                "max": 0.20000095665454865,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.09128710627555847,
+                "max": 0.20000095665454865,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.8130148335018834,
+              "overall_tier": "Moderate Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.06454973667860031,
+                  "residual_max": 0.20000095665454865,
+                  "score": 0.8130148335018834,
+                  "tier": "Moderate Admissibility",
+                  "rms_weighted": 0.20000000298023224,
+                  "rms_unweighted": 0.1414213627576828
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999995573199353,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.06454973667860031,
+                  "residual_max": 0.20000095665454865,
+                  "score": 0.9999995573199353,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07,
+                  "rms_unweighted": 3.12628628762468e-07
+                }
+              }
+            }
+          }
+        },
+        {
+          "magnitude": 0.5,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.8434745258532311,
+            "overall_tier": "Moderate Admissibility",
+            "below_high": true,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.1613743156194687,
+                "residual_max": 0.5000009536743164,
+                "score": 0.8434745258532311,
+                "tier": "Moderate Admissibility",
+                "rms_weighted": 0.06794022768735886
+              }
+            },
+            "tier_drop_from_baseline": true,
+            "score_drop": 0.15652508582694213,
+            "detects_below_high": true,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.5,
+                "max": 0.5000009536743164,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.2282177358865738,
+                "max": 0.5000009536743164,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.7109501098828753,
+              "overall_tier": "Moderate Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.1613743156194687,
+                  "residual_max": 0.5000009536743164,
+                  "score": 0.7109501098828753,
+                  "tier": "Moderate Admissibility",
+                  "rms_weighted": 0.4999999403953552
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999996404930642,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.1613743156194687,
+                  "residual_max": 0.5000009536743164,
+                  "score": 0.9999996404930642,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.9275338095723272,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.1613743156194687,
+                "residual_max": 0.5000009536743164,
+                "score": 0.9275338095723272,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.06794022768735886,
+                "rms_unweighted": 0.1613743007183075
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.07246574237594483,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.5,
+                "max": 0.5000009536743164,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.2282177358865738,
+                "max": 0.5000009536743164,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.634930886903175,
+              "overall_tier": "Low Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.1613743156194687,
+                  "residual_max": 0.5000009536743164,
+                  "score": 0.634930886903175,
+                  "tier": "Low Admissibility",
+                  "rms_weighted": 0.4999999403953552,
+                  "rms_unweighted": 0.3535533845424652
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999995573199353,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.1613743156194687,
+                  "residual_max": 0.5000009536743164,
+                  "score": 0.9999995573199353,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07,
+                  "rms_unweighted": 3.12628628762468e-07
+                }
+              }
+            }
+          }
+        },
+        {
+          "magnitude": 1.0,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.7634091845415815,
+            "overall_tier": "Moderate Admissibility",
+            "below_high": true,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.3227486312389374,
+                "residual_max": 1.0000009536743164,
+                "score": 0.7634091845415815,
+                "tier": "Moderate Admissibility",
+                "rms_weighted": 0.1358804553747177
+              }
+            },
+            "tier_drop_from_baseline": true,
+            "score_drop": 0.2365904271385918,
+            "detects_below_high": true,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 1.0,
+                "max": 1.0000009536743164,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.45643550157546997,
+                "max": 1.0000009536743164,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.5955974108897841,
+              "overall_tier": "Low Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.3227486312389374,
+                  "residual_max": 1.0000009536743164,
+                  "score": 0.5955974108897841,
+                  "tier": "Low Admissibility",
+                  "rms_weighted": 0.9999999403953552
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999996998041067,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.3227486312389374,
+                  "residual_max": 1.0000009536743164,
+                  "score": 0.9999996998041067,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.884582545739289,
+            "overall_tier": "Moderate Admissibility",
+            "below_high": true,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.3227486312389374,
+                "residual_max": 1.0000009536743164,
+                "score": 0.884582545739289,
+                "tier": "Moderate Admissibility",
+                "rms_weighted": 0.1358804553747177,
+                "rms_unweighted": 0.322748601436615
+              }
+            },
+            "tier_drop_from_baseline": true,
+            "score_drop": 0.1154170062089831,
+            "detects_below_high": true,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 1.0,
+                "max": 1.0000009536743164,
+                "n": 400
+              },
+              "exterior": {
+                "rms": 4.4212362126927474e-07,
+                "max": 9.396774203196401e-07,
+                "n": 1520
+              },
+              "global": {
+                "rms": 0.45643550157546997,
+                "max": 1.0000009536743164,
+                "n": 1920
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.510143737115963,
+              "overall_tier": "Low Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.3227486312389374,
+                  "residual_max": 1.0000009536743164,
+                  "score": 0.510143737115963,
+                  "tier": "Low Admissibility",
+                  "rms_weighted": 0.9999999403953552,
+                  "rms_unweighted": 0.7071067690849304
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999996303527802,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.3227486312389374,
+                  "residual_max": 1.0000009536743164,
+                  "score": 0.9999996303527802,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 3.8495633702950727e-07,
+                  "rms_unweighted": 3.12628628762468e-07
+                }
+              }
+            }
+          }
+        }
+      ],
+      "first_mag_below_high_unweighted": 0.5,
+      "first_mag_below_high_weighted": 1.0,
+      "meta": {
+        "x_cut": 0.01604580692946911,
+        "fraction_points_in_band": 0.2083333432674408,
+        "weight_fraction_in_band": 0.018463481217622757,
+        "magnitudes": [
+          0.02,
+          0.05,
+          0.1,
+          0.2,
+          0.5,
+          1.0
+        ],
+        "perturb": "p_grad_x += mag in band (exact \u2202 elsewhere)"
+      }
+    },
+    "localized_couette": {
+      "baseline": {
+        "unweighted": {
+          "overall_score": 0.9999999391416347,
+          "overall_tier": "High Admissibility",
+          "below_high": false,
+          "laws": {
+            "momentum_navier_stokes": {
+              "residual_rms": 3.7377994033249706e-08,
+              "residual_max": 2.384185791015625e-07,
+              "score": 0.9999999391416347,
+              "tier": "High Admissibility",
+              "rms_weighted": 2.750448580002285e-08
+            }
+          }
+        },
+        "weighted": {
+          "overall_score": 0.9999999552177139,
+          "overall_tier": "High Admissibility",
+          "below_high": false,
+          "laws": {
+            "momentum_navier_stokes": {
+              "residual_rms": 3.7377994033249706e-08,
+              "residual_max": 2.384185791015625e-07,
+              "score": 0.9999999552177139,
+              "tier": "High Admissibility",
+              "rms_weighted": 2.750448580002285e-08,
+              "rms_unweighted": 3.73781290363695e-08
+            }
+          }
+        }
+      },
+      "sweeps": [
+        {
+          "magnitude": 0.02,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.9892632717163413,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.00666666217148304,
+                "residual_max": 0.020000159740447998,
+                "score": 0.9892632717163413,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.0024031400680541992
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.010736667425293334,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.01999998651444912,
+                "max": 0.020000159740447998,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.009428083896636963,
+                "max": 0.020000159740447998,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.9774949060949156,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.00666666217148304,
+                  "residual_max": 0.020000159740447998,
+                  "score": 0.9774949060949156,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 0.01999998837709427
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999498033773,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.00666666217148304,
+                  "residual_max": 0.020000159740447998,
+                  "score": 0.9999999498033773,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.9961029592784472,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.00666666217148304,
+                "residual_max": 0.020000159740447998,
+                "score": 0.9961029592784472,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.0024031400680541992,
+                "rms_unweighted": 0.00666666217148304
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.003896995939266734,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.01999998651444912,
+                "max": 0.020000159740447998,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.009428083896636963,
+                "max": 0.020000159740447998,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.9684669361214387,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.00666666217148304,
+                  "residual_max": 0.020000159740447998,
+                  "score": 0.9684669361214387,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 0.01999998837709427,
+                  "rms_unweighted": 0.014142125844955444
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999579352858,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.00666666217148304,
+                  "residual_max": 0.020000159740447998,
+                  "score": 0.9999999579352858,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08,
+                  "rms_unweighted": 3.0833504638394515e-08
+                }
+              }
+            }
+          }
+        },
+        {
+          "magnitude": 0.05,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.9735994885461314,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.01666666381061077,
+                "residual_max": 0.05000019073486328,
+                "score": 0.9735994885461314,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.006007854361087084
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.026400450595503222,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.05000000074505806,
+                "max": 0.05000019073486328,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.02357022650539875,
+                "max": 0.05000019073486328,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.9456062987887525,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.01666666381061077,
+                  "residual_max": 0.05000019073486328,
+                  "score": 0.9456062987887525,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 0.05000000819563866
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999498343953,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.01666666381061077,
+                  "residual_max": 0.05000019073486328,
+                  "score": 0.9999999498343953,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.9903199388251795,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.01666666381061077,
+                "residual_max": 0.05000019073486328,
+                "score": 0.9903199388251795,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.006007854361087084,
+                "rms_unweighted": 0.01666666939854622
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.009680016392534352,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.05000000074505806,
+                "max": 0.05000019073486328,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.02357022650539875,
+                "max": 0.05000019073486328,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.9247706521571772,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.01666666381061077,
+                  "residual_max": 0.05000019073486328,
+                  "score": 0.9247706521571772,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 0.05000000819563866,
+                  "rms_unweighted": 0.035355344414711
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999579612788,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.01666666381061077,
+                  "residual_max": 0.05000019073486328,
+                  "score": 0.9999999579612788,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08,
+                  "rms_unweighted": 3.0833504638394515e-08
+                }
+              }
+            }
+          }
+        },
+        {
+          "magnitude": 0.1,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.9486643894493477,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.033333320170640945,
+                "residual_max": 0.10000020265579224,
+                "score": 0.9486643894493477,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.012015708722174168
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.05133554969228693,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.10000000149011612,
+                "max": 0.10000020265579224,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.0471404530107975,
+                "max": 0.10000020265579224,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.8970281625072342,
+              "overall_tier": "Moderate Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.033333320170640945,
+                  "residual_max": 0.10000020265579224,
+                  "score": 0.8970281625072342,
+                  "tier": "Moderate Admissibility",
+                  "rms_weighted": 0.10000001639127731
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999499446864,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.033333320170640945,
+                  "residual_max": 0.10000020265579224,
+                  "score": 0.9999999499446864,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.9808668375004035,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.033333320170640945,
+                "residual_max": 0.10000020265579224,
+                "score": 0.9808668375004035,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.012015708722174168,
+                "rms_unweighted": 0.03333333879709244
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.01913311771731041,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.10000000149011612,
+                "max": 0.10000020265579224,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.0471404530107975,
+                "max": 0.10000020265579224,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.8603329544611306,
+              "overall_tier": "Moderate Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.033333320170640945,
+                  "residual_max": 0.10000020265579224,
+                  "score": 0.8603329544611306,
+                  "tier": "Moderate Admissibility",
+                  "rms_weighted": 0.10000001639127731,
+                  "rms_unweighted": 0.070710688829422
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999580537029,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.033333320170640945,
+                  "residual_max": 0.10000020265579224,
+                  "score": 0.9999999580537029,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08,
+                  "rms_unweighted": 3.0833504638394515e-08
+                }
+              }
+            }
+          }
+        },
+        {
+          "magnitude": 0.2,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.9031068351690483,
+            "overall_tier": "Moderate Admissibility",
+            "below_high": true,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.06666664034128189,
+                "residual_max": 0.20000016689300537,
+                "score": 0.9031068351690483,
+                "tier": "Moderate Admissibility",
+                "rms_weighted": 0.024031413719058037
+              }
+            },
+            "tier_drop_from_baseline": true,
+            "score_drop": 0.09689310397258633,
+            "detects_below_high": true,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.19999998807907104,
+                "max": 0.20000016689300537,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.0942808985710144,
+                "max": 0.20000016689300537,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.8146017587524214,
+              "overall_tier": "Moderate Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.06666664034128189,
+                  "residual_max": 0.20000016689300537,
+                  "score": 0.8146017587524214,
+                  "tier": "Moderate Admissibility",
+                  "rms_weighted": 0.20000000298023224
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999503787023,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.06666664034128189,
+                  "residual_max": 0.20000016689300537,
+                  "score": 0.9999999503787023,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.9627655361679681,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.06666664034128189,
+                "residual_max": 0.20000016689300537,
+                "score": 0.9627655361679681,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.024031413719058037,
+                "rms_unweighted": 0.06666667014360428
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.03723441904974578,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.19999998807907104,
+                "max": 0.20000016689300537,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.0942808985710144,
+                "max": 0.20000016689300537,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.7565062699425998,
+              "overall_tier": "Moderate Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.06666664034128189,
+                  "residual_max": 0.20000016689300537,
+                  "score": 0.7565062699425998,
+                  "tier": "Moderate Admissibility",
+                  "rms_weighted": 0.20000000298023224,
+                  "rms_unweighted": 0.1414213627576828
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999584174075,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.06666664034128189,
+                  "residual_max": 0.20000016689300537,
+                  "score": 0.9999999584174075,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08,
+                  "rms_unweighted": 3.0833504638394515e-08
+                }
+              }
+            }
+          }
+        },
+        {
+          "magnitude": 0.5,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.7978629679332238,
+            "overall_tier": "Moderate Admissibility",
+            "below_high": true,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.1666666716337204,
+                "residual_max": 0.5000001788139343,
+                "score": 0.7978629679332238,
+                "tier": "Moderate Admissibility",
+                "rms_weighted": 0.06007853522896767
+              }
+            },
+            "tier_drop_from_baseline": true,
+            "score_drop": 0.2021369712084109,
+            "detects_below_high": true,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.5,
+                "max": 0.5000001788139343,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.2357022613286972,
+                "max": 0.5000001788139343,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.6504351187786531,
+              "overall_tier": "Low Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.1666666716337204,
+                  "residual_max": 0.5000001788139343,
+                  "score": 0.6504351187786531,
+                  "tier": "Low Admissibility",
+                  "rms_weighted": 0.5
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999531303527,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.1666666716337204,
+                  "residual_max": 0.5000001788139343,
+                  "score": 0.9999999531303527,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.9163175910446921,
+            "overall_tier": "High Admissibility",
+            "below_high": false,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.1666666716337204,
+                "residual_max": 0.5000001788139343,
+                "score": 0.9163175910446921,
+                "tier": "High Admissibility",
+                "rms_weighted": 0.06007853522896767,
+                "rms_unweighted": 0.1666666716337204
+              }
+            },
+            "tier_drop_from_baseline": false,
+            "score_drop": 0.08368236417302177,
+            "detects_below_high": false,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 0.5,
+                "max": 0.5000001788139343,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.2357022613286972,
+                "max": 0.5000001788139343,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.5681675668443651,
+              "overall_tier": "Low Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.1666666716337204,
+                  "residual_max": 0.5000001788139343,
+                  "score": 0.5681675668443651,
+                  "tier": "Low Admissibility",
+                  "rms_weighted": 0.5,
+                  "rms_unweighted": 0.3535533845424652
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999607232877,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.1666666716337204,
+                  "residual_max": 0.5000001788139343,
+                  "score": 0.9999999607232877,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08,
+                  "rms_unweighted": 3.0833504638394515e-08
+                }
+              }
+            }
+          }
+        },
+        {
+          "magnitude": 1.0,
+          "perturb": "p_grad",
+          "unweighted": {
+            "overall_score": 0.6990407268952541,
+            "overall_tier": "Moderate Admissibility",
+            "below_high": true,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.3333333432674408,
+                "residual_max": 1.000000238418579,
+                "score": 0.6990407268952541,
+                "tier": "Moderate Admissibility",
+                "rms_weighted": 0.12015707045793533
+              }
+            },
+            "tier_drop_from_baseline": true,
+            "score_drop": 0.30095921224638056,
+            "detects_below_high": true,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 1.0,
+                "max": 1.000000238418579,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.4714045226573944,
+                "max": 1.000000238418579,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.5226583213199375,
+              "overall_tier": "Low Admissibility",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.3333333432674408,
+                  "residual_max": 1.000000238418579,
+                  "score": 0.5226583213199375,
+                  "tier": "Low Admissibility",
+                  "rms_weighted": 1.0
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999601755887,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.3333333432674408,
+                  "residual_max": 1.000000238418579,
+                  "score": 0.9999999601755887,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08
+                }
+              }
+            }
+          },
+          "weighted": {
+            "overall_score": 0.8656552255945412,
+            "overall_tier": "Moderate Admissibility",
+            "below_high": true,
+            "laws": {
+              "momentum_navier_stokes": {
+                "residual_rms": 0.3333333432674408,
+                "residual_max": 1.000000238418579,
+                "score": 0.8656552255945412,
+                "tier": "Moderate Admissibility",
+                "rms_weighted": 0.12015707045793533,
+                "rms_unweighted": 0.3333333432674408
+              }
+            },
+            "tier_drop_from_baseline": true,
+            "score_drop": 0.13434472962317268,
+            "detects_below_high": true,
+            "region_breakdown": {
+              "cluster_band": {
+                "rms": 1.0,
+                "max": 1.000000238418579,
+                "n": 384
+              },
+              "exterior": {
+                "rms": 4.360493122135267e-08,
+                "max": 2.107342425006209e-07,
+                "n": 1344
+              },
+              "global": {
+                "rms": 0.4714045226573944,
+                "max": 1.000000238418579,
+                "n": 1728
+              }
+            },
+            "eval_mask_cluster_only": {
+              "overall_score": 0.4363772055023148,
+              "overall_tier": "Non-Admissible",
+              "below_high": true,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.3333333432674408,
+                  "residual_max": 1.000000238418579,
+                  "score": 0.4363772055023148,
+                  "tier": "Non-Admissible",
+                  "rms_weighted": 1.0,
+                  "rms_unweighted": 0.7071067690849304
+                }
+              }
+            },
+            "eval_mask_exterior_only": {
+              "overall_score": 0.9999999666271875,
+              "overall_tier": "High Admissibility",
+              "below_high": false,
+              "laws": {
+                "momentum_navier_stokes": {
+                  "residual_rms": 0.3333333432674408,
+                  "residual_max": 1.000000238418579,
+                  "score": 0.9999999666271875,
+                  "tier": "High Admissibility",
+                  "rms_weighted": 2.5838442496706193e-08,
+                  "rms_unweighted": 3.0833504638394515e-08
+                }
+              }
+            }
+          }
+        }
+      ],
+      "first_mag_below_high_unweighted": 0.2,
+      "first_mag_below_high_weighted": 1.0,
+      "meta": {
+        "r_cut": 1.0178885459899902,
+        "fraction_points_in_band": 0.2222222238779068,
+        "weight_fraction_in_band": 0.014437721110880375,
+        "magnitudes": [
+          0.02,
+          0.05,
+          0.1,
+          0.2,
+          0.5,
+          1.0
+        ],
+        "perturb": "p_grad_x += mag in inner-wall band (exact \u2202)"
+      }
+    },
+    "noise_sweep": {
+      "noise_levels": [
+        0.0,
+        0.0001,
+        0.001,
+        0.01
+      ],
+      "cases": {
+        "taylor_green": {
+          "u_scale": 0.4990009069442749,
+          "rows": [
+            {
+              "noise_rel": 0.0,
+              "orders": {
+                "legacy": {
+                  "overall_score": 0.9536335352818288,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.024070290848612785,
+                      "residual_max": 0.09750311076641083,
+                      "score": 0.9536335352818288,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd2": {
+                  "overall_score": 0.9853265650365925,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.007369589526206255,
+                      "residual_max": 0.017513319849967957,
+                      "score": 0.9853265650365925,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd4": {
+                  "overall_score": 0.9989789144496154,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.000509001431055367,
+                      "residual_max": 0.0020143226720392704,
+                      "score": 0.9989789144496154,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd6": {
+                  "overall_score": 0.9998814815794703,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 5.902959674131125e-05,
+                      "residual_max": 0.00024517366546206176,
+                      "score": 0.9998814815794703,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "noise_rel": 0.0001,
+              "orders": {
+                "legacy": {
+                  "overall_score": 0.9536304771500043,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.024072028696537018,
+                      "residual_max": 0.09778378158807755,
+                      "score": 0.9536304771500043,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd2": {
+                  "overall_score": 0.985316205655721,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.007374909706413746,
+                      "residual_max": 0.01815180853009224,
+                      "score": 0.985316205655721,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd4": {
+                  "overall_score": 0.9987912501970492,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.0006026655319146812,
+                      "residual_max": 0.004404362291097641,
+                      "score": 0.9987912501970492,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd6": {
+                  "overall_score": 0.9987938288258257,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.0006014087121002376,
+                      "residual_max": 0.005106436554342508,
+                      "score": 0.9987938288258257,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "noise_rel": 0.001,
+              "orders": {
+                "legacy": {
+                  "overall_score": 0.9536121044489999,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.024080395698547363,
+                      "residual_max": 0.10298000276088715,
+                      "score": 0.9536121044489999,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd2": {
+                  "overall_score": 0.9850202329259476,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.007525412831455469,
+                      "residual_max": 0.022319577634334564,
+                      "score": 0.9850202329259476,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd4": {
+                  "overall_score": 0.9937434304423125,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.0031351286452263594,
+                      "residual_max": 0.02480897307395935,
+                      "score": 0.9937434304423125,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd6": {
+                  "overall_score": 0.9886254556503443,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.00573003850877285,
+                      "residual_max": 0.0590488575398922,
+                      "score": 0.9886254556503443,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "noise_rel": 0.01,
+              "orders": {
+                "legacy": {
+                  "overall_score": 0.9440761274590325,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.02935093641281128,
+                      "residual_max": 0.18377913534641266,
+                      "score": 0.9440761274590325,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd2": {
+                  "overall_score": 0.9610530562029982,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.02007288485765457,
+                      "residual_max": 0.1376093029975891,
+                      "score": 0.9610530562029982,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd4": {
+                  "overall_score": 0.9445940148214141,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.029262105002999306,
+                      "residual_max": 0.25197577476501465,
+                      "score": 0.9445940148214141,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd6": {
+                  "overall_score": 0.9039729015497876,
+                  "overall_tier": "Moderate Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.05336182937026024,
+                      "residual_max": 0.43448707461357117,
+                      "score": 0.9039729015497876,
+                      "tier": "Moderate Admissibility"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "meta": "Gaussian noise on u and p; Path B fills spatial \u2202; u_t exact"
+        },
+        "kovasznay": {
+          "u_scale": 0.7695507407188416,
+          "rows": [
+            {
+              "noise_rel": 0.0,
+              "orders": {
+                "legacy": {
+                  "overall_score": 0.8363602989023857,
+                  "overall_tier": "Moderate Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.12394001334905624,
+                      "residual_max": 0.7129213809967041,
+                      "score": 0.8363602989023857,
+                      "tier": "Moderate Admissibility"
+                    }
+                  }
+                },
+                "fd2": {
+                  "overall_score": 0.9149140677365188,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.058935534209012985,
+                      "residual_max": 0.48435333371162415,
+                      "score": 0.9149140677365188,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd4": {
+                  "overall_score": 0.9107959984115319,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.06414968520402908,
+                      "residual_max": 0.6658911108970642,
+                      "score": 0.9107959984115319,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd6": {
+                  "overall_score": 0.9343874262275382,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.04625976085662842,
+                      "residual_max": 0.5613328218460083,
+                      "score": 0.9343874262275382,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "noise_rel": 0.0001,
+              "orders": {
+                "legacy": {
+                  "overall_score": 0.8362942496329542,
+                  "overall_tier": "Moderate Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.12399628013372421,
+                      "residual_max": 0.7159605026245117,
+                      "score": 0.8362942496329542,
+                      "tier": "Moderate Admissibility"
+                    }
+                  }
+                },
+                "fd2": {
+                  "overall_score": 0.9141034789707507,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.059541333466768265,
+                      "residual_max": 0.49314096570014954,
+                      "score": 0.9141034789707507,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                },
+                "fd4": {
+                  "overall_score": 0.90882489171761,
+                  "overall_tier": "Moderate Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.06569209694862366,
+                      "residual_max": 0.6491541266441345,
+                      "score": 0.90882489171761,
+                      "tier": "Moderate Admissibility"
+                    }
+                  }
+                },
+                "fd6": {
+                  "overall_score": 0.9189405711064371,
+                  "overall_tier": "High Admissibility",
+                  "below_high": false,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.058090124279260635,
+                      "residual_max": 0.5583333969116211,
+                      "score": 0.9189405711064371,
+                      "tier": "High Admissibility"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "noise_rel": 0.001,
+              "orders": {
+                "legacy": {
+                  "overall_score": 0.8316997640869737,
+                  "overall_tier": "Moderate Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.12852250039577484,
+                      "residual_max": 0.7303137183189392,
+                      "score": 0.8316997640869737,
+                      "tier": "Moderate Admissibility"
+                    }
+                  }
+                },
+                "fd2": {
+                  "overall_score": 0.8663803014283598,
+                  "overall_tier": "Moderate Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.09811639040708542,
+                      "residual_max": 0.5696545839309692,
+                      "score": 0.8663803014283598,
+                      "tier": "Moderate Admissibility"
+                    }
+                  }
+                },
+                "fd4": {
+                  "overall_score": 0.8159190354320481,
+                  "overall_tier": "Moderate Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.14903028309345245,
+                      "residual_max": 1.652185082435608,
+                      "score": 0.8159190354320481,
+                      "tier": "Moderate Admissibility"
+                    }
+                  }
+                },
+                "fd6": {
+                  "overall_score": 0.6731250078440728,
+                  "overall_tier": "Moderate Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.3275538384914398,
+                      "residual_max": 4.070361137390137,
+                      "score": 0.6731250078440728,
+                      "tier": "Moderate Admissibility"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "noise_rel": 0.01,
+              "orders": {
+                "legacy": {
+                  "overall_score": 0.6654916020036528,
+                  "overall_tier": "Low Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.36887985467910767,
+                      "residual_max": 2.6957287788391113,
+                      "score": 0.6654916020036528,
+                      "tier": "Low Admissibility"
+                    }
+                  }
+                },
+                "fd2": {
+                  "overall_score": 0.58130886903387,
+                  "overall_tier": "Low Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 0.8051251769065857,
+                      "residual_max": 5.025809288024902,
+                      "score": 0.58130886903387,
+                      "tier": "Low Admissibility"
+                    }
+                  }
+                },
+                "fd4": {
+                  "overall_score": 0.5723961970187158,
+                  "overall_tier": "Low Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 1.4412446022033691,
+                      "residual_max": 18.459705352783203,
+                      "score": 0.5723961970187158,
+                      "tier": "Low Admissibility"
+                    }
+                  }
+                },
+                "fd6": {
+                  "overall_score": 0.5707305247802725,
+                  "overall_tier": "Low Admissibility",
+                  "below_high": true,
+                  "laws": {
+                    "momentum_navier_stokes": {
+                      "residual_rms": 3.2976765632629395,
+                      "residual_max": 53.85706329345703,
+                      "score": 0.5707305247802725,
+                      "tier": "Low Admissibility"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "meta": "Uniform grid; Gaussian noise on u and p; Path B spatial fill"
+        }
+      }
+    }
+  }
+}

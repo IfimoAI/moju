@@ -10,10 +10,11 @@ moju follows [Semantic Versioning](https://semver.org/) (semver) with one clarif
 - **MINOR** (0.1 → 0.2): New features, optional parameters, or new APIs. Existing public APIs remain supported; breaking changes are avoided but may occur with a deprecation period.
 - **MAJOR** (0.x → 1.0, or 1.x → 2.0): Breaking changes allowed. Public APIs may be removed or changed; we document migrations in release notes.
 
-## 0.x vs 1.0
+## 0.x vs 1.0 vs 2.0
 
 - **0.x:** The library is still evolving. We keep patch releases (0.1.x) backward compatible. Minor releases (0.2, 0.3) may introduce breaking changes after deprecation where feasible.
 - **1.0 and later:** Breaking changes are a major bump. 1.x minor and patch releases stay backward compatible.
+- **2.0:** Scoring defaults change (Path B `fd_order=4`, weighted norms with a percentile safeguard). Tier *cutoffs* are unchanged. Reproduce 1.x with `fd_order="legacy"` / `weighted_norms=False`, or `moju<2`. See [`docs/MIGRATION_1x_to_2.0.md`](docs/MIGRATION_1x_to_2.0.md).
 
 ## Releases
 

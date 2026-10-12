@@ -1,0 +1,1859 @@
+{
+  "phase": "A4_verification",
+  "high_cutoff": 0.9090909090909091,
+  "dtype": "float64",
+  "closure_verification": {
+    "matching": {
+      "expected": {
+        "boundary": 4.0,
+        "interior": 4.0
+      },
+      "sine_obs_order": {
+        "d1_boundary": 4.053440368709648,
+        "d1_interior": 4.033740386628408,
+        "d2_boundary": 3.038806852391831,
+        "d2_interior": 4.084848610884062
+      },
+      "poly3_obs_order": {
+        "d1_boundary": -0.9999999923209234,
+        "d1_interior": -1.6012304784056866,
+        "d2_boundary": -2.585168211274735,
+        "d2_interior": -2.275286604203444
+      },
+      "exp_obs_order": {
+        "d1_boundary": 4.0419542604797165,
+        "d1_interior": 4.054110779696002,
+        "d2_boundary": 3.027658802791595,
+        "d2_interior": 4.031897300339203
+      },
+      "mixed_obs_order": {
+        "boundary": 4.067550743914765,
+        "interior": 4.057930998700549
+      },
+      "kovasznay": {
+        "rows": [
+          {
+            "n": 24,
+            "boundary_rms": 1.6895351925708643e-07,
+            "interior_rms": 4.691847825536393e-08
+          },
+          {
+            "n": 48,
+            "boundary_rms": 9.681547676309082e-09,
+            "interior_rms": 2.626018795003113e-09
+          },
+          {
+            "n": 96,
+            "boundary_rms": 5.754421420842706e-10,
+            "interior_rms": 1.5951976024290197e-10
+          }
+        ],
+        "obs_order_boundary": 4.07249490802057,
+        "obs_order_interior": 4.041070190356097
+      },
+      "passes_sine_order_check": true,
+      "kov_boundary_rms_n48": 9.681547676309082e-09
+    },
+    "order_reduced": {
+      "expected": {
+        "boundary": 2.0,
+        "interior": 4.0
+      },
+      "sine_obs_order": {
+        "d1_boundary": 2.028634141889231,
+        "d1_interior": 4.033740386628408,
+        "d2_boundary": 1.0140496523859774,
+        "d2_interior": 4.084848610884062
+      },
+      "poly3_obs_order": {
+        "d1_boundary": 2.030533513340297,
+        "d1_interior": -1.6012304784056866,
+        "d2_boundary": 1.0152667566451101,
+        "d2_interior": -2.275286604203444
+      },
+      "exp_obs_order": {
+        "d1_boundary": 2.021256273911507,
+        "d1_interior": 4.054110779696002,
+        "d2_boundary": 1.0084890578676238,
+        "d2_interior": 4.031897300339203
+      },
+      "mixed_obs_order": {
+        "boundary": 2.0378839815266288,
+        "interior": 4.057930998700549
+      },
+      "kovasznay": {
+        "rows": [
+          {
+            "n": 24,
+            "boundary_rms": 0.0001754434411567335,
+            "interior_rms": 4.691847825536393e-08
+          },
+          {
+            "n": 48,
+            "boundary_rms": 4.110591853233651e-05,
+            "interior_rms": 2.626018795003113e-09
+          },
+          {
+            "n": 96,
+            "boundary_rms": 9.960419555638786e-06,
+            "interior_rms": 1.5951976024290197e-10
+          }
+        ],
+        "obs_order_boundary": 2.045067713382356,
+        "obs_order_interior": 4.041070190356097
+      },
+      "passes_sine_order_check": true,
+      "kov_boundary_rms_n48": 4.110591853233651e-05
+    },
+    "sbp": {
+      "expected": {
+        "boundary": 2.0,
+        "interior": 4.0
+      },
+      "sine_obs_order": {
+        "d1_boundary": 2.0279037438135723,
+        "d1_interior": 2.5495180847303867,
+        "d2_boundary": 1.0140496523859774,
+        "d2_interior": 4.084848610884062
+      },
+      "poly3_obs_order": {
+        "d1_boundary": 2.030533513297697,
+        "d1_interior": 2.56259868156986,
+        "d2_boundary": 1.0152667566451101,
+        "d2_interior": -2.275286604203444
+      },
+      "exp_obs_order": {
+        "d1_boundary": 2.01990908976202,
+        "d1_interior": 2.543604942165038,
+        "d2_boundary": 1.0084890578676238,
+        "d2_interior": 4.031897300339203
+      },
+      "mixed_obs_order": {
+        "boundary": 2.0377949828720365,
+        "interior": 2.578779298972239
+      },
+      "kovasznay": {
+        "rows": [
+          {
+            "n": 24,
+            "boundary_rms": 0.00021280239327726278,
+            "interior_rms": 1.177016058644805e-05
+          },
+          {
+            "n": 48,
+            "boundary_rms": 4.99360031490672e-05,
+            "interior_rms": 1.882704666184824e-06
+          },
+          {
+            "n": 96,
+            "boundary_rms": 1.210725606933427e-05,
+            "interior_rms": 3.2570402240183443e-07
+          }
+        ],
+        "obs_order_boundary": 2.044208416782198,
+        "obs_order_interior": 2.5311732647272525
+      },
+      "passes_sine_order_check": false,
+      "kov_boundary_rms_n48": 4.99360031490672e-05
+    },
+    "bc_aware": {
+      "expected": {
+        "boundary": 4.0,
+        "interior": 4.0
+      },
+      "sine_obs_order": {
+        "d1_boundary": 4.053440368103074,
+        "d1_interior": 4.033740386628408,
+        "d2_boundary": 3.0388068484252897,
+        "d2_interior": 4.084848610884062
+      },
+      "poly3_obs_order": {
+        "d1_boundary": -1.5222527015446632,
+        "d1_interior": -1.6012304784056866,
+        "d2_boundary": -2.408740549705215,
+        "d2_interior": -2.275286604203444
+      },
+      "exp_obs_order": {
+        "d1_boundary": 4.041944154871947,
+        "d1_interior": 4.054110779696002,
+        "d2_boundary": 3.0276729129914264,
+        "d2_interior": 4.031897300339203
+      },
+      "mixed_obs_order": {
+        "boundary": 4.067550746134716,
+        "interior": 4.057930998700549
+      },
+      "kovasznay": {
+        "rows": [
+          {
+            "n": 24,
+            "boundary_rms": 1.689535199373969e-07,
+            "interior_rms": 4.691847825536393e-08
+          },
+          {
+            "n": 48,
+            "boundary_rms": 9.681544523689744e-09,
+            "interior_rms": 2.626018795003113e-09
+          },
+          {
+            "n": 96,
+            "boundary_rms": 5.754409964345513e-10,
+            "interior_rms": 1.5951976024290197e-10
+          }
+        ],
+        "obs_order_boundary": 4.072497310502505,
+        "obs_order_interior": 4.041070190356097
+      },
+      "passes_sine_order_check": true,
+      "kov_boundary_rms_n48": 9.681544523689744e-09
+    }
+  },
+  "closure_kovasznay": {},
+  "spike_source": {
+    "n": 40,
+    "r_high": 0.06549846857599496,
+    "residual_frame": {
+      "edges": {
+        "lo_0": 0.13637855623275147,
+        "hi_0": 0.05120178495071436,
+        "lo_1": 0.31541093257524516,
+        "hi_1": 0.25189143049524526
+      },
+      "corners_rms": 0.37308482961141826,
+      "max": 0.6658882158328314,
+      "frac_above_r_high": 0.05
+    },
+    "term_breakdown": {},
+    "derivative_errors_fd_vs_analytic": {
+      "u_grad": {
+        "boundary_rms": 0.32715582917996455,
+        "interior_rms": 0.08413337201440586,
+        "max": 1.0179779401619418,
+        "edges": {
+          "lo_0": 0.23866371988640303,
+          "hi_0": 0.09331923814121092,
+          "lo_1": 0.49601634729293026,
+          "hi_1": 0.3796859202723468
+        },
+        "corners_rms": 0.5630224042311173
+      },
+      "u_laplacian": {
+        "boundary_rms": 7.938829644878051,
+        "interior_rms": 0.17813208972486352,
+        "max": 26.63548625473174,
+        "edges": {
+          "lo_0": 5.12058748452961,
+          "hi_0": 2.002186109604863,
+          "lo_1": 12.655326586634754,
+          "hi_1": 8.903016258321768
+        },
+        "corners_rms": 14.140135240462216
+      },
+      "p_grad": {
+        "boundary_rms": 4.06807888899405e-07,
+        "interior_rms": 9.299914664281245e-08,
+        "max": 1.0594660005969203e-06,
+        "edges": {
+          "lo_0": 7.718374790600295e-07,
+          "hi_0": 1.3255600254208964e-07,
+          "lo_1": 1.9608459027482558e-07,
+          "hi_1": 1.9608459027482558e-07
+        },
+        "corners_rms": 6.300951758676232e-07
+      },
+      "u0_d0": {
+        "boundary_rms": 2.0442853225872287e-08,
+        "interior_rms": 5.524928248923614e-09,
+        "max": 6.89807140297205e-08
+      },
+      "u0_d1": {
+        "boundary_rms": 0.3259830293810432,
+        "interior_rms": 0.08319707196777439,
+        "max": 1.0179212620420224
+      },
+      "u1_d0": {
+        "boundary_rms": 3.0317148142139358e-09,
+        "interior_rms": 8.639730604177111e-10,
+        "max": 1.0571349656762763e-08
+      },
+      "u1_d1": {
+        "boundary_rms": 0.027676725275718784,
+        "interior_rms": 0.012516848744925804,
+        "max": 0.10362415031547223
+      }
+    },
+    "dominant": [
+      "u_laplacian",
+      7.938829644878051
+    ]
+  },
+  "sharp_violations": {
+    "smooth_band": {
+      "by_mag": [
+        {
+          "magnitude": 0.1,
+          "configs": {
+            "plain_p95": {
+              "score": 0.8683596981170252,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.10000000000000016
+            },
+            "ea_order_p95": {
+              "score": 0.9314784281771435,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.04852497323286412
+            },
+            "ea_order_p97_5": {
+              "score": 0.9027682864460751,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.07104645858327005
+            },
+            "ea_order_p99": {
+              "score": 0.8410265521271236,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.12468829193760142
+            },
+            "ea_dual_p95": {
+              "score": 0.9337682318634435,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.04678838384229625
+            },
+            "ea_dual_p97_5": {
+              "score": 0.901067403224956,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.07242573627825857
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.927359771906324,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.05167015162869981
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.9099931891748452,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.06524511806553222
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.9085342005894423,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.0664091992277313
+            }
+          }
+        },
+        {
+          "magnitude": 0.2,
+          "configs": {
+            "plain_p95": {
+              "score": 0.767346034488284,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.20000000000000015
+            },
+            "ea_order_p95": {
+              "score": 0.8717450847417868,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.09704994646572845
+            },
+            "ea_order_p97_5": {
+              "score": 0.8227690425771729,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.14209291716654138
+            },
+            "ea_order_p99": {
+              "score": 0.7256650734067305,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.24937658387520426
+            },
+            "ea_dual_p95": {
+              "score": 0.8757647818873214,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.09357676768459161
+            },
+            "ea_dual_p97_5": {
+              "score": 0.8199478347163879,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.1448514725565183
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.8645580760610214,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.10334030325739989
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.8348509203221977,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.1304902361310655
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.8323982309661865,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.13281839845546228
+            }
+          }
+        },
+        {
+          "magnitude": 0.5,
+          "configs": {
+            "plain_p95": {
+              "score": 0.5688338560108996,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.5000000000000002
+            },
+            "ea_order_p95": {
+              "score": 0.7310952464274365,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.24262486616432163
+            },
+            "ea_order_p97_5": {
+              "score": 0.6499753991406889,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.35523229291635516
+            },
+            "ea_order_p99": {
+              "score": 0.5141082853308739,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.6234414596880125
+            },
+            "ea_dual_p95": {
+              "score": 0.7381992623367801,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.23394191921147783
+            },
+            "ea_dual_p97_5": {
+              "score": 0.645588439968728,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.36212868139129784
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.7185710980506368,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.2583507581435003
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.6690992358111879,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.3262255903276657
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.6651721798769938,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.33204599613865493
+            }
+          }
+        },
+        {
+          "magnitude": 1.0,
+          "configs": {
+            "plain_p95": {
+              "score": 0.4192672245139387,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 1.0000000000000002
+            },
+            "ea_order_p95": {
+              "score": 0.5980410385314401,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.48524973232905616
+            },
+            "ea_order_p97_5": {
+              "score": 0.5040134009379051,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.7104645858330514
+            },
+            "ea_order_p99": {
+              "score": 0.3666933043004127,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 1.2468829193755173
+            },
+            "ea_dual_p95": {
+              "score": 0.6067694917946079,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.4678838384259802
+            },
+            "ea_dual_p97_5": {
+              "score": 0.4992065627031028,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 0.7242573627850241
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.5828557591388227,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.5167015162873885
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.5252875895776593,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.6524511806556844
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.520875948921961,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.664091992279994
+            }
+          }
+        }
+      ]
+    },
+    "gaussian": {
+      "by_mag": [
+        {
+          "magnitude": 0.1,
+          "configs": {
+            "plain_p95": {
+              "score": 0.989771178441772,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.00038659201394612616
+            },
+            "ea_order_p95": {
+              "score": 0.989771178441772,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.00033577923466864457
+            },
+            "ea_order_p97_5": {
+              "score": 0.987268785904821,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.008506388322087145
+            },
+            "ea_order_p99": {
+              "score": 0.9549724046380256,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.03110274515482377
+            },
+            "ea_dual_p95": {
+              "score": 0.989771178441772,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.00024199336818545182
+            },
+            "ea_dual_p97_5": {
+              "score": 0.989771178441772,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.00600025057117602
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.989771178441772,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.00032579153278717443
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.989771178441772,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.006270164941381012
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.989771178441772,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.006458748938661175
+            }
+          }
+        },
+        {
+          "magnitude": 0.2,
+          "configs": {
+            "plain_p95": {
+              "score": 0.9797494956787103,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.0007731840278933247
+            },
+            "ea_order_p95": {
+              "score": 0.9797494956787103,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.0006715584693372333
+            },
+            "ea_order_p97_5": {
+              "score": 0.9748576642686911,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.017012776644173708
+            },
+            "ea_order_p99": {
+              "score": 0.9138250596217461,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.062205490309647136
+            },
+            "ea_dual_p95": {
+              "score": 0.9797494956787103,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.00048398673637018884
+            },
+            "ea_dual_p97_5": {
+              "score": 0.9797494956787103,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.012000501142351214
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.9797494956787103,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.0006515830655732675
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.9797494956787103,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.012540329882763388
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.9797494956787103,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.012917497877323695
+            }
+          }
+        },
+        {
+          "magnitude": 0.5,
+          "configs": {
+            "plain_p95": {
+              "score": 0.9508662150824668,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.0019329600697351366
+            },
+            "ea_order_p95": {
+              "score": 0.9508662150824668,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.0016788961733430903
+            },
+            "ea_order_p97_5": {
+              "score": 0.9394285232769954,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.04253194161043337
+            },
+            "ea_order_p99": {
+              "score": 0.8092229503704187,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.15551372577411696
+            },
+            "ea_dual_p95": {
+              "score": 0.9508662150824668,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.0012099668409240735
+            },
+            "ea_dual_p97_5": {
+              "score": 0.9508662150824668,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.030001252855876917
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.9508662150824668,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.0016289576639318178
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.9508662150824668,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.03135082470691038
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.9508662150824668,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.03229374469331114
+            }
+          }
+        },
+        {
+          "magnitude": 1.0,
+          "configs": {
+            "plain_p95": {
+              "score": 0.9063345673852352,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.0038659201394715564
+            },
+            "ea_order_p95": {
+              "score": 0.9063345673852352,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.003357792346686114
+            },
+            "ea_order_p97_5": {
+              "score": 0.8857757764518419,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.0850638832208662
+            },
+            "ea_order_p99": {
+              "score": 0.6795755348342888,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.31102745154823347
+            },
+            "ea_dual_p95": {
+              "score": 0.9063345673852352,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.002419933681847432
+            },
+            "ea_dual_p97_5": {
+              "score": 0.9063345673852352,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.06000250571175307
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.9063345673852352,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.003257915327862555
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.9063345673852352,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.06270164941382199
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.9063345673852352,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.0645874893866235
+            }
+          }
+        }
+      ]
+    },
+    "checker": {
+      "by_mag": [
+        {
+          "magnitude": 0.1,
+          "configs": {
+            "plain_p95": {
+              "score": 0.9846896899536771,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 2.040396661419375e-15
+            },
+            "ea_order_p95": {
+              "score": 0.9846896899536771,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 5.322622343857634e-15
+            },
+            "ea_order_p97_5": {
+              "score": 0.9846896899536771,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.8677787023395855e-15
+            },
+            "ea_order_p99": {
+              "score": 0.9846896899536771,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.0005122171190481052
+            },
+            "ea_dual_p95": {
+              "score": 0.9846896899536771,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 5.465123302975421e-15
+            },
+            "ea_dual_p97_5": {
+              "score": 0.9846896899536771,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.4261162223316814e-15
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.9846896899536771,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 3.85399120236722e-15
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.9846896899536771,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.340678439384241e-15
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.9846896899536771,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.085948351063108e-15
+            }
+          }
+        },
+        {
+          "magnitude": 0.2,
+          "configs": {
+            "plain_p95": {
+              "score": 0.9698411216850059,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 2.040396661419375e-15
+            },
+            "ea_order_p95": {
+              "score": 0.9698411216850059,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 5.322622343857634e-15
+            },
+            "ea_order_p97_5": {
+              "score": 0.9698411216850059,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.8677787023395855e-15
+            },
+            "ea_order_p99": {
+              "score": 0.9698411216850059,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.0010244342380877679
+            },
+            "ea_dual_p95": {
+              "score": 0.9698411216850059,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 5.465123302975421e-15
+            },
+            "ea_dual_p97_5": {
+              "score": 0.9698411216850059,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.4261162223316814e-15
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.9698411216850059,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 3.85399120236722e-15
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.9698411216850059,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.340678439384241e-15
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.9698411216850059,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.085948351063108e-15
+            }
+          }
+        },
+        {
+          "magnitude": 0.5,
+          "configs": {
+            "plain_p95": {
+              "score": 0.9278660239228463,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 2.040396661419375e-15
+            },
+            "ea_order_p95": {
+              "score": 0.9278660239228463,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 5.322622343857634e-15
+            },
+            "ea_order_p97_5": {
+              "score": 0.9278660239228463,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.8677787023395855e-15
+            },
+            "ea_order_p99": {
+              "score": 0.9278660239228463,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 0.0025610855952067557
+            },
+            "ea_dual_p95": {
+              "score": 0.9278660239228463,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 5.465123302975421e-15
+            },
+            "ea_dual_p97_5": {
+              "score": 0.9278660239228463,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.4261162223316814e-15
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.9278660239228463,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 3.85399120236722e-15
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.9278660239228463,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.340678439384241e-15
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.9278660239228463,
+              "tier": "High Admissibility",
+              "below_high": false,
+              "sg": 6.085948351063108e-15
+            }
+          }
+        },
+        {
+          "magnitude": 1.0,
+          "configs": {
+            "plain_p95": {
+              "score": 0.8654385036073837,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 2.040396661419375e-15
+            },
+            "ea_order_p95": {
+              "score": 0.8654385036073837,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 5.322622343857634e-15
+            },
+            "ea_order_p97_5": {
+              "score": 0.8654385036073837,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 6.8677787023395855e-15
+            },
+            "ea_order_p99": {
+              "score": 0.8654385036073837,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.0051221711904050685
+            },
+            "ea_dual_p95": {
+              "score": 0.8654385036073837,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 5.465123302975421e-15
+            },
+            "ea_dual_p97_5": {
+              "score": 0.8654385036073837,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 6.4261162223316814e-15
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.8654385036073837,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 3.85399120236722e-15
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.8654385036073837,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 6.340678439384241e-15
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.8654385036073837,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 6.085948351063108e-15
+            }
+          }
+        }
+      ]
+    },
+    "kink": {
+      "by_mag": [
+        {
+          "magnitude": 0.1,
+          "configs": {
+            "plain_p95": {
+              "score": 0.8683596981170242,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.10000000000000095
+            },
+            "ea_order_p95": {
+              "score": 0.6305332057295818,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.38652557871332954
+            },
+            "ea_order_p97_5": {
+              "score": 0.5442873395381697,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.552298229648567
+            },
+            "ea_order_p99": {
+              "score": 0.49491271055278097,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 0.6732069972459733
+            },
+            "ea_dual_p95": {
+              "score": 0.6316550137575755,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.3846675970540752
+            },
+            "ea_dual_p97_5": {
+              "score": 0.5649711321297344,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.5079285315640534
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.7136927258813236,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.26462562771704584
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.6386796857506496,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.37318146542041075
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.5657889496719014,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.506240865596812
+            }
+          }
+        },
+        {
+          "magnitude": 0.2,
+          "configs": {
+            "plain_p95": {
+              "score": 0.7673460344882832,
+              "tier": "Moderate Admissibility",
+              "below_high": true,
+              "sg": 0.20000000000000095
+            },
+            "ea_order_p95": {
+              "score": 0.4604224128453561,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 0.7730511574266611
+            },
+            "ea_order_p97_5": {
+              "score": 0.3738975103544757,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 1.1045964592971373
+            },
+            "ea_order_p99": {
+              "score": 0.3288265830313067,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 1.3464139944919495
+            },
+            "ea_dual_p95": {
+              "score": 0.4616197085591292,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 0.7693351941081544
+            },
+            "ea_dual_p97_5": {
+              "score": 0.3937001859538964,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 1.0158570631281112
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.5548384435362185,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.5292512554340936
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.4691619445220909,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 0.7463629308408225
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.3944949033424801,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 1.012481731193628
+            }
+          }
+        },
+        {
+          "magnitude": 0.5,
+          "configs": {
+            "plain_p95": {
+              "score": 0.5817662432026848,
+              "tier": "Low Admissibility",
+              "below_high": true,
+              "sg": 0.5000000000000009
+            },
+            "ea_order_p95": {
+              "score": 0.2646380779296077,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 1.93262789356139
+            },
+            "ea_order_p97_5": {
+              "score": 0.20118736747851887,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 2.761491148230972
+            },
+            "ea_order_p99": {
+              "score": 0.17124143000224823,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 3.3660349862115333
+            },
+            "ea_dual_p95": {
+              "score": 0.26557683780448255,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 1.9233379852321042
+            },
+            "ea_dual_p97_5": {
+              "score": 0.2149836873250928,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 2.5396426577478386
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.34454212050090427,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 1.323128138583292
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.27153146690226077,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 1.8659073270975064
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.21554590220542583,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 2.5312043279128686
+            }
+          }
+        },
+        {
+          "magnitude": 1.0,
+          "configs": {
+            "plain_p95": {
+              "score": 0.49689557650611577,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 1.0000000000000009
+            },
+            "ea_order_p95": {
+              "score": 0.20351870730507876,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 3.865255787036982
+            },
+            "ea_order_p97_5": {
+              "score": 0.1516991791653345,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 5.522982296268419
+            },
+            "ea_order_p99": {
+              "score": 0.12793958730718694,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 6.732069972124115
+            },
+            "ea_dual_p95": {
+              "score": 0.20430089150544908,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 3.8466759698403195
+            },
+            "ea_dual_p97_5": {
+              "score": 0.16279347396213964,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 5.07928531431516
+            },
+            "ea_order_smooth_p95": {
+              "score": 0.2717892062932137,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 2.64625627713489
+            },
+            "ea_order_smooth_p97_5": {
+              "score": 0.20927311325507916,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 3.7318146541208406
+            },
+            "ea_dual_smooth_p97_5": {
+              "score": 0.16324758625342933,
+              "tier": "Non-Admissible",
+              "below_high": true,
+              "sg": 5.062408654665423
+            }
+          }
+        }
+      ]
+    }
+  },
+  "detection_verdict": {
+    "plain_p95": {
+      "first_mag": {
+        "gaussian": 1.0,
+        "checker": 1.0,
+        "kink": 0.1
+      },
+      "n_detect": 6,
+      "n_total": 12
+    },
+    "verdicts": {
+      "ea_order_p95": {
+        "at_least_as_well_as_plain_p95": true,
+        "first_mag": {
+          "gaussian": 1.0,
+          "checker": 1.0,
+          "kink": 0.1
+        },
+        "n_detect": 6,
+        "n_total": 12
+      },
+      "ea_order_p97_5": {
+        "at_least_as_well_as_plain_p95": true,
+        "first_mag": {
+          "gaussian": 1.0,
+          "checker": 1.0,
+          "kink": 0.1
+        },
+        "n_detect": 6,
+        "n_total": 12
+      },
+      "ea_order_smooth_p97_5": {
+        "at_least_as_well_as_plain_p95": true,
+        "first_mag": {
+          "gaussian": 1.0,
+          "checker": 1.0,
+          "kink": 0.1
+        },
+        "n_detect": 6,
+        "n_total": 12
+      },
+      "ea_dual_p97_5": {
+        "at_least_as_well_as_plain_p95": true,
+        "first_mag": {
+          "gaussian": 1.0,
+          "checker": 1.0,
+          "kink": 0.1
+        },
+        "n_detect": 6,
+        "n_total": 12
+      },
+      "ea_dual_smooth_p97_5": {
+        "at_least_as_well_as_plain_p95": true,
+        "first_mag": {
+          "gaussian": 1.0,
+          "checker": 1.0,
+          "kink": 0.1
+        },
+        "n_detect": 6,
+        "n_total": 12
+      }
+    }
+  },
+  "clean_eps_suites": {
+    "order_smooth0": {
+      "taylor_green_coarse": {
+        "n": 32,
+        "scores": {
+          "p95": {
+            "score": 0.9976689625176822,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0011635226611246446
+          },
+          "p97_5": {
+            "score": 0.9973902071189762,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0013030257348470653
+          },
+          "p99": {
+            "score": 0.9970401463934648,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0014783240305455043
+          },
+          "plain_p95": {
+            "score": 0.9960781030621663,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.001960716639930054
+          }
+        },
+        "spike_frac": 0.0
+      },
+      "taylor_green_fine": {
+        "n": 64,
+        "scores": {
+          "p95": {
+            "score": 0.9998927650154288,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 5.340901355742315e-05
+          },
+          "p97_5": {
+            "score": 0.9998724688319082,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 6.351893623304637e-05
+          },
+          "p99": {
+            "score": 0.9998357378014261,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 8.181641851595864e-05
+          },
+          "plain_p95": {
+            "score": 0.9999051759034591,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 4.7227111726268964e-05
+          }
+        },
+        "spike_frac": 0.0
+      },
+      "kovasznay_coarse": {
+        "n": 40,
+        "scores": {
+          "p95": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.04766548053215317
+          },
+          "p97_5": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.05104918266003363
+          },
+          "p99": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.05530568141253953
+          },
+          "plain_p95": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.05151896721133707
+          }
+        },
+        "spike_frac": 0.05
+      },
+      "kovasznay_fine": {
+        "n": 80,
+        "scores": {
+          "p95": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.000880737222193634
+          },
+          "p97_5": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0021098401168560934
+          },
+          "p99": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0036139308215406706
+          },
+          "plain_p95": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0019012500072023023
+          }
+        },
+        "spike_frac": 0.00046875
+      }
+    },
+    "order_smooth1": {
+      "taylor_green_coarse": {
+        "n": 32,
+        "scores": {
+          "p95": {
+            "score": 0.9975810325236532,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.001207518788409568
+          },
+          "p97_5": {
+            "score": 0.9972997523222665,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0013483105752764403
+          },
+          "p99": {
+            "score": 0.9970451989088727,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.001475793030196586
+          },
+          "plain_p95": {
+            "score": 0.9960781030621663,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.001960716639930054
+          }
+        },
+        "spike_frac": 0.0
+      },
+      "taylor_green_fine": {
+        "n": 64,
+        "scores": {
+          "p95": {
+            "score": 0.9998916403587144,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 5.396921613936932e-05
+          },
+          "p97_5": {
+            "score": 0.9998685105336039,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 6.549068922232484e-05
+          },
+          "p99": {
+            "score": 0.9998387834447934,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 8.029918683664494e-05
+          },
+          "plain_p95": {
+            "score": 0.9999051759034591,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 4.7227111726268964e-05
+          }
+        },
+        "spike_frac": 0.0
+      },
+      "kovasznay_coarse": {
+        "n": 40,
+        "scores": {
+          "p95": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.027149730083893566
+          },
+          "p97_5": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.05492644068700495
+          },
+          "p99": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0558962065046361
+          },
+          "plain_p95": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.05151896721133707
+          }
+        },
+        "spike_frac": 0.05
+      },
+      "kovasznay_fine": {
+        "n": 80,
+        "scores": {
+          "p95": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0007583406012148686
+          },
+          "p97_5": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0020591273722925167
+          },
+          "p99": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0035643826271987526
+          },
+          "plain_p95": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0019012500072023023
+          }
+        },
+        "spike_frac": 0.00046875
+      }
+    },
+    "dual_smooth0": {
+      "taylor_green_coarse": {
+        "n": 32,
+        "scores": {
+          "p95": {
+            "score": 0.9987960250157476,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.000600278389806892
+          },
+          "p97_5": {
+            "score": 0.9878844202726598,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.006107312102191131
+          },
+          "p99": {
+            "score": 0.9874354103766041,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.006336532430350354
+          },
+          "plain_p95": {
+            "score": 0.9960781030621663,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.001960716639930054
+          }
+        },
+        "spike_frac": 0.0
+      },
+      "taylor_green_fine": {
+        "n": 64,
+        "scores": {
+          "p95": {
+            "score": 0.9999383429649484,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 3.070724852361097e-05
+          },
+          "p97_5": {
+            "score": 0.9999321001892836,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 3.381656899011024e-05
+          },
+          "p99": {
+            "score": 0.9999149356501751,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 4.236585939699862e-05
+          },
+          "plain_p95": {
+            "score": 0.9999051759034591,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 4.7227111726268964e-05
+          }
+        },
+        "spike_frac": 0.0
+      },
+      "kovasznay_coarse": {
+        "n": 40,
+        "scores": {
+          "p95": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0392874908064204
+          },
+          "p97_5": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.053169936696287834
+          },
+          "p99": {
+            "score": 0.8956588733012676,
+            "tier": "Moderate Admissibility",
+            "below_high": true,
+            "sg": 0.07630342546678547
+          },
+          "plain_p95": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.05151896721133707
+          }
+        },
+        "spike_frac": 0.05
+      },
+      "kovasznay_fine": {
+        "n": 80,
+        "scores": {
+          "p95": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0011749950333769677
+          },
+          "p97_5": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0016121320597936087
+          },
+          "p99": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.002212427107269491
+          },
+          "plain_p95": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0019012500072023023
+          }
+        },
+        "spike_frac": 0.00046875
+      }
+    },
+    "dual_smooth1": {
+      "taylor_green_coarse": {
+        "n": 32,
+        "scores": {
+          "p95": {
+            "score": 0.9988208709904044,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0005162567460207185
+          },
+          "p97_5": {
+            "score": 0.9988208709904044,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0005249254811377741
+          },
+          "p99": {
+            "score": 0.9988208709904044,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0005436234848860548
+          },
+          "plain_p95": {
+            "score": 0.9960781030621663,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.001960716639930054
+          }
+        },
+        "spike_frac": 0.0
+      },
+      "taylor_green_fine": {
+        "n": 64,
+        "scores": {
+          "p95": {
+            "score": 0.99994097697308,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 2.9395347675723317e-05
+          },
+          "p97_5": {
+            "score": 0.9999393616821852,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 3.0199862783318358e-05
+          },
+          "p99": {
+            "score": 0.9999371789704715,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 3.128699280117179e-05
+          },
+          "plain_p95": {
+            "score": 0.9999051759034591,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 4.7227111726268964e-05
+          }
+        },
+        "spike_frac": 0.0
+      },
+      "kovasznay_coarse": {
+        "n": 40,
+        "scores": {
+          "p95": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.039763352996740685
+          },
+          "p97_5": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.04895727837097089
+          },
+          "p99": {
+            "score": 0.8923906377155948,
+            "tier": "Moderate Admissibility",
+            "below_high": true,
+            "sg": 0.07898164924847904
+          },
+          "plain_p95": {
+            "score": 0.909455956062175,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.05151896721133707
+          }
+        },
+        "spike_frac": 0.05
+      },
+      "kovasznay_fine": {
+        "n": 80,
+        "scores": {
+          "p95": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.001104346643427523
+          },
+          "p97_5": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0015093098004305466
+          },
+          "p99": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.00197346923761494
+          },
+          "plain_p95": {
+            "score": 0.9930915599039034,
+            "tier": "High Admissibility",
+            "below_high": false,
+            "sg": 0.0019012500072023023
+          }
+        },
+        "spike_frac": 0.00046875
+      }
+    }
+  },
+  "recommendation": {
+    "boundary_closure": "matching",
+    "safeguard_error_aware": true,
+    "safeguard_percentile": 97.5,
+    "eps_mode": "order",
+    "smooth_radius": 0,
+    "reason": "ea_order_p97_5 detects sharp perts \u2265 plain p95 and keeps clean TG/Kov High; prefer highest percentile, then order-diff \u03b5, then unsmoothed.",
+    "winning_config": "ea_order_p97_5",
+    "bc_aware_kov_boundary_rms_n48": 9.681544523689744e-09,
+    "bc_aware_fixed": true,
+    "note_defaults_not_switched": true
+  },
+  "closure_path_b_kovasznay_coarse": [
+    {
+      "closure": "matching",
+      "spike_frac": 0.05,
+      "tiers": {
+        "95.0": "High Admissibility",
+        "97.5": "Low Admissibility",
+        "99.0": "Low Admissibility"
+      },
+      "max_res": 0.6658882158328314
+    },
+    {
+      "closure": "order_reduced",
+      "spike_frac": 0.068125,
+      "tiers": {
+        "95.0": "Moderate Admissibility",
+        "97.5": "Moderate Admissibility",
+        "99.0": "Low Admissibility"
+      },
+      "max_res": 0.49813695314866113
+    },
+    {
+      "closure": "sbp",
+      "spike_frac": 0.068125,
+      "tiers": {
+        "95.0": "Moderate Admissibility",
+        "97.5": "Moderate Admissibility",
+        "99.0": "Low Admissibility"
+      },
+      "max_res": 0.49794936878589213
+    },
+    {
+      "closure": "bc_aware",
+      "spike_frac": 0.05,
+      "tiers": {
+        "95.0": "High Admissibility",
+        "97.5": "Low Admissibility",
+        "99.0": "Low Admissibility"
+      },
+      "max_res": 0.6658882158328276
+    }
+  ]
+}

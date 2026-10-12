@@ -22,7 +22,7 @@ class TestFillPathBLawFD:
         out, w = fill_path_b_derivatives(
             state,
             laws_spec=laws,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
             fill_law_recipes=True,
         )
         assert not w
@@ -41,7 +41,7 @@ class TestFillPathBLawFD:
         out, _ = fill_path_b_derivatives(
             state,
             laws_spec=laws,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
             fill_law_recipes=True,
         )
         assert jnp.allclose(out["phi_laplacian"], sentinel)

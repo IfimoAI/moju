@@ -135,7 +135,7 @@ def test_plan_fourier_with_enrich_no_blocking_for_alpha():
         constant_keys=set(),
         auto_path_b_derivatives=True,
         fill_law_fd=True,
-        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+        path_b_grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
     )
     assert "alpha" not in p.missing_state_direct
     assert not p.has_blocking_gaps()

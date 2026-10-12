@@ -6,11 +6,82 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-11
+
+Major release: Path B derivative defaults and residual scoring defaults change.
+Admissibility **tier cutoffs** are unchanged. See
+[`docs/MIGRATION_1x_to_2.0.md`](docs/MIGRATION_1x_to_2.0.md),
+[`docs/phase_a_fd_impact_report.md`](docs/phase_a_fd_impact_report.md), and
+[`docs/phase_a5_periodic_safeguard.md`](docs/phase_a5_periodic_safeguard.md).
+
+### Breaking
+
+- **`PathBGridConfig.fd_order` / `fd_order_time` default to `4`** (was `None` → `jnp.gradient`).
+  Use `fd_order="legacy"` or `None` for 1.x bit-exact FD fill.
+- **`weighted_norms=True` by default** on `ResidualEngine.compute_residuals`, with a
+  **95th-percentile safeguard**: scoring uses
+  `max(weighted_R_eff, p95(|r|))`. Pass `weighted_norms=False` for 1.x unweighted scoring.
+- Scores/tiers on Path B FD audits can shift (typically lower residual on smooth fields;
+  Kovasznay Path B often Moderate→High under fd4). Supplied-derivative audits are unchanged
+  when derivatives are not overwritten.
+
+### Added
+
+- Fornberg non-uniform FD weights; dedicated second-derivative and mixed stencils;
+  Fornberg one-sided boundary closures at orders 2/4/6 (`boundary_closure="matching"` default;
+  `order_reduced` / `sbp` / `bc_aware` opt-in).
+- Per-axis periodic FD wrap-around stencils (`PathBGridConfig.periodic` bool or sequence;
+  JAX + Torch); never inferred. Spectral still requires all axes periodic.
+- Weighted residual norms (trapezoid / user `point_weights`) with configurable safeguard
+  (`safeguard_percentile` default **95**, or `max` / `worst_region`).
+- Opt-in `safeguard_error_aware` (order-/dual-spacing ε); documented with A4/A5 evidence,
+  **not** the 2.0 default.
+- Safeguard diagnostic warnings when residual max / worst-region would drop below High
+  while the percentile safeguard stays High, and when boundary-stencil spike fractions
+  are material (notes coincidence with derivative-error / resolution-sensor flags).
+  Diagnostics never change tiers.
+- Curvilinear / polar helpers in `moju.monitor.curvilinear` (explicit API; no auto Path B).
+- Resolution sensor diagnostic (`resolution_sensor=True`; never changes tiers), including
+  a Nyquist / grid-scale energy warning (threshold **0.05**).
+- Dual-spacing derivative-error method; analytic Couette / NS helpers.
+- Torch Path B `fd_order` / `fd_order_time` (default 4) and FD stencil parity helpers.
+- Migration guide and Phase A–A5 impact reports.
+
+### Changed
+
+- Default Path B fill accuracy (order 4) and default residual reduction (weighted + p95).
+- Matching second-derivative boundary Fornberg width is `order + 2` so boundary order
+  matches the interior (Phase A5).
+- Docs: `getting_derivatives_right.md`, `VERSIONING.md`, `ROADMAP.md`, `CITATION.cff` (2.0.0).
+
+### Migration
+
+- Reproduce 1.x: `PathBGridConfig(fd_order="legacy", fd_order_time="legacy")` and
+  `weighted_norms=False`, or pin `moju<2`.
+- Noisy field exports: prefer supplied derivatives or `fd_order=2`; avoid `fd_order=6`.
+- Paper Path B with supplied `T_xx`: still High under 2.0; FD refill comparisons are in the
+  impact report.
+- Always declare periodic axes; misdeclaring a periodic axis as bounded inflates
+  boundary residuals.
+
+### Known limitations
+
+- Curvilinear grids are not auto-selected by Path B; call `moju.monitor.curvilinear` explicitly.
+- Weighted scoring requires inferable structured coordinates or user `point_weights`.
+- **Safeguard detection floor:** violations on fewer than about **5%** of points may not
+  lower the tier under p95; use `eval_mask` or region scoring for small critical regions.
+  Narrow Gaussians are not caught by the resolution sensor.
+- **Coarse bounded Path B grids:** boundary rows can approach the p95 tail and lower tiers
+  on clean data; prefer finer grids, supplied derivatives, or a boundary-band `eval_mask`.
+- Region-aware boundary thresholds, revisiting error-aware / higher default percentile,
+  element-wise polynomial differentiation, and weak-form residuals are deferred to 2.1
+  ([`ROADMAP.md`](ROADMAP.md)).
+
 ## [1.4.0] - Unreleased
 
-There are no breaking changes. Existing specs and report schema `1.0` stay valid.
-Diagnostics add optional report sections and warnings; they never change tier cutoffs
-or scoring formulas. Omitting the new kwargs preserves 1.3 behaviour.
+There are no breaking changes relative to 1.3. Diagnostics add optional report sections and
+warnings; they never change tier cutoffs. Omitting the new kwargs preserves 1.3 behaviour.
+Superseded for defaults by 2.0.0; 1.4 features remain in 2.0.
 
 ### Added
 
@@ -26,9 +97,7 @@ or scoring formulas. Omitting the new kwargs preserves 1.3 behaviour.
   and `derivative_error_threshold` (default 0.5) produce per-key error estimates and a
   per-law `residual_may_be_dominated_by_derivative_error` flag. Flags only.
 - **Selectable FD stencil order.** `PathBGridConfig.fd_order` and `fd_order_time` accept
-  2, 4, or 6 (explicit central + one-sided boundaries on uniform grids). Default `None`
-  keeps the legacy `jnp.gradient` path. Spectral fill warns when `periodic=False` or
-  spacing is non-uniform.
+  2, 4, or 6. In 1.4 the default remained `None` (legacy `jnp.gradient`).
 - **Evaluation-point masking.** Optional `eval_mask` excludes points from RMS/max for that
   call; mask statistics appear under `eval_mask` in the report. `boundary_distance_mask`
   helper included.

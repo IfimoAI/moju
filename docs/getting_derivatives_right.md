@@ -56,13 +56,89 @@ $\partial_t$ from the solver when available.
 ## Finite-difference order (Path B)
 
 `PathBGridConfig.fd_order` selects explicit central stencils of order **2, 4, or 6**
-with matching one-sided boundaries on **uniform** grids. The default `fd_order=None`
-keeps the legacy `jnp.gradient` path (unchanged from 1.3). Temporal fill uses
-`fd_order_time` the same way.
+with matching Fornberg one-sided boundaries. **Moju 2.0 defaults to `fd_order=4`**
+(and `fd_order_time=4`). Pass `fd_order="legacy"` or `None` for the 1.x
+`jnp.gradient` path. Second derivatives use **dedicated** stencils (`diff2_uniform`).
 
-Non-uniform spacing is only supported on the legacy path; set `fd_order=None` or
-supply derivatives. Spectral spatial fill still requires `periodic=True` and uniform
-spacing; Moju warns when those guards fail.
+On **non-uniform** structured axes, the same `fd_order` uses Fornberg weights.
+
+### Periodic axes (per-axis declaration)
+
+`PathBGridConfig.periodic` is **never inferred**. Pass:
+
+- `False` (default) — every spatial axis uses boundary closures;
+- `True` — every spatial axis uses wrap-around central FD (or FFT when spectral);
+- a per-axis sequence, e.g. `periodic=(False, True)` for Kovasznay (`x` bounded, `y` periodic).
+
+Misdeclaring a periodic physical axis as bounded applies one-sided closures on a
+wrap-around field and **inflates boundary residuals**. Spectral fill
+(`diff_method="spectral"`) still requires **all** spatial axes declared periodic
+(`periodic=True` or a sequence of all `True`); requesting spectral on a
+non-periodic axis raises `ValueError`.
+
+On **noisy** field exports, higher FD orders amplify noise: prefer `fd_order=2`,
+or supply solver/autodiff derivatives. Avoid order 6 on noisy data.
+
+## Weighted residual norms (2.0 default)
+
+**Default:** area/volume-weighted R_eff (trapezoid from coordinates, or
+`point_weights=`) plus a **95th-percentile safeguard**:
+
+`R_score = max(weighted_R_eff, p95(|r|))`
+
+equivalent to `min(score(weighted), score(p95))`. This keeps scores fair on
+clustered grids while still detecting localized near-wall violations.
+
+- `safeguard_percentile=` (default **95**) or
+  `weighted_safeguard={"method": "percentile", "percentile": …}`.
+- `safeguard_error_aware=True` — opt-in residual / derivative-error normalization
+  (Phase A4/A5 evidence; **not** the 2.0 default).
+- `weighted_norms=False` / `"unweighted"` — 1.x-style unweighted scoring.
+- `weighted_norms="report"` — unweighted scoring; attach `rms_weighted` sidecar.
+- `weighted_safeguard=False` — weighted RMS only (no percentile).
+- `weighted_safeguard={"method": "max"|"percentile"|"worst_region", ...}` — choose
+  another candidate (see the Phase A3–A5 impact reports).
+
+**Detection floor:** violations confined to fewer than about **5%** of evaluation
+points may not drop the tier under p95 (need larger magnitude or a wider band).
+Use `eval_mask` or region scoring (`weighted_safeguard="worst_region"`) for small
+critical regions. The resolution sensor does **not** catch narrow-Gaussian
+perturbations; it targets grid-scale / checkerboard energy.
+
+**Coarse bounded grids:** boundary rows can approach the p95 tail and lower tiers
+on otherwise clean Path B data. Prefer a finer grid, supplied derivatives, or a
+boundary-band `eval_mask`. Always declare periodic axes explicitly — misdeclaring
+a periodic axis as bounded inflates boundary residuals.
+
+When residual max or a worst-region statistic would drop below High while the
+percentile safeguard keeps High, Moju emits a `safeguard_diagnostic` warning
+(log + report). Material boundary-stencil spike fractions also warn, and note
+coincidence with derivative-error or resolution-sensor flags. **Diagnostics never
+change tiers.**
+
+Scattered points: always pass explicit `point_weights`.
+
+## Curvilinear structured grids
+
+For non-rectilinear structured meshes, differentiate in computational coordinates and
+transform with mapping metrics via `moju.monitor.curvilinear` (polar / Taylor–Couette
+example in the Phase A2 tests). This is opt-in and separate from rectilinear Path B
+fill until an auto layout is approved.
+
+## Resolution sensor (diagnostic only)
+
+`resolution_sensor=True` compares two stencil orders on each field and warns when
+interior disagreement is large (derivatives may be unreliable). It also warns when
+Nyquist-bin spectral energy exceeds the documented grid-scale threshold (`0.05` by
+default) — a detection floor for checkerboard / grid-scale artifacts. **Warnings
+never change admissibility tiers.**
+
+## Boundary closures and masking
+
+One-sided closures match the selected `fd_order` but remain the accuracy limiter on
+wall-normal layers (e.g. exponential profiles). When the physics of interest is
+interior, prefer `eval_mask` / `boundary_distance_mask` to exclude a band of width
+roughly `fd_order` points at non-periodic edges.
 
 ## Derivative-error estimates (opt-in)
 
@@ -72,7 +148,7 @@ estimates. For supplied derivatives, pass a second set as `state_pred_alt` (for 
 a coarser spacing). When the estimated derivative contribution is comparable to the
 residual (default ratio ≥ 0.5, configurable via `derivative_error_threshold`), the
 report flags `residual_may_be_dominated_by_derivative_error` for that law. **Flags do
-not change tiers.**
+not change tiers.** Methods: `"stencil_order"` (default), `"dual_spacing"`, or `"both"`.
 
 ## Reading the per-term breakdown
 

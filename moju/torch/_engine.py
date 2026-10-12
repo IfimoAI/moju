@@ -146,6 +146,8 @@ class TorchResidualEngine:
         path_b_fill: bool = False,
         path_b_diff_method: str = "fd",
         path_b_periodic: bool = False,
+        path_b_fd_order: Any = 4,
+        path_b_fd_order_time: Any = 4,
         best_effort: bool = True,
         law_scale_mode: str = "auto",
         state_units: str = "nondimensional",
@@ -176,6 +178,8 @@ class TorchResidualEngine:
         self._path_b_fill = path_b_fill
         self._path_b_diff_method = str(path_b_diff_method)
         self._path_b_periodic = bool(path_b_periodic)
+        self._path_b_fd_order = path_b_fd_order
+        self._path_b_fd_order_time = path_b_fd_order_time
         self._best_effort = best_effort
         self._law_implied_audits = bool(law_implied_audits)
 
@@ -440,6 +444,8 @@ class TorchResidualEngine:
                 constants=self._constants,
                 diff_method=self._path_b_diff_method,  # type: ignore[arg-type]
                 periodic=self._path_b_periodic,
+                fd_order=self._path_b_fd_order,
+                fd_order_time=self._path_b_fd_order_time,
             )
             for w in pb_warns:
                 warnings.warn(f"TorchResidualEngine path_b: {w}", UserWarning, stacklevel=2)
@@ -678,12 +684,26 @@ class TorchResidualEngine:
             nondim_scales=self._scales,
             nondim_scales_overrides=self._nondim_scales_overrides or None,
         )
+        from moju.monitor.path_b_derivatives import PathBGridConfig
+
         residual_dict = jax_engine.compute_residuals(
             state_pred=state_np,
             state_ref=state_ref_np,
             run_mode="eval",
             state_units=eff_state_units,
             law_scale_mode=self._law_scale_mode,
+            auto_path_b_derivatives=(
+                PathBGridConfig(
+                    fd_order=self._path_b_fd_order,
+                    fd_order_time=self._path_b_fd_order_time,
+                    diff_method=self._path_b_diff_method,  # type: ignore[arg-type]
+                    periodic=self._path_b_periodic,
+                )
+                if self._path_b_fill
+                else False
+            ),
+            fill_law_fd=bool(self._path_b_fill),
+            weighted_norms=True,
         )
         log = jax_engine.log
         report = jax_audit(

@@ -1,0 +1,656 @@
+{
+  "phase": "A2",
+  "cases": {
+    "taylor_green_path_b": {
+      "case": "taylor_green_path_b_fd",
+      "legacy": {
+        "overall_score": 0.9536335352818288,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.024070287123322487,
+            "residual_max": 0.09750311076641083,
+            "score": 0.9536335352818288,
+            "tier": "High Admissibility",
+            "residual_rms_weighted": 0.025391146540641785
+          }
+        },
+        "rms_mode": "report",
+        "scoring_uses_weights": false,
+        "fd_order": null
+      },
+      "fd4_unweighted": {
+        "overall_score": 0.9989789144496154,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.0005090013146400452,
+            "residual_max": 0.0020143226720392704,
+            "score": 0.9989789144496154,
+            "tier": "High Admissibility",
+            "residual_rms_weighted": 0.0005879832897335291
+          }
+        },
+        "rms_mode": "report",
+        "scoring_uses_weights": false,
+        "fd_order": 4,
+        "resolution_sensor": {
+          "per_field": {
+            "u": {
+              "shape": [
+                32,
+                32
+              ],
+              "disagreement_reduce": 1.8277677297592163,
+              "threshold": 0.25,
+              "unreliable": true,
+              "edge_max": 1.8277677297592163,
+              "interior_max": 1.8277677297592163
+            },
+            "p": {
+              "shape": [
+                32,
+                32
+              ],
+              "disagreement_reduce": 1.957014560699463,
+              "threshold": 0.25,
+              "unreliable": true,
+              "edge_max": 1.9353134632110596,
+              "interior_max": 1.957014560699463
+            }
+          },
+          "warnings": [
+            "resolution_sensor: field 'u' order-disagreement 1.83 exceeds threshold 0.25 \u2014 derivatives may be unreliable",
+            "resolution_sensor: field 'p' order-disagreement 1.96 exceeds threshold 0.25 \u2014 derivatives may be unreliable"
+          ],
+          "order_hi": 4,
+          "order_lo": 2,
+          "threshold": 0.25,
+          "note": "Diagnostic only; does not change admissibility tiers."
+        }
+      },
+      "fd4_weighted": {
+        "overall_score": 0.9988206589786377,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.0005090013146400452,
+            "residual_max": 0.0020143226720392704,
+            "score": 0.9988206589786377,
+            "tier": "High Admissibility",
+            "residual_rms_weighted": 0.0005879832897335291,
+            "residual_rms_unweighted": 0.0005090013146400452
+          }
+        },
+        "rms_mode": "score",
+        "scoring_uses_weights": true,
+        "fd_order": 4
+      },
+      "tier_changes": []
+    },
+    "kovasznay_path_b": {
+      "case": "kovasznay_path_b_fd",
+      "legacy": {
+        "overall_score": 0.8363602989023857,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.12394001334905624,
+            "residual_max": 0.7129213809967041,
+            "score": 0.8363602989023857,
+            "tier": "Moderate Admissibility",
+            "residual_rms_weighted": 0.16409511864185333
+          }
+        },
+        "rms_mode": "report",
+        "scoring_uses_weights": false,
+        "fd_order": null
+      },
+      "fd4_unweighted": {
+        "overall_score": 0.9107959984115319,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.06414967775344849,
+            "residual_max": 0.6658911108970642,
+            "score": 0.9107959984115319,
+            "tier": "High Admissibility",
+            "residual_rms_weighted": 0.06521021574735641
+          }
+        },
+        "rms_mode": "report",
+        "scoring_uses_weights": false,
+        "fd_order": 4,
+        "resolution_sensor": {
+          "per_field": {
+            "u": {
+              "shape": [
+                40,
+                40
+              ],
+              "disagreement_reduce": 1.7939362525939941,
+              "threshold": 0.25,
+              "unreliable": true,
+              "edge_max": 1.7939362525939941,
+              "interior_max": 0.1301323026418686
+            },
+            "p": {
+              "shape": [
+                40,
+                40
+              ],
+              "disagreement_reduce": 1.996854305267334,
+              "threshold": 0.25,
+              "unreliable": true,
+              "edge_max": 1.996854305267334,
+              "interior_max": 1.9688656330108643
+            }
+          },
+          "warnings": [
+            "resolution_sensor: field 'u' order-disagreement 1.79 exceeds threshold 0.25 \u2014 derivatives may be unreliable",
+            "resolution_sensor: field 'p' order-disagreement 2 exceeds threshold 0.25 \u2014 derivatives may be unreliable"
+          ],
+          "order_hi": 4,
+          "order_lo": 2,
+          "threshold": 0.25,
+          "note": "Diagnostic only; does not change admissibility tiers."
+        }
+      },
+      "fd4_weighted": {
+        "overall_score": 0.9094548444990956,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.06414967775344849,
+            "residual_max": 0.6658911108970642,
+            "score": 0.9094548444990956,
+            "tier": "High Admissibility",
+            "residual_rms_weighted": 0.06521021574735641,
+            "residual_rms_unweighted": 0.06414972245693207
+          }
+        },
+        "rms_mode": "score",
+        "scoring_uses_weights": true,
+        "fd_order": 4
+      },
+      "tier_changes": [
+        {
+          "compare": "fd4_unweighted",
+          "legacy_tier": "Moderate Admissibility",
+          "new_tier": "High Admissibility",
+          "legacy_score": 0.8363602989023857,
+          "new_score": 0.9107959984115319
+        },
+        {
+          "compare": "fd4_weighted",
+          "legacy_tier": "Moderate Admissibility",
+          "new_tier": "High Admissibility",
+          "legacy_score": 0.8363602989023857,
+          "new_score": 0.9094548444990956
+        }
+      ]
+    },
+    "laplace_1d_path_b": {
+      "case": "laplace_1d_sine_path_b",
+      "legacy": {
+        "overall_score": 0.8888888888888888,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "laplace_equation": {
+            "residual_rms": 6.918525218963623,
+            "residual_max": 9.858319282531738,
+            "score": 0.8888888888888888,
+            "tier": "Moderate Admissibility",
+            "residual_rms_weighted": 6.97314977645874
+          }
+        },
+        "rms_mode": "report",
+        "scoring_uses_weights": false,
+        "fd_order": null
+      },
+      "fd4_unweighted": {
+        "overall_score": 0.8888888888888888,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "laplace_equation": {
+            "residual_rms": 6.924082279205322,
+            "residual_max": 9.866488456726074,
+            "score": 0.8888888888888888,
+            "tier": "Moderate Admissibility",
+            "residual_rms_weighted": 6.978819847106934
+          }
+        },
+        "rms_mode": "report",
+        "scoring_uses_weights": false,
+        "fd_order": 4,
+        "resolution_sensor": {
+          "per_field": {
+            "phi": {
+              "shape": [
+                64
+              ],
+              "disagreement_reduce": 0.0008283471688628197,
+              "threshold": 0.25,
+              "unreliable": false,
+              "edge_max": 0.0008283471688628197,
+              "interior_max": 0.00042493443470448256
+            }
+          },
+          "warnings": [],
+          "order_hi": 4,
+          "order_lo": 2,
+          "threshold": 0.25,
+          "note": "Diagnostic only; does not change admissibility tiers."
+        }
+      },
+      "fd4_weighted": {
+        "overall_score": 0.8881087948874361,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "laplace_equation": {
+            "residual_rms": 6.924082279205322,
+            "residual_max": 9.866488456726074,
+            "score": 0.8881087948874361,
+            "tier": "Moderate Admissibility",
+            "residual_rms_weighted": 6.978819847106934,
+            "residual_rms_unweighted": 6.924082279205322
+          }
+        },
+        "rms_mode": "score",
+        "scoring_uses_weights": true,
+        "fd_order": 4
+      },
+      "tier_changes": []
+    },
+    "controls_perturbed": {
+      "tg_perturbed_p_grad": {
+        "overall_score": 0.7411741086347008,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.20000040531158447,
+            "residual_max": 0.2000001221895218,
+            "score": 0.7411741086347008,
+            "tier": "Moderate Admissibility"
+          }
+        },
+        "rms_mode": null,
+        "scoring_uses_weights": null,
+        "stays_below_high": true
+      },
+      "kovasznay_perturbed_u": {
+        "overall_score": 0.8761004823346361,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.11661025136709213,
+            "residual_max": 0.48184823989868164,
+            "score": 0.8761004823346361,
+            "tier": "Moderate Admissibility"
+          }
+        },
+        "rms_mode": null,
+        "scoring_uses_weights": null,
+        "stays_below_high": true
+      }
+    },
+    "curvilinear_taylor_couette": {
+      "resolutions": [
+        {
+          "overall_score": 0.9993815016938062,
+          "overall_tier": "High Admissibility",
+          "laws": {
+            "momentum_navier_stokes": {
+              "residual_rms": 0.00023279647575691342,
+              "residual_max": 0.001277359202504158,
+              "score": 0.9993815016938062,
+              "tier": "High Admissibility",
+              "residual_rms_weighted": 0.00021087174536660314
+            }
+          },
+          "rms_mode": "report",
+          "scoring_uses_weights": false,
+          "nr": 16,
+          "nt": 24,
+          "grad_err_interior": 3.5643577575683594e-05
+        },
+        {
+          "overall_score": 0.9998760903774625,
+          "overall_tier": "High Admissibility",
+          "laws": {
+            "momentum_navier_stokes": {
+              "residual_rms": 4.4985790736973286e-05,
+              "residual_max": 0.0002995514078065753,
+              "score": 0.9998760903774625,
+              "tier": "High Admissibility",
+              "residual_rms_weighted": 3.987988020526245e-05
+            }
+          },
+          "rms_mode": "report",
+          "scoring_uses_weights": false,
+          "nr": 24,
+          "nt": 36,
+          "grad_err_interior": 8.940696716308594e-06
+        },
+        {
+          "overall_score": 0.9999610263300561,
+          "overall_tier": "High Admissibility",
+          "laws": {
+            "momentum_navier_stokes": {
+              "residual_rms": 1.3899423720431514e-05,
+              "residual_max": 0.0001116114726755768,
+              "score": 0.9999610263300561,
+              "tier": "High Admissibility",
+              "residual_rms_weighted": 1.2280749615456443e-05
+            }
+          },
+          "rms_mode": "report",
+          "scoring_uses_weights": false,
+          "nr": 32,
+          "nt": 48,
+          "grad_err_interior": 6.318092346191406e-06
+        }
+      ],
+      "grad_error_decreases": true
+    },
+    "second_derivative_convergence": {
+      "tg_lap_order_2": {
+        "err_n24": 0.011374115943908691,
+        "err_n48": 0.002856612205505371,
+        "converges": true
+      },
+      "tg_lap_order_4": {
+        "err_n24": 0.0001035928726196289,
+        "err_n48": 5.030632019042969e-05,
+        "converges": true
+      },
+      "tg_lap_order_6": {
+        "err_n24": 6.616115570068359e-06,
+        "err_n48": 5.841255187988281e-05,
+        "converges": false
+      }
+    },
+    "w2_paper_path_b": {
+      "supplied_pinn": {
+        "overall_score": 0.9999994340039925,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "fourier_conduction": {
+            "residual_rms": 8.929634350351989e-05,
+            "residual_max": 0.0004757824935950339,
+            "score": 0.9999994340039925,
+            "tier": "High Admissibility",
+            "residual_rms_weighted": 0.00010557806672295555
+          }
+        },
+        "rms_mode": "report",
+        "scoring_uses_weights": false,
+        "note": "PINN-supplied T_xx (paper Path B); fd_order irrelevant"
+      },
+      "fd_legacy_unweighted": {
+        "overall_score": 0.9999002226821588,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "fourier_conduction": {
+            "residual_rms": 0.01574309915304184,
+            "residual_max": 0.34154030680656433,
+            "score": 0.9999002226821588,
+            "tier": "High Admissibility",
+            "residual_rms_weighted": 0.12584006786346436
+          }
+        },
+        "rms_mode": "report",
+        "scoring_uses_weights": false
+      },
+      "fd4_unweighted": {
+        "overall_score": 0.9996411383860077,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "fourier_conduction": {
+            "residual_rms": 0.06216822564601898,
+            "residual_max": 0.8642946481704712,
+            "score": 0.9996411383860077,
+            "tier": "High Admissibility",
+            "residual_rms_weighted": 0.26627597212791443
+          }
+        },
+        "rms_mode": "report",
+        "scoring_uses_weights": false
+      },
+      "fd4_weighted": {
+        "overall_score": 0.9996578470367676,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "fourier_conduction": {
+            "residual_rms": 0.06216822564601898,
+            "residual_max": 0.8642946481704712,
+            "score": 0.9996578470367676,
+            "tier": "High Admissibility",
+            "residual_rms_weighted": 0.05927267298102379,
+            "residual_rms_unweighted": 0.06216822564601898
+          }
+        },
+        "rms_mode": "score",
+        "scoring_uses_weights": true
+      }
+    }
+  },
+  "all_tier_changes": [
+    {
+      "case": "kovasznay_path_b",
+      "compare": "fd4_unweighted",
+      "legacy_tier": "Moderate Admissibility",
+      "new_tier": "High Admissibility",
+      "legacy_score": 0.8363602989023857,
+      "new_score": 0.9107959984115319
+    },
+    {
+      "case": "kovasznay_path_b",
+      "compare": "fd4_weighted",
+      "legacy_tier": "Moderate Admissibility",
+      "new_tier": "High Admissibility",
+      "legacy_score": 0.8363602989023857,
+      "new_score": 0.9094548444990956
+    }
+  ],
+  "phase_a_cases": {
+    "tg_supplied_exact": {
+      "legacy": {
+        "overall_score": 0.999999946462379,
+        "overall_tier": "High Admissibility"
+      },
+      "fd4": {
+        "overall_score": 0.999999946462379,
+        "overall_tier": "High Admissibility"
+      },
+      "tier_changes": [],
+      "note": "supplied derivatives; Path B must not overwrite \u2014 scores identical",
+      "scores_equal": true
+    },
+    "taylor_green_path_b": {
+      "legacy": {
+        "case": "taylor_green_path_b_fd/legacy",
+        "fd_order": null,
+        "overall_score": 0.9536335352818288,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.024070287123322487,
+            "residual_max": 0.09750311076641083,
+            "score": 0.9536335352818288,
+            "tier": "High Admissibility"
+          }
+        },
+        "exact_residual_max": 1.0998195421052515e-07,
+        "closeness": {
+          "momentum_navier_stokes": 0.09750300078445662
+        }
+      },
+      "fd4": {
+        "case": "taylor_green_path_b_fd/fd4",
+        "fd_order": 4,
+        "overall_score": 0.9989789343354893,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.000508991361130029,
+            "residual_max": 0.0020065600983798504,
+            "score": 0.9989789343354893,
+            "tier": "High Admissibility"
+          }
+        },
+        "exact_residual_max": 1.0998195421052515e-07,
+        "closeness": {
+          "momentum_navier_stokes": 0.00200645011642564
+        }
+      },
+      "tier_changes": []
+    },
+    "kovasznay_path_b": {
+      "legacy": {
+        "case": "kovasznay_path_b_fd/legacy",
+        "fd_order": null,
+        "overall_score": 0.8363602989023857,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.12394001334905624,
+            "residual_max": 0.7129213809967041,
+            "score": 0.8363602989023857,
+            "tier": "Moderate Admissibility"
+          }
+        },
+        "exact_residual_max": 9.531102023174753e-07,
+        "closeness": {
+          "momentum_navier_stokes": 0.7129204278865018
+        }
+      },
+      "fd4": {
+        "case": "kovasznay_path_b_fd/fd4",
+        "fd_order": 4,
+        "overall_score": 0.9209290807141018,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.05623702332377434,
+            "residual_max": 0.5771285891532898,
+            "score": 0.9209290807141018,
+            "tier": "High Admissibility"
+          }
+        },
+        "exact_residual_max": 9.531102023174753e-07,
+        "closeness": {
+          "momentum_navier_stokes": 0.5771276360430875
+        }
+      },
+      "tier_changes": [
+        {
+          "law": "momentum_navier_stokes",
+          "legacy_tier": "Moderate Admissibility",
+          "fd4_tier": "High Admissibility",
+          "legacy_rms": 0.12394001334905624,
+          "fd4_rms": 0.05623702332377434,
+          "legacy_score": 0.8363602989023857,
+          "fd4_score": 0.9209290807141018
+        },
+        {
+          "law": "__overall__",
+          "legacy_tier": "Moderate Admissibility",
+          "fd4_tier": "High Admissibility",
+          "legacy_score": 0.8363602989023857,
+          "fd4_score": 0.9209290807141018
+        }
+      ]
+    },
+    "laplace_1d_path_b": {
+      "legacy": {
+        "case": "laplace_1d_sine_path_b/legacy",
+        "fd_order": null,
+        "overall_score": 0.8888888888888888,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "laplace_equation": {
+            "residual_rms": 6.918525218963623,
+            "residual_max": 9.858319282531738,
+            "score": 0.8888888888888888,
+            "tier": "Moderate Admissibility"
+          }
+        }
+      },
+      "fd4": {
+        "case": "laplace_1d_sine_path_b/fd4",
+        "fd_order": 4,
+        "overall_score": 0.8888888888888888,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "laplace_equation": {
+            "residual_rms": 6.924122333526611,
+            "residual_max": 9.866495132446289,
+            "score": 0.8888888888888888,
+            "tier": "Moderate Admissibility"
+          }
+        }
+      },
+      "tier_changes": []
+    },
+    "paper_style_fourier_path_b": {
+      "legacy": {
+        "case": "paper_style_fourier_path_b/legacy",
+        "fd_order": null,
+        "overall_score": 0.987792957009322,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "fourier_conduction": {
+            "residual_rms": 0.8136886358261108,
+            "residual_max": 4.11822509765625,
+            "score": 0.987792957009322,
+            "tier": "High Admissibility"
+          }
+        },
+        "exact_residual_max": 6.065238267183304e-07,
+        "closeness": {
+          "fourier_conduction": 4.118224491132423
+        }
+      },
+      "fd4": {
+        "case": "paper_style_fourier_path_b/fd4",
+        "fd_order": 4,
+        "overall_score": 0.9994660488759154,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "fourier_conduction": {
+            "residual_rms": 0.03517605736851692,
+            "residual_max": 0.23096123337745667,
+            "score": 0.9994660488759154,
+            "tier": "High Admissibility"
+          }
+        },
+        "exact_residual_max": 6.065238267183304e-07,
+        "closeness": {
+          "fourier_conduction": 0.23096062685362995
+        }
+      },
+      "tier_changes": []
+    }
+  },
+  "phase_a_tier_changes": [
+    {
+      "case": "kovasznay_path_b",
+      "law": "momentum_navier_stokes",
+      "legacy_tier": "Moderate Admissibility",
+      "fd4_tier": "High Admissibility",
+      "legacy_rms": 0.12394001334905624,
+      "fd4_rms": 0.05623702332377434,
+      "legacy_score": 0.8363602989023857,
+      "fd4_score": 0.9209290807141018
+    },
+    {
+      "case": "kovasznay_path_b",
+      "law": "__overall__",
+      "legacy_tier": "Moderate Admissibility",
+      "fd4_tier": "High Admissibility",
+      "legacy_score": 0.8363602989023857,
+      "fd4_score": 0.9209290807141018
+    }
+  ]
+}
