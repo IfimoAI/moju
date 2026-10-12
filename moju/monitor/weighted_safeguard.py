@@ -134,7 +134,17 @@ def worst_region_weighted_rms(
     """Worst area-weighted RMS over tiles and boundary bands (2D spatial)."""
     mag = residual_magnitude(arr)
     w = jnp.asarray(weights, dtype=float)
-    if mag.ndim == 1:
+    # Column fields (n, 1) with 1D weights are 1D spatially — do not treat as 2D
+    # (jnp.where on (n,1) mask with (n,) weights broadcasts to an (n,n) grid).
+    while mag.ndim >= 2 and int(mag.shape[-1]) == 1:
+        if w.ndim == mag.ndim and int(w.shape[-1]) == 1:
+            break
+        mag = mag[..., 0]
+    if mag.ndim == 1 and w.ndim > 1:
+        if int(w.shape[0]) == int(mag.shape[0]):
+            w = jnp.sum(w, axis=tuple(range(1, w.ndim)))
+        else:
+            w = jnp.ones((int(mag.shape[0]),), dtype=w.dtype)
         # 1D: split into tiles along the line + end bands
         n = int(mag.shape[0])
         min_n = max(int(min_region_abs), int(math.ceil(float(min_region_frac) * n)))

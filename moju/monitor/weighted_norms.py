@@ -99,24 +99,76 @@ def weights_from_state(
     return None
 
 
-def weighted_rms(arr: Any, weights: Any) -> jnp.ndarray:
-    """sqrt(sum(w r^2) / sum(w)) with broadcasting; NaN if total weight is 0."""
+def _align_weights_to_residual(
+    arr: Any, weights: Any
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """
+    Align quadrature weights to a residual array for weighted statistics.
+
+    Handles common 2.0 default-path edge cases that must not raise:
+    - scalar residuals (``()``): ignore spatial weights (use weight 1);
+    - trailing singleton columns ``(n, 1)`` with 1D weights ``(n,)``;
+    - overweight grids (e.g. inferred ``(n, n)`` weights vs 1D ``(n,)`` / ``(n, 1)``
+      residual): collapse extra weight axes by summing.
+    """
     a = jnp.asarray(arr)
-    w = jnp.asarray(weights, dtype=a.dtype)
-    # Align weights to leading spatial dims
-    if w.ndim < a.ndim:
-        while w.ndim < a.ndim:
-            # If trailing axis looks like vector components, don't expand into it when
-            # w already matches a.shape[:-1]
-            if a.shape[: w.ndim] == w.shape and a.ndim == w.ndim + 1:
-                break
-            w = w[..., None]
+    w_in = jnp.asarray(weights)
+    w = jnp.asarray(w_in, dtype=a.dtype)
+
+    if a.ndim == 0:
+        return a, jnp.ones((), dtype=a.dtype)
+
+    # Drop trailing singleton axes unless weights are also trailing-singleton with
+    # the same leading shape (true 2D with one column). This turns 1D column
+    # fields ``(n, 1)`` into ``(n,)`` even when overweight 2D weights ``(n, n)``
+    # were inferred.
+    while a.ndim >= 2 and int(a.shape[-1]) == 1:
+        if (
+            w.ndim == a.ndim
+            and int(w.shape[-1]) == 1
+            and tuple(a.shape[:-1]) == tuple(w.shape[:-1])
+        ):
+            break
+        if tuple(w.shape) == tuple(a.shape):
+            break
+        a = a[..., 0]
+
+    # Vector residual: Euclidean magnitude over the last axis when weights match
+    # the leading spatial shape.
+    if w.ndim == a.ndim - 1 and a.shape[: w.ndim] == w.shape:
+        a = jnp.sqrt(jnp.sum(jnp.square(a), axis=-1) + 1e-30)
+
+    # Weights have extra trailing spatial dims (mis-inferred mesh): marginalize.
+    if w.ndim > a.ndim:
+        if a.ndim >= 1 and int(w.shape[0]) == int(a.shape[0]):
+            # If leading dims already match residual, sum the surplus axes.
+            if tuple(a.shape) == tuple(w.shape[: a.ndim]):
+                w = jnp.sum(w, axis=tuple(range(a.ndim, w.ndim)))
+            else:
+                w = jnp.sum(w, axis=tuple(range(1, w.ndim)))
+        else:
+            raise ValueError(
+                f"weights shape {tuple(w_in.shape)} incompatible with residual {tuple(a.shape)}"
+            )
+
+    # Expand weights into trailing component dims when needed.
+    while w.ndim < a.ndim:
+        if a.shape[: w.ndim] == w.shape and a.ndim == w.ndim + 1:
+            break
+        w = w[..., None]
+
     try:
         w = jnp.broadcast_to(w, a.shape)
     except Exception as err:  # noqa: BLE001
         raise ValueError(
-            f"weights shape {jnp.asarray(weights).shape} incompatible with residual {a.shape}"
+            f"weights shape {tuple(w_in.shape)} incompatible with residual {tuple(a.shape)}"
         ) from err
+    return a, w
+
+
+def weighted_rms(arr: Any, weights: Any) -> jnp.ndarray:
+    """sqrt(sum(w r^2) / sum(w)) with broadcasting; NaN if total weight is 0."""
+    a, w = _align_weights_to_residual(arr, weights)
     # Flatten
     af = a.ravel()
     wf = w.ravel()
@@ -131,18 +183,10 @@ def weighted_rms(arr: Any, weights: Any) -> jnp.ndarray:
 
 def weighted_max_abs(arr: Any, weights: Any) -> jnp.ndarray:
     """max |r| over points with positive weight (unweighted among kept points)."""
-    a = jnp.asarray(arr)
-    w = jnp.asarray(weights)
-    if w.ndim < a.ndim and a.shape[: w.ndim] == w.shape:
-        # component axis: any positive weight on the spatial point keeps it
-        mag = jnp.sqrt(jnp.sum(jnp.square(a), axis=-1) + 1e-30)
-        keep = w > 0
-        vals = jnp.where(keep, mag, 0.0)
-        return jnp.max(vals)
     try:
-        w = jnp.broadcast_to(w, a.shape)
-    except Exception:  # noqa: BLE001
-        return jnp.max(jnp.abs(a))
+        a, w = _align_weights_to_residual(arr, weights)
+    except ValueError:
+        return jnp.max(jnp.abs(jnp.asarray(arr)))
     keep = w > 0
     return jnp.max(jnp.where(keep, jnp.abs(a), 0.0))
 
@@ -166,17 +210,7 @@ def weighted_r_eff_scalar(
 
     When ``q_power != 0``, applies the same Q^p factor using weighted means.
     """
-    a = jnp.asarray(x)
-    w = jnp.asarray(weights, dtype=a.dtype)
-    if w.ndim < a.ndim and a.shape[: w.ndim] == w.shape and a.ndim == w.ndim + 1:
-        # Vector residual: reduce components first (Euclidean), then weight spatially
-        a = jnp.sqrt(jnp.sum(jnp.square(a), axis=-1) + 1e-30)
-    try:
-        w = jnp.broadcast_to(w, a.shape)
-    except Exception as err:  # noqa: BLE001
-        raise ValueError(
-            f"weights shape {jnp.asarray(weights).shape} incompatible with residual {a.shape}"
-        ) from err
+    a, w = _align_weights_to_residual(x, weights)
     af = a.ravel()
     wf = w.ravel()
     finite = jnp.isfinite(af) & jnp.isfinite(wf) & (wf > 0)
