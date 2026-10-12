@@ -1,0 +1,202 @@
+{
+  "cases": {
+    "tg_supplied_exact": {
+      "legacy": {
+        "overall_score": 0.999999946462379,
+        "overall_tier": "High Admissibility"
+      },
+      "fd4": {
+        "overall_score": 0.999999946462379,
+        "overall_tier": "High Admissibility"
+      },
+      "tier_changes": [],
+      "note": "supplied derivatives; Path B must not overwrite \u2014 scores identical",
+      "scores_equal": true
+    },
+    "taylor_green_path_b": {
+      "legacy": {
+        "case": "taylor_green_path_b_fd/legacy",
+        "fd_order": null,
+        "overall_score": 0.9536335352818288,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.024070287123322487,
+            "residual_max": 0.09750311076641083,
+            "score": 0.9536335352818288,
+            "tier": "High Admissibility"
+          }
+        },
+        "exact_residual_max": 1.0998195421052515e-07,
+        "closeness": {
+          "momentum_navier_stokes": 0.09750300078445662
+        }
+      },
+      "fd4": {
+        "case": "taylor_green_path_b_fd/fd4",
+        "fd_order": 4,
+        "overall_score": 0.9989789343354893,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.000508991361130029,
+            "residual_max": 0.0020065600983798504,
+            "score": 0.9989789343354893,
+            "tier": "High Admissibility"
+          }
+        },
+        "exact_residual_max": 1.0998195421052515e-07,
+        "closeness": {
+          "momentum_navier_stokes": 0.00200645011642564
+        }
+      },
+      "tier_changes": []
+    },
+    "kovasznay_path_b": {
+      "legacy": {
+        "case": "kovasznay_path_b_fd/legacy",
+        "fd_order": null,
+        "overall_score": 0.8363602989023857,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.12394001334905624,
+            "residual_max": 0.7129213809967041,
+            "score": 0.8363602989023857,
+            "tier": "Moderate Admissibility"
+          }
+        },
+        "exact_residual_max": 9.531102023174753e-07,
+        "closeness": {
+          "momentum_navier_stokes": 0.7129204278865018
+        }
+      },
+      "fd4": {
+        "case": "kovasznay_path_b_fd/fd4",
+        "fd_order": 4,
+        "overall_score": 0.9209290807141018,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "momentum_navier_stokes": {
+            "residual_rms": 0.05623702332377434,
+            "residual_max": 0.5771285891532898,
+            "score": 0.9209290807141018,
+            "tier": "High Admissibility"
+          }
+        },
+        "exact_residual_max": 9.531102023174753e-07,
+        "closeness": {
+          "momentum_navier_stokes": 0.5771276360430875
+        }
+      },
+      "tier_changes": [
+        {
+          "law": "momentum_navier_stokes",
+          "legacy_tier": "Moderate Admissibility",
+          "fd4_tier": "High Admissibility",
+          "legacy_rms": 0.12394001334905624,
+          "fd4_rms": 0.05623702332377434,
+          "legacy_score": 0.8363602989023857,
+          "fd4_score": 0.9209290807141018
+        },
+        {
+          "law": "__overall__",
+          "legacy_tier": "Moderate Admissibility",
+          "fd4_tier": "High Admissibility",
+          "legacy_score": 0.8363602989023857,
+          "fd4_score": 0.9209290807141018
+        }
+      ]
+    },
+    "laplace_1d_path_b": {
+      "legacy": {
+        "case": "laplace_1d_sine_path_b/legacy",
+        "fd_order": null,
+        "overall_score": 0.8888888888888888,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "laplace_equation": {
+            "residual_rms": 6.918525218963623,
+            "residual_max": 9.858319282531738,
+            "score": 0.8888888888888888,
+            "tier": "Moderate Admissibility"
+          }
+        }
+      },
+      "fd4": {
+        "case": "laplace_1d_sine_path_b/fd4",
+        "fd_order": 4,
+        "overall_score": 0.8888888888888888,
+        "overall_tier": "Moderate Admissibility",
+        "laws": {
+          "laplace_equation": {
+            "residual_rms": 6.924122333526611,
+            "residual_max": 9.866495132446289,
+            "score": 0.8888888888888888,
+            "tier": "Moderate Admissibility"
+          }
+        }
+      },
+      "tier_changes": []
+    },
+    "paper_style_fourier_path_b": {
+      "legacy": {
+        "case": "paper_style_fourier_path_b/legacy",
+        "fd_order": null,
+        "overall_score": 0.987792957009322,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "fourier_conduction": {
+            "residual_rms": 0.8136886358261108,
+            "residual_max": 4.11822509765625,
+            "score": 0.987792957009322,
+            "tier": "High Admissibility"
+          }
+        },
+        "exact_residual_max": 6.065238267183304e-07,
+        "closeness": {
+          "fourier_conduction": 4.118224491132423
+        }
+      },
+      "fd4": {
+        "case": "paper_style_fourier_path_b/fd4",
+        "fd_order": 4,
+        "overall_score": 0.9994660488759154,
+        "overall_tier": "High Admissibility",
+        "laws": {
+          "fourier_conduction": {
+            "residual_rms": 0.03517605736851692,
+            "residual_max": 0.23096123337745667,
+            "score": 0.9994660488759154,
+            "tier": "High Admissibility"
+          }
+        },
+        "exact_residual_max": 6.065238267183304e-07,
+        "closeness": {
+          "fourier_conduction": 0.23096062685362995
+        }
+      },
+      "tier_changes": []
+    }
+  },
+  "all_tier_changes": [
+    {
+      "case": "kovasznay_path_b",
+      "law": "momentum_navier_stokes",
+      "legacy_tier": "Moderate Admissibility",
+      "fd4_tier": "High Admissibility",
+      "legacy_rms": 0.12394001334905624,
+      "fd4_rms": 0.05623702332377434,
+      "legacy_score": 0.8363602989023857,
+      "fd4_score": 0.9209290807141018
+    },
+    {
+      "case": "kovasznay_path_b",
+      "law": "__overall__",
+      "legacy_tier": "Moderate Admissibility",
+      "fd4_tier": "High Admissibility",
+      "legacy_score": 0.8363602989023857,
+      "fd4_score": 0.9209290807141018
+    }
+  ]
+}

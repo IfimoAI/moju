@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 import torch
 
+# re-export for callers
+
 # Fields for which we auto-fill spatial grad / laplacian.
 # Each entry: (primitive_key, grad_key, laplacian_key)
 _SPATIAL_FILL_RECIPES: List[Tuple[str, str, str]] = [
@@ -112,8 +114,19 @@ def _spectral_diff_along_axis(
     return torch.moveaxis(du, -1, axis)
 
 
-def _laplacian_torch_fd(f: torch.Tensor, sp: List[float]) -> torch.Tensor:
+def _laplacian_torch_fd(
+    f: torch.Tensor,
+    sp: List[float],
+    *,
+    fd_order: Optional[int] = None,
+    periodic: Any = False,
+) -> torch.Tensor:
     """Sum of second spatial derivatives (FD)."""
+    from moju.torch._fd_stencils import effective_fd_order, laplacian_uniform_nd_torch
+
+    order = effective_fd_order(fd_order)
+    if order is not None:
+        return laplacian_uniform_nd_torch(f, sp, order=order, periodic=periodic)
     lap = torch.zeros_like(f)
     for dim_idx, s in enumerate(sp):
         g = torch.gradient(f, spacing=[s], dim=[dim_idx])[0]
@@ -130,6 +143,13 @@ def _laplacian_torch_spectral(f: torch.Tensor, coords: List[torch.Tensor]) -> to
     return lap
 
 
+def _all_axes_periodic(periodic: Any, n_axes: int) -> bool:
+    from moju.monitor.fd_stencils import _normalize_periodic_flags
+
+    flags = _normalize_periodic_flags(periodic, n_axes)
+    return bool(flags) and all(flags)
+
+
 def fill_path_b_derivatives_torch(
     state: Dict[str, Any],
     *,
@@ -138,7 +158,9 @@ def fill_path_b_derivatives_torch(
     coord_keys: Tuple[str, ...] = ("x", "y", "z"),
     copy: bool = True,
     diff_method: Literal["fd", "spectral"] = "fd",
-    periodic: bool = False,
+    periodic: Any = False,
+    fd_order: Any = 4,
+    fd_order_time: Any = 4,
 ) -> Tuple[Dict[str, Any], List[str]]:
     """
     Fill missing derivative keys in *state* using FD or periodic spectral spatial ops.
@@ -146,60 +168,82 @@ def fill_path_b_derivatives_torch(
     Only keys already absent from *state* are filled; existing keys are never
     overwritten. Temporal ``*_t`` always uses FD.
 
-    Parameters
-    ----------
-    state:
-        State dict containing primitive fields and (optionally) coordinate
-        tensors.  Values may be ``torch.Tensor`` or array-like.
-    laws_spec:
-        Law specs (used for future recipe expansion; currently ignored).
-    constants:
-        Engine constants (not used for derivative fill).
-    coord_keys:
-        Names of spatial coordinate tensors in *state* (default ``x``, ``y``, ``z``).
-    copy:
-        If ``True`` (default), return a new dict; otherwise mutate in-place.
-    diff_method:
-        ``\"fd\"`` (default) or ``\"spectral\"`` (requires ``periodic=True``).
-    periodic:
-        Required ``True`` when ``diff_method=\"spectral\"``.
+    ``periodic`` may be a bool or per-axis sequence (never inferred). Spectral
+    requires every spatial axis declared periodic.
 
-    Returns
-    -------
-    (new_state, warnings)
+    ``fd_order`` / ``fd_order_time`` default to **4** (Moju 2.0). Pass ``None`` or
+    ``\"legacy\"`` for ``torch.gradient`` (1.x-style).
     """
-    if diff_method == "spectral" and not periodic:
-        raise ValueError(
-            "diff_method='spectral' requires periodic=True "
-            "(periodic Fourier differentiation on a structured grid)"
-        )
+    from moju.monitor.fd_stencils import _normalize_periodic_flags
+    from moju.torch._fd_stencils import (
+        diff1_uniform_torch,
+        effective_fd_order,
+    )
+
+    if diff_method == "spectral":
+        # Defer length check until n_spatial is known; bool False fails immediately.
+        if isinstance(periodic, bool) or periodic is None:
+            if not periodic:
+                raise ValueError(
+                    "diff_method='spectral' requires periodic=True "
+                    "(periodic Fourier differentiation on a structured grid)"
+                )
     if diff_method not in ("fd", "spectral"):
         raise ValueError(f"diff_method must be 'fd' or 'spectral', got {diff_method!r}")
 
     out: Dict[str, Any] = dict(state) if copy else state
     warn_list: List[str] = []
     _ = laws_spec, constants  # API parity with JAX fill
+    order = effective_fd_order(fd_order)
+    order_t = effective_fd_order(fd_order_time)
 
-    # Collect coordinate tensors and their spacings
+    def _axis_coord_1d(c: torch.Tensor, axis: int) -> torch.Tensor:
+        """Recover a 1D axis from a rectilinear meshgrid coordinate array."""
+        if c.ndim == 1:
+            return c.reshape(-1)
+        # indexing='ij': x varies along axis 0, y along axis 1, ...
+        if axis == 0:
+            line = c[(slice(None),) + (0,) * (c.ndim - 1)]
+        else:
+            idx = [0] * c.ndim
+            idx[axis] = slice(None)
+            line = c[tuple(idx)]
+        return line.reshape(-1)
+
+    # Collect coordinate tensors and their spacings (prefer 1D axes from meshgrids)
     coords: List[torch.Tensor] = []
     spacings: List[float] = []
     active_coord_keys: List[str] = []
-    for ck in coord_keys:
-        if ck in out:
-            c = torch.as_tensor(out[ck], dtype=torch.float32)
-            if c.ndim >= 1:
-                coords.append(c)
-                if diff_method == "fd":
-                    spacings.append(_infer_spacing(c.reshape(-1)))
-                else:
-                    try:
-                        spacings.append(_uniform_spacing_or_raise(c.reshape(-1)))
-                    except ValueError as exc:
-                        warn_list.append(f"fill_path_b_derivatives_torch: {ck}: {exc}")
-                        return out, warn_list
-                active_coord_keys.append(ck)
+    present = [ck for ck in coord_keys if ck in out]
+    for axis, ck in enumerate(present):
+        c = torch.as_tensor(out[ck], dtype=torch.float32)
+        if c.ndim < 1:
+            continue
+        try:
+            c1 = _axis_coord_1d(c, axis if c.ndim > 1 else 0)
+        except Exception:  # noqa: BLE001
+            c1 = c.reshape(-1)
+        coords.append(c1)
+        if diff_method == "fd":
+            spacings.append(_infer_spacing(c1))
+        else:
+            try:
+                spacings.append(_uniform_spacing_or_raise(c1))
+            except ValueError as exc:
+                warn_list.append(f"fill_path_b_derivatives_torch: {ck}: {exc}")
+                return out, warn_list
+        active_coord_keys.append(ck)
 
     n_spatial = len(coords)
+    if diff_method == "spectral" and n_spatial > 0 and not _all_axes_periodic(periodic, n_spatial):
+        raise ValueError(
+            "diff_method='spectral' requires periodic=True "
+            "(or a per-axis sequence of all True); spectral differentiation is "
+            "not allowed on an axis not declared periodic"
+        )
+    pflags = (
+        _normalize_periodic_flags(periodic, n_spatial) if n_spatial > 0 else ()
+    )
 
     def _grad_and_laplacian(
         field: torch.Tensor,
@@ -234,9 +278,23 @@ def fill_path_b_derivatives_torch(
                                 g_parts.append(_spectral_diff_along_axis(comp, dim_idx, L, order=1))
                             grad_components.append(torch.stack(g_parts, dim=-1))
                         else:
-                            g_parts = torch.gradient(
-                                comp, spacing=spacings, dim=list(range(n_spatial))
-                            )
+                            if order is not None:
+                                g_parts = [
+                                    diff1_uniform_torch(
+                                        comp,
+                                        float(spacings[dim_idx]),
+                                        order=order,
+                                        axis=dim_idx,
+                                        periodic=pflags[dim_idx],
+                                    )
+                                    for dim_idx in range(n_spatial)
+                                ]
+                            else:
+                                g_parts = list(
+                                    torch.gradient(
+                                        comp, spacing=spacings, dim=list(range(n_spatial))
+                                    )
+                                )
                             grad_components.append(torch.stack(g_parts, dim=-1))
                     out[grad_key] = torch.stack(grad_components, dim=-2)
                 else:
@@ -247,7 +305,21 @@ def fill_path_b_derivatives_torch(
                             g_parts.append(_spectral_diff_along_axis(f, dim_idx, L, order=1))
                         out[grad_key] = torch.stack(g_parts, dim=-1)
                     else:
-                        g_parts = torch.gradient(f, spacing=spacings, dim=list(range(n_spatial)))
+                        if order is not None:
+                            g_parts = [
+                                diff1_uniform_torch(
+                                    f,
+                                    float(spacings[dim_idx]),
+                                    order=order,
+                                    axis=dim_idx,
+                                    periodic=pflags[dim_idx],
+                                )
+                                for dim_idx in range(n_spatial)
+                            ]
+                        else:
+                            g_parts = list(
+                                torch.gradient(f, spacing=spacings, dim=list(range(n_spatial)))
+                            )
                         out[grad_key] = torch.stack(g_parts, dim=-1)
             except Exception as exc:  # noqa: BLE001
                 warn_list.append(f"fill_path_b_derivatives_torch: {grad_key}: {exc}")
@@ -261,14 +333,18 @@ def fill_path_b_derivatives_torch(
                         if diff_method == "spectral":
                             lap = _laplacian_torch_spectral(comp, coords)
                         else:
-                            lap = _laplacian_torch_fd(comp, spacings)
+                            lap = _laplacian_torch_fd(
+                                comp, spacings, fd_order=order, periodic=pflags
+                            )
                         lap_components.append(lap)
                     out[lap_key] = torch.stack(lap_components, dim=-1)
                 else:
                     if diff_method == "spectral":
                         out[lap_key] = _laplacian_torch_spectral(f, coords)
                     else:
-                        out[lap_key] = _laplacian_torch_fd(f, spacings)
+                        out[lap_key] = _laplacian_torch_fd(
+                            f, spacings, fd_order=order, periodic=pflags
+                        )
             except Exception as exc:  # noqa: BLE001
                 warn_list.append(f"fill_path_b_derivatives_torch: {lap_key}: {exc}")
 
@@ -289,8 +365,13 @@ def fill_path_b_derivatives_torch(
             if prim_key in out and t_key not in out:
                 f = torch.as_tensor(out[prim_key], dtype=torch.float32)
                 try:
-                    dt_parts = torch.gradient(f, spacing=[t_spacing], dim=[0])
-                    out[t_key] = dt_parts[0]
+                    if order_t is not None:
+                        out[t_key] = diff1_uniform_torch(
+                            f, float(t_spacing), order=order_t, axis=0
+                        )
+                    else:
+                        dt_parts = torch.gradient(f, spacing=[t_spacing], dim=[0])
+                        out[t_key] = dt_parts[0]
                 except Exception as exc:  # noqa: BLE001
                     warn_list.append(
                         f"fill_path_b_derivatives_torch: {t_key}: {exc}"

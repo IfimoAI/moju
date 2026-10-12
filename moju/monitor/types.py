@@ -294,6 +294,12 @@ class AuditReport(TypedDict, total=False):
     derivative_provenance: Dict[str, str]
     law_sources: Dict[str, Dict[str, str]]
     execution: str
+    term_breakdown: Dict[str, Any]
+    derivative_metadata: Dict[str, Any]
+    derivative_provenance_ext: Dict[str, Any]
+    derivative_error: Dict[str, Any]
+    eval_mask: Dict[str, Any]
+    diagnostic_warnings: List[str]
 
 
 def report_json_schema() -> Dict[str, Any]:

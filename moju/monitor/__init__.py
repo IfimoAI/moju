@@ -58,6 +58,30 @@ from moju.monitor.path_b_derivatives import (
     fill_path_b_derivatives,
     fill_path_b_spectral,
 )
+from moju.monitor.fd_stencils import (
+    diff1_uniform,
+    diff2_uniform,
+    effective_fd_order,
+    mixed_diff_uniform,
+    validate_fd_order,
+)
+from moju.monitor.weighted_norms import (
+    structured_point_weights,
+    trapezoid_weights_1d,
+    weighted_rms,
+    weights_from_state,
+)
+from moju.monitor.curvilinear import (
+    fill_vector_grad_lap_polar,
+    gradient_curvilinear_2d,
+    gradient_polar_physical,
+    laplacian_curvilinear_2d,
+    mapping_metrics_2d,
+)
+from moju.monitor.resolution_sensor import build_resolution_sensor_report
+from moju.monitor.derivative_metadata import DerivativeKeyMeta, check_derivative_consistency
+from moju.monitor.derivative_error import DEFAULT_DERIVATIVE_ERROR_RATIO
+from moju.monitor.eval_mask import boundary_distance_mask
 from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_key
 from moju.monitor.tiers import (
     TIER_CUTOFFS,
@@ -141,4 +165,23 @@ __all__ = [
     "LawImpliedCheck",
     "implied_by_projection",
     "MissingSuppliedDerivativeError",
+    "diff1_uniform",
+    "diff2_uniform",
+    "mixed_diff_uniform",
+    "validate_fd_order",
+    "effective_fd_order",
+    "structured_point_weights",
+    "trapezoid_weights_1d",
+    "weighted_rms",
+    "weights_from_state",
+    "gradient_curvilinear_2d",
+    "gradient_polar_physical",
+    "laplacian_curvilinear_2d",
+    "fill_vector_grad_lap_polar",
+    "mapping_metrics_2d",
+    "build_resolution_sensor_report",
+    "DerivativeKeyMeta",
+    "check_derivative_consistency",
+    "DEFAULT_DERIVATIVE_ERROR_RATIO",
+    "boundary_distance_mask",
 ]

@@ -45,7 +45,7 @@ class TestSpectralPrimitives:
     def test_validate_requires_periodic(self):
         with pytest.raises(ValueError, match="periodic=True"):
             validate_spectral_grid_config(
-                PathBGridConfig(diff_method="spectral", periodic=False)
+                PathBGridConfig(diff_method="spectral", periodic=False, fd_order=None, fd_order_time=None)
             )
 
 
@@ -73,8 +73,7 @@ class TestSpectralFillRecipes:
             periodic=True,
             spatial_dimension=1,
             steady=True,
-            layout="separable",
-        )
+            layout="separable",fd_order=None, fd_order_time=None)
         state, warns = fill_law_fd_from_primitives(
             {"u": u, "x": x},
             laws,
@@ -110,7 +109,7 @@ class TestSpectralFillRecipes:
             {"u": u, "x": x},
             laws_spec=laws,
             constants={"re": 50.0, "U": 1.0, "L": L},
-            grid=PathBGridConfig(spatial_dimension=1, layout="separable"),
+            grid=PathBGridConfig(spatial_dimension=1, layout="separable", fd_order=None, fd_order_time=None),
         )
         assert "u_grad" in state and "u_laplacian" in state
 
@@ -136,8 +135,7 @@ class TestSpectralFillRecipes:
             diff_method="spectral",
             periodic=True,
             spatial_dimension=1,
-            layout="separable",
-        )
+            layout="separable",fd_order=None, fd_order_time=None)
         state, _ = fill_path_b_derivatives(
             {"u": u, "x": x, "u_laplacian": sentinel},
             laws_spec=laws,
@@ -153,7 +151,7 @@ class TestSpectralFillRecipes:
             fill_path_b_derivatives(
                 {"u": jnp.sin(x)[:, None], "x": x},
                 laws_spec=[{"name": "burgers_equation", "state_map": {"u": "u", "u_laplacian": "u_laplacian"}}],
-                grid=PathBGridConfig(diff_method="spectral", periodic=False, spatial_dimension=1),
+                grid=PathBGridConfig(diff_method="spectral", periodic=False, spatial_dimension=1, fd_order=None, fd_order_time=None),
                 fill_law_recipes=True,
             )
 
@@ -169,8 +167,7 @@ class TestSpectralFillRecipes:
             diff_method="spectral",
             periodic=True,
             spatial_dimension=2,
-            layout="separable",
-        )
+            layout="separable",fd_order=None, fd_order_time=None)
         state, _ = fill_law_fd_from_primitives(
             {"phi": phi, "x": xs, "y": ys},
             [{"name": "laplace_equation", "state_map": {"phi_laplacian": "phi_laplacian", "phi": "phi"}}],
@@ -190,8 +187,7 @@ class TestSpectralFillRecipes:
             diff_method="spectral",
             periodic=True,
             spatial_dimension=2,
-            layout="separable",
-        )
+            layout="separable",fd_order=None, fd_order_time=None)
         laws = [
             {
                 "name": "burgers_equation",
@@ -251,8 +247,7 @@ class TestSpectralEngineSmoke:
             periodic=True,
             spatial_dimension=1,
             layout="separable",
-            steady=True,
-        )
+            steady=True,fd_order=None, fd_order_time=None)
         residuals = engine.compute_residuals(
             {"u": u, "u_t": u_t, "x": x},
             auto_path_b_derivatives=grid,

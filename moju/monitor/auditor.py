@@ -905,6 +905,16 @@ def audit(
         report["derivative_provenance"] = dict(log[-1]["derivative_provenance"])
     if log[-1].get("law_sources"):
         report["law_sources"] = dict(log[-1]["law_sources"])
+    for opt_key in (
+        "term_breakdown",
+        "derivative_metadata",
+        "derivative_provenance_ext",
+        "derivative_error",
+        "eval_mask",
+        "diagnostic_warnings",
+    ):
+        if log[-1].get(opt_key) is not None:
+            report[opt_key] = log[-1][opt_key]
     from moju.monitor.constitutive_closure_summary import build_constitutive_closure_summary
 
     report["constitutive_closure_summary"] = build_constitutive_closure_summary(last_report_per_key)
@@ -2187,6 +2197,19 @@ class ResidualEngine:
         law_scale_mode: Optional[str] = None,
         state_units: Optional[str] = None,
         nondim_scales: Any = None,
+        derivative_metadata: Optional[Dict[str, Any]] = None,
+        eval_mask: Any = None,
+        state_pred_alt: Optional[Dict[str, Any]] = None,
+        estimate_derivative_error: Optional[bool] = None,
+        derivative_error_threshold: Optional[float] = None,
+        derivative_error_method: Optional[str] = None,
+        point_weights: Any = None,
+        weighted_norms: Any = True,
+        weighted_safeguard: Any = True,
+        safeguard_percentile: Optional[float] = None,
+        safeguard_error_aware: bool = False,
+        safeguard_deriv_error: Optional[Dict[str, Any]] = None,
+        resolution_sensor: Any = False,
     ) -> Dict[str, Any]:
         """
         Compute residuals.
@@ -2207,14 +2230,34 @@ class ResidualEngine:
         :func:`moju.piratio.nondim.dimensional_to_nd` before laws (see ``nondim_inference``).
 
         If ``auto_path_b_derivatives`` is True, uses default ``PathBGridConfig`` with
-        ``diff_method=\"fd\"`` (finite differences). If a ``PathBGridConfig`` instance, uses that
-        layout; set ``diff_method=\"spectral\"`` and ``periodic=True`` for periodic Fourier spatial
-        derivatives (temporal ``dt`` / ``dtt`` remain FD). When ``fill_law_fd`` is also True, missing
-        **registered** ``Laws.*`` inputs (e.g. ``phi_laplacian``, ``u_grad``) are filled from
-        primitives on the same grid (see ``law_fd_recipes`` / ``fill_path_b_spectral``).
-        Warnings are appended to the log ``inferred`` list when enabled.
+        ``diff_method=\"fd\"`` and Moju 2.0 defaults ``fd_order=4``. If a ``PathBGridConfig``
+        instance, uses that layout; set ``diff_method=\"spectral\"`` and ``periodic=True`` for
+        periodic Fourier spatial derivatives (temporal ``dt`` / ``dtt`` remain FD). When
+        ``fill_law_fd`` is also True, missing **registered** ``Laws.*`` inputs are filled from
+        primitives on the same grid. Warnings are appended to the log ``inferred`` list when
+        enabled.
 
         If ``fill_law_fd`` is True, ``auto_path_b_derivatives`` must also be enabled.
+
+        Additive diagnostics (never change tier *thresholds*):
+          - ``derivative_metadata``: optional per-key metadata for consistency warnings.
+          - ``eval_mask``: boolean array (True = keep). When set, RMS/max for this call use
+            masked points only.
+          - ``state_pred_alt`` / ``estimate_derivative_error``: opt-in derivative-error estimates.
+          - ``point_weights`` / ``weighted_norms`` (Moju 2.0 default ``True``): area-weighted
+            R_eff for scoring, with a percentile safeguard (see ``weighted_safeguard``). Use
+            ``weighted_norms=False`` / ``\"unweighted\"`` for 1.x-style unweighted scoring.
+          - ``weighted_safeguard``: ``True`` (default, percentile safeguard), ``False`` (weighted
+            RMS only), or a dict ``{\"method\": \"percentile\"|\"max\"|\"worst_region\", ...}``.
+          - ``safeguard_percentile``: percentile for the default percentile safeguard (default
+            ``95``; see Phase A3 percentile comparison). Overrides
+            ``weighted_safeguard[\"percentile\"]`` when both are set.
+          - ``safeguard_error_aware``: opt-in (Phase A4). When True, percentile safeguard
+            uses residuals normalized by a pointwise derivative-error field
+            (``safeguard_deriv_error`` keyed like residual flat keys, or auto dual-order
+            residual difference when Path B FD fill is active). Never raises a tier vs
+            the non-normalized safeguard on the same residual.
+          - ``resolution_sensor``: opt-in under-resolution report (never changes tiers).
         """
         residuals, entry = self._compute_entry(
             state_pred,
@@ -2229,6 +2272,19 @@ class ResidualEngine:
             law_scale_mode=law_scale_mode,
             state_units=state_units,
             nondim_scales=nondim_scales,
+            derivative_metadata=derivative_metadata,
+            eval_mask=eval_mask,
+            state_pred_alt=state_pred_alt,
+            estimate_derivative_error=estimate_derivative_error,
+            derivative_error_threshold=derivative_error_threshold,
+            derivative_error_method=derivative_error_method,
+            point_weights=point_weights,
+            weighted_norms=weighted_norms,
+            weighted_safeguard=weighted_safeguard,
+            safeguard_percentile=safeguard_percentile,
+            safeguard_error_aware=safeguard_error_aware,
+            safeguard_deriv_error=safeguard_deriv_error,
+            resolution_sensor=resolution_sensor,
         )
         self._log.append(entry)
         self._index += 1
@@ -2250,6 +2306,19 @@ class ResidualEngine:
         law_scale_mode: Optional[str] = None,
         state_units: Optional[str] = None,
         nondim_scales: Any = None,
+        derivative_metadata: Optional[Dict[str, Any]] = None,
+        eval_mask: Any = None,
+        state_pred_alt: Optional[Dict[str, Any]] = None,
+        estimate_derivative_error: Optional[bool] = None,
+        derivative_error_threshold: Optional[float] = None,
+        derivative_error_method: Optional[str] = None,
+        point_weights: Any = None,
+        weighted_norms: Any = True,
+        weighted_safeguard: Any = True,
+        safeguard_percentile: Optional[float] = None,
+        safeguard_error_aware: bool = False,
+        safeguard_deriv_error: Optional[Dict[str, Any]] = None,
+        resolution_sensor: Any = False,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Compute residuals and one log entry without touching the engine log."""
         if run_mode not in ("training", "eval"):
@@ -2760,8 +2829,143 @@ class ResidualEngine:
             }
 
         flat = _flatten_residual_dict(residuals)
+        mask_meta: Dict[str, Any] = {}
+        if eval_mask is not None:
+            from moju.monitor.eval_mask import mask_flat_residuals, mask_provenance
+
+            flat = mask_flat_residuals(flat, eval_mask)
+            mask_meta = mask_provenance(eval_mask)
         rms_per_key = _rms_per_key(flat, to_python=log_to_python)
         r_max_per_key = _max_per_key(flat, to_python=log_to_python, scoring=self._scoring_by_key)
+
+        # --- Weighted norms (Moju 2.0 default) + optional percentile safeguard ---
+        wn_mode = weighted_norms
+        if wn_mode is True:
+            wn_mode = "score"
+        elif wn_mode is False or wn_mode is None:
+            wn_mode = "off"
+        elif isinstance(wn_mode, str):
+            wn_mode = wn_mode.strip().lower()
+            if wn_mode in ("unweighted", "false", "off"):
+                wn_mode = "off"
+            elif wn_mode in ("true", "weighted", "score"):
+                wn_mode = "score"
+            elif wn_mode != "report":
+                raise ValueError(
+                    "weighted_norms must be True, False, 'report', 'score', or 'unweighted'"
+                )
+        else:
+            raise ValueError(
+                "weighted_norms must be True, False, 'report', 'score', or 'unweighted'"
+            )
+
+        from moju.monitor.weighted_safeguard import DEFAULT_PERCENTILE as _DEFAULT_SG_PCT
+
+        sg_cfg: Dict[str, Any] = {}
+        if weighted_safeguard is True:
+            sg_cfg = {"method": "percentile", "percentile": float(_DEFAULT_SG_PCT)}
+        elif weighted_safeguard is False or weighted_safeguard is None:
+            sg_cfg = {}
+        elif isinstance(weighted_safeguard, dict):
+            sg_cfg = dict(weighted_safeguard)
+            if "method" not in sg_cfg:
+                sg_cfg["method"] = "percentile"
+        elif isinstance(weighted_safeguard, str):
+            sg_cfg = {"method": weighted_safeguard.strip().lower()}
+        else:
+            raise ValueError(
+                "weighted_safeguard must be True, False, a method name, or a dict"
+            )
+        if safeguard_percentile is not None:
+            if not sg_cfg:
+                sg_cfg = {"method": "percentile"}
+            sg_cfg["percentile"] = float(safeguard_percentile)
+        elif sg_cfg.get("method") in ("percentile", "p", "pct") and "percentile" not in sg_cfg:
+            sg_cfg["percentile"] = float(_DEFAULT_SG_PCT)
+
+        weights_arr = None
+        rms_weighted: Optional[Dict[str, Any]] = None
+        rms_unweighted_sidecar: Optional[Dict[str, Any]] = None
+        safeguard_per_key: Optional[Dict[str, Any]] = None
+        weighted_norm_note: Optional[str] = None
+        if wn_mode != "off" or point_weights is not None:
+            from moju.monitor.weighted_norms import (
+                weighted_r_eff_scalar,
+                weights_from_state,
+            )
+
+            if point_weights is not None:
+                weights_arr = jnp.asarray(point_weights, dtype=float)
+            else:
+                weights_arr = weights_from_state(merged)
+            # When eval_mask compacted residuals, select matching weight samples
+            if weights_arr is not None and eval_mask is not None:
+                from moju.monitor.eval_mask import apply_mask_to_residual
+
+                try:
+                    weights_arr = jnp.asarray(
+                        apply_mask_to_residual(weights_arr, eval_mask), dtype=float
+                    )
+                except ValueError:
+                    weighted_norm_note = (
+                        "weighted_norms: could not align point_weights with eval_mask; "
+                        "keeping unweighted rms"
+                    )
+                    weights_arr = None
+            if weights_arr is not None:
+                from moju.monitor.weighted_safeguard import (
+                    combine_weighted_and_safeguard,
+                    compute_safeguard_stat,
+                )
+
+                rms_weighted = {}
+                scoring_rms: Dict[str, Any] = {}
+                safeguard_per_key = {}
+                for key, arr in flat.items():
+                    rw = weighted_r_eff_scalar(
+                        arr,
+                        weights_arr,
+                        jitter_sq=float(R_EFF_RMS_JITTER_SQ),
+                        q_power=float(R_EFF_Q_POWER),
+                        scale_eps=float(_SCALE_EPS),
+                    )
+                    rw_f = float(jax.device_get(rw)) if log_to_python else rw
+                    rms_weighted[key] = rw_f
+                    if sg_cfg and wn_mode == "score":
+                        sg_kwargs = dict(sg_cfg)
+                        if safeguard_error_aware:
+                            sg_kwargs["error_aware"] = True
+                            if (
+                                safeguard_deriv_error is not None
+                                and key in safeguard_deriv_error
+                            ):
+                                sg_kwargs["deriv_error_field"] = safeguard_deriv_error[
+                                    key
+                                ]
+                            sg_kwargs.setdefault("scale_k", 1.0)
+                        sg = compute_safeguard_stat(arr, weights_arr, **sg_kwargs)
+                        safeguard_per_key[key] = {
+                            k: v for k, v in sg.items() if k != "detail"
+                        }
+                        if "detail" in sg:
+                            safeguard_per_key[key]["worst_region"] = (
+                                sg["detail"].get("worst_region")
+                            )
+                            safeguard_per_key[key]["stat"] = sg["stat"]
+                        scoring_rms[key] = combine_weighted_and_safeguard(
+                            float(rw_f), float(sg["stat"])
+                        )
+                    else:
+                        scoring_rms[key] = rw_f
+                if wn_mode == "score":
+                    rms_unweighted_sidecar = dict(rms_per_key)
+                    # Primary rms for scoring = max(weighted R_eff, safeguard_stat)
+                    rms_per_key = scoring_rms
+            elif wn_mode in ("score", "report") and not weighted_norm_note:
+                weighted_norm_note = (
+                    "weighted_norms requested but no point_weights / "
+                    "inferable structured coordinates; keeping unweighted rms"
+                )
         state_ref_built_for_scale = None
         if ref_for_audits is not None:
             state_ref_built_for_scale = _maybe_nd_convert(
@@ -2779,6 +2983,172 @@ class ResidualEngine:
             constants=self.constants,
             scoring=self._scoring_by_key,
         )
+
+        # --- Additive diagnostics (sidecars; do not alter tier cutoffs) ---
+        diagnostic_warnings: List[str] = []
+        if weighted_norm_note:
+            diagnostic_warnings.append(weighted_norm_note)
+        from moju.monitor.derivative_metadata import (
+            check_derivative_consistency,
+            merge_provenance_with_metadata,
+            normalize_derivative_metadata,
+        )
+        from moju.monitor.term_breakdown import build_term_breakdown
+
+        meta_norm = normalize_derivative_metadata(derivative_metadata)
+        if meta_norm:
+            diagnostic_warnings.extend(
+                check_derivative_consistency(self.laws_spec, meta_norm)
+            )
+
+        term_breakdown = build_term_breakdown(
+            self.laws_spec,
+            residuals.get("laws") or {},
+            merged,
+            self.constants,
+            scale_per_key=scale_per_key,
+            scale_source_per_key=scale_source_per_key,
+            mask=eval_mask,
+            nondim_scales=effective_nd_scales or self.nondim_scales,
+        )
+
+        do_err = bool(estimate_derivative_error) if estimate_derivative_error is not None else False
+        if not do_err:
+            try:
+                from moju.monitor.path_b_derivatives import PathBGridConfig as _PBC
+
+                if isinstance(auto_path_b_derivatives, _PBC):
+                    do_err = bool(auto_path_b_derivatives.estimate_derivative_error)
+            except Exception:  # noqa: BLE001
+                pass
+
+        derivative_error_report: Optional[Dict[str, Any]] = None
+        if do_err or state_pred_alt is not None:
+            from moju.monitor.derivative_error import (
+                DEFAULT_DERIVATIVE_ERROR_RATIO,
+                build_derivative_error_report,
+                estimate_derivative_errors,
+                estimate_errors_dual_spacing,
+                fill_dual_spacing_alternate,
+            )
+            from moju.monitor.path_b_derivatives import PathBGridConfig, fill_path_b_derivatives
+            from dataclasses import replace
+
+            thr = (
+                float(derivative_error_threshold)
+                if derivative_error_threshold is not None
+                else DEFAULT_DERIVATIVE_ERROR_RATIO
+            )
+            err_method = (derivative_error_method or "stencil_order").strip().lower()
+            if err_method not in ("stencil_order", "dual_spacing", "both"):
+                raise ValueError(
+                    "derivative_error_method must be 'stencil_order', 'dual_spacing', or 'both'"
+                )
+            primary_for_err: Dict[str, Any] = dict(state_pred_built)
+            err_keys: Dict[str, Dict[str, float]] = {}
+            methods_run: List[str] = []
+
+            if state_pred_alt is not None:
+                err_keys.update(
+                    estimate_derivative_errors(
+                        primary_for_err, dict(state_pred_alt), order=2
+                    )
+                )
+                methods_run.append("state_pred_alt")
+
+            grid_hi = None
+            if auto_path_b_derivatives is True:
+                grid_hi = PathBGridConfig(spatial_dimension=self.default_coord_dimension)
+            elif isinstance(auto_path_b_derivatives, PathBGridConfig):
+                grid_hi = auto_path_b_derivatives
+
+            prim = {
+                k: v
+                for k, v in state_pred_built.items()
+                if not any(
+                    str(k).endswith(s) for s in ("_t", "_tt", "_grad", "_laplacian")
+                )
+            }
+
+            if do_err and grid_hi is not None and err_method in ("stencil_order", "both"):
+                from moju.monitor.fd_stencils import effective_fd_order as _eff_fd
+
+                _fo = _eff_fd(grid_hi.fd_order)
+                if _fo in (4, 6):
+                    grid_alt = replace(
+                        grid_hi, fd_order=2, estimate_derivative_error=False
+                    )
+                else:
+                    grid_alt = replace(
+                        grid_hi, fd_order=4, estimate_derivative_error=False
+                    )
+                try:
+                    filled_alt, _, _ = fill_path_b_derivatives(
+                        prim,
+                        laws_spec=self.laws_spec,
+                        constants=self.constants,
+                        grid=grid_alt,
+                        copy=True,
+                        fill_law_recipes=bool(fill_law_fd),
+                        return_provenance=True,
+                    )
+                    err_keys.update(
+                        estimate_derivative_errors(
+                            primary_for_err, filled_alt, order=2
+                        )
+                    )
+                    methods_run.append("stencil_order")
+                except Exception as err:  # noqa: BLE001
+                    diagnostic_warnings.append(
+                        f"derivative_error: stencil_order alternate fill failed: {err}"
+                    )
+
+            if do_err and grid_hi is not None and err_method in ("dual_spacing", "both"):
+                try:
+                    coarse = fill_dual_spacing_alternate(
+                        prim,
+                        laws_spec=self.laws_spec,
+                        constants=self.constants,
+                        grid=grid_hi,
+                        fill_law_recipes=bool(fill_law_fd),
+                    )
+                    meta = coarse.pop("_dual_spacing_meta", {}) or {}
+                    ndim = int(meta.get("spatial_ndim", self.default_coord_dimension))
+                    dual = estimate_errors_dual_spacing(
+                        primary_for_err,
+                        coarse,
+                        spatial_ndim=ndim,
+                        order=2,
+                    )
+                    # Prefer max error when both methods report the same key
+                    for k, stats in dual.items():
+                        if k not in err_keys or float(stats.get("error_rms", 0)) > float(
+                            err_keys[k].get("error_rms", 0)
+                        ):
+                            err_keys[k] = stats
+                    methods_run.append("dual_spacing")
+                except Exception as err:  # noqa: BLE001
+                    diagnostic_warnings.append(
+                        f"derivative_error: dual_spacing alternate fill failed: {err}"
+                    )
+
+            if err_keys:
+                derivative_error_report = build_derivative_error_report(
+                    self.laws_spec,
+                    residuals.get("laws") or {},
+                    err_keys,
+                    threshold=thr,
+                )
+                derivative_error_report["methods"] = methods_run
+                for law_n, info in (derivative_error_report.get("per_law") or {}).items():
+                    if info.get("residual_may_be_dominated_by_derivative_error"):
+                        diagnostic_warnings.append(
+                            f"derivative_error: law {law_n!r} residual may be dominated "
+                            f"by derivative error "
+                            f"(error/residual="
+                            f"{info.get('error_over_residual')}, threshold={thr})."
+                        )
+
         entry: Dict[str, Any] = {
             "index": self._index,
             "rms": rms_per_key,
@@ -2803,6 +3173,97 @@ class ResidualEngine:
             entry["unresolved_dependencies"] = unresolved_dependencies
         if derivative_provenance:
             entry["derivative_provenance"] = derivative_provenance
+        if meta_norm:
+            entry["derivative_metadata"] = meta_norm
+            entry["derivative_provenance_ext"] = merge_provenance_with_metadata(
+                derivative_provenance, meta_norm
+            )
+        if term_breakdown:
+            entry["term_breakdown"] = term_breakdown
+        if derivative_error_report is not None:
+            entry["derivative_error"] = derivative_error_report
+        if mask_meta:
+            entry["eval_mask"] = mask_meta
+        if rms_weighted is not None:
+            entry["rms_weighted"] = rms_weighted
+            entry["weighted_norms"] = {
+                "mode": wn_mode if wn_mode != "off" else "report",
+                "scoring_uses_weights": wn_mode == "score",
+                "weight_source": (
+                    "user" if point_weights is not None else "trapezoid_from_coords"
+                ),
+                "safeguard": sg_cfg or None,
+            }
+        if safeguard_per_key:
+            entry["weighted_safeguard"] = safeguard_per_key
+        if rms_unweighted_sidecar is not None:
+            entry["rms_unweighted"] = rms_unweighted_sidecar
+        # Resolution sensor (diagnostic only)
+        rs_warned = False
+        if resolution_sensor:
+            from moju.monitor.resolution_sensor import build_resolution_sensor_report
+
+            rs_kw: Dict[str, Any] = {}
+            if isinstance(resolution_sensor, dict):
+                rs_kw = dict(resolution_sensor)
+            try:
+                rs_report = build_resolution_sensor_report(merged, **rs_kw)
+                entry["resolution_sensor"] = rs_report
+                for w in rs_report.get("warnings") or []:
+                    diagnostic_warnings.append(w)
+                    rs_warned = True
+            except Exception as err:  # noqa: BLE001
+                diagnostic_warnings.append(f"resolution_sensor failed: {err}")
+
+        # Safeguard masking / boundary-spike diagnostics (never change tiers)
+        if (
+            wn_mode == "score"
+            and weights_arr is not None
+            and sg_cfg
+            and flat
+        ):
+            from moju.monitor.weighted_safeguard import build_safeguard_diagnostic_warnings
+
+            fd_ord = 4
+            try:
+                from moju.monitor.path_b_derivatives import PathBGridConfig as _PBC
+                from moju.monitor.fd_stencils import effective_fd_order
+
+                if isinstance(auto_path_b_derivatives, _PBC):
+                    eo = effective_fd_order(auto_path_b_derivatives.fd_order)
+                    if eo is not None:
+                        fd_ord = int(eo)
+            except Exception:  # noqa: BLE001
+                pass
+            der_flagged_laws = set()
+            if derivative_error_report is not None:
+                for law_n, info in (derivative_error_report.get("per_law") or {}).items():
+                    if info.get("residual_may_be_dominated_by_derivative_error"):
+                        der_flagged_laws.add(str(law_n))
+            for key, arr in flat.items():
+                sk = float(scale_per_key.get(key, 1.0) or 1.0)
+                scoring_r = float(rms_per_key.get(key, float("nan")))
+                law_name = None
+                if str(key).startswith("laws/"):
+                    law_name = str(key).split("/", 1)[1]
+                der_flag = bool(law_name and law_name in der_flagged_laws)
+                for w in build_safeguard_diagnostic_warnings(
+                    arr,
+                    weights_arr,
+                    scale_k=sk,
+                    scoring_r=scoring_r,
+                    key=str(key),
+                    high_threshold=float(ADM_HIGH_THRESHOLD),
+                    fd_order=fd_ord,
+                    derivative_error_flagged=der_flag,
+                    resolution_sensor_warned=rs_warned,
+                ):
+                    diagnostic_warnings.append(w)
+
+        if diagnostic_warnings:
+            entry["diagnostic_warnings"] = diagnostic_warnings
+            for w in diagnostic_warnings:
+                _maybe_log_infer(w)
         from moju.registry import law_sources_for_specs
 
         law_sources = law_sources_for_specs(self.laws_spec)

@@ -86,7 +86,7 @@ def test_minimal_engine_uses_problem_coord_dimension_and_allows_per_call_overrid
     # Explicit per-call override to 1D should allow FD fill and law computation.
     residuals = eng.compute_residuals(
         state,
-        auto_path_b_derivatives=PathBGridConfig(spatial_dimension=1),
+        auto_path_b_derivatives=PathBGridConfig(spatial_dimension=1, fd_order=None, fd_order_time=None),
         fill_law_fd=True,
         log_to_python=True,
     )

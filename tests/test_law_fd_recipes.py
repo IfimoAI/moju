@@ -31,7 +31,7 @@ class TestFillLawFdLaplace:
         out, w = fill_law_fd_from_primitives(
             state,
             laws,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
         )
         assert "phi_laplacian" in out
         # Interior FD for linear field ~ 0
@@ -50,7 +50,7 @@ class TestFillLawFdLaplace:
         out, _ = fill_law_fd_from_primitives(
             state,
             laws,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
         )
         expect = -(jnp.pi**2) * phi
         assert jnp.allclose(out["phi_laplacian"][1:-1], expect[1:-1], rtol=1e-3, atol=1e-3)
@@ -69,7 +69,7 @@ class TestSchrodingerLawFd:
         out, w = fill_law_fd_from_primitives(
             state,
             laws,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
         )
         assert "psi_laplacian" in out, w
         expect = (L**2) * (-(jnp.pi**2)) * psi
@@ -85,7 +85,7 @@ class TestSchrodingerLawFd:
         out, w = fill_law_fd_from_primitives(
             state,
             laws,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
         )
         assert out.get("psi_laplacian") is None
         assert any("need L" in s for s in w)
@@ -103,7 +103,7 @@ class TestFillPathBWithLawRecipes:
             state,
             laws_spec=laws,
             fill_law_recipes=True,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
         )
         assert jnp.allclose(out["phi_laplacian"][1:-1], 0.0, rtol=rtol, atol=1e-4)
 
@@ -119,7 +119,7 @@ class TestFillPathBWithLawRecipes:
             state,
             laws_spec=laws,
             fill_law_recipes=True,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
         )
         assert "T_laplacian" in out
         assert jnp.allclose(out["T_laplacian"][1:-1], 0.0, rtol=rtol, atol=1e-3)
@@ -137,7 +137,7 @@ class TestFillPathBWithLawRecipes:
             state,
             laws_spec=laws,
             fill_law_recipes=True,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
         )
         assert not w or all("need x same shape" not in s for s in w)
         assert "T_laplacian" in out
@@ -159,7 +159,7 @@ class TestFillPathBWithLawRecipes:
             state,
             laws_spec=laws,
             fill_law_recipes=True,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension="auto", steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension="auto", steady=True, fd_order=None, fd_order_time=None),
         )
         assert "T_laplacian" in out, w
         lap = out["T_laplacian"]
@@ -178,7 +178,7 @@ class TestFillPathBWithLawRecipes:
             state,
             laws_spec=laws,
             fill_law_recipes=True,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension="auto", steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension="auto", steady=True, fd_order=None, fd_order_time=None),
         )
         assert "T_laplacian" in out
         assert out["T_laplacian"].shape == T.shape
@@ -198,7 +198,7 @@ class TestFillPathBWithLawRecipes:
             laws_spec=laws,
             fill_law_recipes=True,
             constants=constants,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
         )
         assert "T_laplacian" in out, w
 
@@ -214,7 +214,7 @@ class TestFillPathBWithLawRecipes:
             state,
             laws_spec=laws,
             fill_law_recipes=True,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension="auto", steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension="auto", steady=True, fd_order=None, fd_order_time=None),
         )
         assert "T_laplacian" in out, w
         assert out["T_laplacian"].shape == T.shape
@@ -238,7 +238,7 @@ class TestFillPathBWithLawRecipes:
             state,
             laws_spec=laws,
             fill_law_recipes=True,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension="auto", steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension="auto", steady=True, fd_order=None, fd_order_time=None),
         )
         assert "T_laplacian" in out, w
         assert out["T_laplacian"].shape == T.shape
@@ -266,7 +266,7 @@ class TestFillPathBWithLawRecipes:
             state,
             laws_spec=laws,
             fill_law_recipes=True,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
         )
         assert "T_laplacian" in out, w
         assert not any("list index out of range" in s for s in w)
@@ -297,7 +297,7 @@ class TestFillPathBWithLawRecipes:
             state,
             laws_spec=laws,
             fill_law_recipes=True,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension="auto", steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension="auto", steady=True, fd_order=None, fd_order_time=None),
         )
         assert "T_laplacian" in out, w
         lap_g = -2 * (jnp.pi**2) * g
@@ -329,7 +329,7 @@ class TestMassIncompressibleFd:
         out, _ = fill_law_fd_from_primitives(
             state,
             laws,
-            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=2, steady=True),
+            grid=PathBGridConfig(layout="meshgrid", spatial_dimension=2, steady=True, fd_order=None, fd_order_time=None),
         )
         assert "u_grad" in out
         r = Laws.mass_incompressible(out["u_grad"])
@@ -352,8 +352,7 @@ class TestResidualEngineFillLawFd:
         res = eng.compute_residuals(
             state,
             auto_path_b_derivatives=PathBGridConfig(
-                layout="meshgrid", spatial_dimension=1, steady=True
-            ),
+                layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
             fill_law_fd=True,
         )
         lap_r = res["laws"]["laplace_equation"]
@@ -388,8 +387,7 @@ class TestResidualEngineFillLawFd:
         res = eng.compute_residuals(
             {"phi": phi, "x": x},
             auto_path_b_derivatives=PathBGridConfig(
-                layout="meshgrid", spatial_dimension=1, steady=True
-            ),
+                layout="meshgrid", spatial_dimension=1, steady=True, fd_order=None, fd_order_time=None),
             fill_law_fd=True,
         )
         r = res["laws"]["laplace_equation"]

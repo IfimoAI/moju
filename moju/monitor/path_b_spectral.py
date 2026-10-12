@@ -31,10 +31,12 @@ def validate_spectral_grid_config(cfg: PathBGridConfig) -> None:
         raise ValueError(
             f"PathBGridConfig.diff_method must be 'fd' or 'spectral', got {cfg.diff_method!r}"
         )
-    if not cfg.periodic:
+    # Spectral needs every spatial axis declared periodic (bool True or all-True sequence).
+    if not cfg.all_spatial_axes_periodic():
         raise ValueError(
             "diff_method='spectral' requires PathBGridConfig(periodic=True) "
-            "(periodic Fourier differentiation on a structured grid)"
+            "(or a per-axis sequence of all True); spectral differentiation is "
+            "not allowed on an axis not declared periodic"
         )
 
 

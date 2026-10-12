@@ -115,7 +115,7 @@ def test_monitor_module_has_all():
         "enrich_derived_state_from_constitutive_audits",
         "pretty_residual_key",
         "pretty_category_name",
-    } | NEW_1_2_0_MONITOR_EXPORTS
+    } | NEW_1_2_0_MONITOR_EXPORTS | NEW_1_4_0_MONITOR_EXPORTS | NEW_2_0_MONITOR_EXPORTS
 
 
 NEW_1_2_0_MONITOR_EXPORTS = {
@@ -137,6 +137,31 @@ NEW_1_2_0_MONITOR_EXPORTS = {
     "LawImpliedCheck",
     "implied_by_projection",
     "MissingSuppliedDerivativeError",
+}
+
+NEW_1_4_0_MONITOR_EXPORTS = {
+    "diff1_uniform",
+    "diff2_uniform",
+    "validate_fd_order",
+    "DerivativeKeyMeta",
+    "check_derivative_consistency",
+    "DEFAULT_DERIVATIVE_ERROR_RATIO",
+    "boundary_distance_mask",
+}
+
+NEW_2_0_MONITOR_EXPORTS = {
+    "effective_fd_order",
+    "mixed_diff_uniform",
+    "structured_point_weights",
+    "trapezoid_weights_1d",
+    "weighted_rms",
+    "weights_from_state",
+    "gradient_curvilinear_2d",
+    "gradient_polar_physical",
+    "laplacian_curvilinear_2d",
+    "fill_vector_grad_lap_polar",
+    "mapping_metrics_2d",
+    "build_resolution_sensor_report",
 }
 
 
