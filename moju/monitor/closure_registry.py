@@ -48,6 +48,10 @@ def _fn_and_args(fn: Callable[..., Any]) -> Tuple[Callable[..., Any], List[str]]
         if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD):
             arg_names.append(p.name)
         elif p.kind == p.KEYWORD_ONLY:
+            # Optional keyword-only args (e.g. deprecated aliases) are not part of
+            # monitor state_map binding.
+            if p.default is not inspect.Parameter.empty:
+                continue
             arg_names.append(p.name)
         else:
             raise TypeError("Variadic signatures are not supported for monitor closures")

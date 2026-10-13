@@ -125,12 +125,15 @@ Do **not** pass the velocity field as the Reynolds velocity argument.
 
 ### Conditioning gate (viscosity rows)
 
-Implied viscosity is scored only where the viscous fit is well-posed:
+Implied viscosity is scored only where the viscous contribution is identifiable.
+Both checks use the same threshold `implied_term_fraction` (default **0.1**):
 
-- **Fit quality** \(|\beta\nabla^2u| / (|\beta\nabla^2u| + |\mathrm{rhs}-\beta\nabla^2u|) \ge\) `implied_term_fraction` (default **0.1**).
-- **Operator energy**: \(|\nabla^2u|^2\) must exceed a relative floor of the RHS energy (rejects vanishing Laplacians that would inflate \(\beta\)).
+1. **Term fraction** — \(|\beta\nabla^2\mathbf u| / \max_i |\mathrm{term}_i| \ge\) threshold, where \(\mathrm{term}_i\) runs over \(u_t\), advection, \(\nabla p\), optional body force, and the viscous term itself.
+2. **Fit quality** — \(|\beta\nabla^2\mathbf u| / (|\beta\nabla^2\mathbf u| + |\mathrm{rhs}-\beta\nabla^2\mathbf u|) \ge\) threshold.
 
-Configure via constants: `implied_term_fraction`, `implied_min_identifiable_fraction` (default 0.05), `implied_min_identifiable_count` (default 8). Excluded points are NaN in \(\delta\); `closure_debug` reports `excluded_fraction`, `mu_tilde_global` / `nu_tilde_global`, and `re_tilde_global`. If too few points remain, admissibility for that key is **Not identifiable** (see `log[-1]["implied_identifiability"]`).
+Configure via constants: `implied_term_fraction`, `implied_min_identifiable_fraction` (default 0.05), `implied_min_identifiable_count` (default 8). Excluded points are NaN in \(\delta\); `closure_debug` reports `term_fraction`, `fit_quality`, `excluded_fraction`, `mu_tilde_global` / `nu_tilde_global`, and `re_tilde_global`. If too few points remain, admissibility for that key is **Not identifiable** (see `log[-1]["implied_identifiability"]`).
+
+**When are implied properties identifiable?** Prefer regions where the constitutive term is not dwarfed by the rest of the balance (e.g. viscous-dominated Stokes/low-Re patches). Inertia-dominated high-Re patches may be excluded even when the PDE residual is small — that is intentional, not a law failure. Safe-division rows (Fourier \(\alpha\), Fick \(D\), …) already NaN-mask vanishing denominators; viscosity rows use the gate above.
 
 Example: let Moju materialize `k`, `rho`, and `alpha` from `T` (so the Fourier implied `thermal_diffusivity` check can run without you precomputing those fields):
 

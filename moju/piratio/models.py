@@ -1,8 +1,16 @@
+import warnings
+
 import jax
 import jax.numpy as jnp
 
 # Stefan-Boltzmann constant [W/(m^2 K^4)]; as JAX scalar for tracing
 _STEFAN_BOLTZMANN = 5.670374419e-8
+
+
+@jax.jit
+def _dynamic_viscosity_from_re_core(rho, U, L, re):
+    """JIT core: ``μ = ρ U L / Re`` with declared reference velocity ``U``."""
+    return (jnp.asarray(rho) * jnp.asarray(U) * jnp.asarray(L)) / (jnp.asarray(re) + 1e-30)
 
 class Models:
     """
@@ -236,24 +244,39 @@ class Models:
         return (omega * L) / st_wave
 
     @staticmethod
-    @jax.jit
-    def dynamic_viscosity_from_re(rho, U, L, re):
+    def dynamic_viscosity_from_re(rho, U=None, L=None, re=None, *, u=None):
         """
         Dynamic viscosity from Reynolds number with a declared reference velocity.
 
         :math:`\\mu = \\rho U L / \\mathrm{Re}`. Viscosity is a material property; ``U`` must
         be the same characteristic / reference speed used to define ``Re`` (never local
-        ``|u|``, which varies near walls and stagnation and would bias ``μ``).
+        speed magnitude, which varies near walls and stagnation and would bias ``μ``).
 
         :param rho: Density [kg/m^3].
         :param U: Characteristic / reference velocity [m/s] (scalar or broadcastable).
         :param L: Characteristic length [m].
         :param re: Reynolds number.
+        :param u: **Deprecated** keyword alias for ``U`` (removal planned in moju 3.0).
         :return: Dynamic viscosity mu [Pa*s].
         """
-        return (
-            jnp.asarray(rho) * jnp.asarray(U) * jnp.asarray(L)
-        ) / (jnp.asarray(re) + 1e-30)
+        if u is not None:
+            if U is not None:
+                raise TypeError(
+                    "Models.dynamic_viscosity_from_re: pass only one of 'U' and deprecated 'u'"
+                )
+            warnings.warn(
+                "Models.dynamic_viscosity_from_re(..., u=...) is deprecated; "
+                "use U=... (declared reference velocity) instead. "
+                "Scheduled for removal in moju 3.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            U = u
+        if U is None or L is None or re is None:
+            raise TypeError(
+                "dynamic_viscosity_from_re() requires rho, U (or deprecated u=), L, and re"
+            )
+        return _dynamic_viscosity_from_re_core(rho, U, L, re)
 
     @staticmethod
     @jax.jit

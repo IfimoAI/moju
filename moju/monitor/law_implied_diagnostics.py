@@ -192,15 +192,13 @@ def _apply_viscosity_conditioning(
     """
     Gate a pointwise viscosity coefficient for implied-property scoring.
 
-    Two checks (both required):
+    Both checks are required (``threshold`` = ``implied_term_fraction``, default 0.1):
 
-    1. **Fit quality** — ``|β ∇²u| / (|β ∇²u| + |rhs − β ∇²u|)`` ≥ ``threshold``.
-       This stays high when large inertial/pressure terms cancel and the viscous
-       term is small but consistent (e.g. Taylor–Green at moderate Re).
-    2. **Operator energy** — ``|∇²u|²`` must exceed a relative floor of the RHS
-       energy so a vanishing Laplacian cannot yield a huge unstable ``β``.
+    1. **Term fraction** — ``|β ∇²u| / max_i |term_i|`` ≥ ``threshold``, where the
+       viscous term is ``β ∇²u`` and ``term_i`` runs over the balance terms
+       (``u_t``, advection, ``∇p``, optional body force, and the viscous term).
+    2. **Fit quality** — ``|β ∇²u| / (|β ∇²u| + |rhs − β ∇²u|)`` ≥ ``threshold``.
 
-    Also reports ``term_fraction = |β ∇²u| / max_i |term_i|`` for diagnostics.
     Returns ``(beta_masked, beta_global, meta)``.
     """
     b = jnp.asarray(beta)
@@ -221,18 +219,12 @@ def _apply_viscosity_conditioning(
         tmax = jnp.maximum(tmax, _vec_norm_last(term))
     term_fraction = jnp.where(tmax > 0, pt / tmax, jnp.zeros_like(pt))
 
-    den = jnp.sum(jnp.square(ba), axis=-1)
-    rhs_energy = jnp.sum(jnp.square(rhs_a), axis=-1)
-    # Relative operator floor: reject points (and whole fields) where ∇²u is ~0
-    # compared to the momentum RHS that β is asked to explain.
-    den_scale = jnp.maximum(jnp.mean(rhs_energy), 1e-30)
-    op_ok = den >= (float(threshold) * float(threshold) * den_scale)
-
     mask = (
         jnp.isfinite(fit_quality)
+        & jnp.isfinite(term_fraction)
         & jnp.isfinite(b)
         & (fit_quality >= float(threshold))
-        & op_ok
+        & (term_fraction >= float(threshold))
     )
     n_tot = int(mask.size)
     n_ok = int(jnp.sum(mask))

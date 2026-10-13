@@ -20,17 +20,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ``ν̃* = argmin ||(u_t + (u·∇)u + ∇p − f) − ν* ∇²u||`` by last-axis LSQ
   (plus a domain projection on the identifiable set), then
   ``μ̃ = ρ U L ν̃*`` with **declared** reference ``U`` and ``L``. Implied
-  Reynolds numbers use the same reference scales, never local ``|u|``.
-  ``Models.dynamic_viscosity_from_re`` now takes ``(rho, U, L, re)`` instead of
-  ``(rho, u, L, re)``. Burgers already returned ν̃ from LSQ; it gains the same
-  conditioning gate and ``Rẽ = U L / ν̃`` reporting.
+  Reynolds numbers use the same reference scales, never local speed.
+  ``Models.dynamic_viscosity_from_re`` uses ``(rho, U, L, re)``. Burgers
+  already returned ν̃ from LSQ; it gains the same conditioning gate and
+  ``Rẽ = U L / ν̃`` reporting.
 
-- **Conditioning gate.** Points where the viscous fit is weak (fit quality or
-  Laplacian operator energy below ``implied_term_fraction``, default **0.1**)
-  are NaN-masked and counted in ``excluded_fraction``. If too few points remain
-  (``implied_min_identifiable_fraction`` / ``implied_min_identifiable_count``),
-  the implied row is reported as **Not identifiable** rather than scored.
-  Compact flags are logged under ``entry["implied_identifiability"]``.
+- **Conditioning gate.** A point is kept only if **both** hold
+  (threshold ``implied_term_fraction``, default **0.1**):
+  (1) **term fraction** ``|β ∇²u| / max_i |term_i|`` ≥ threshold;
+  (2) **fit quality** ``|β ∇²u| / (|β ∇²u| + |rhs − β ∇²u|)`` ≥ threshold.
+  Excluded points are NaN-masked; ``excluded_fraction`` is logged. If too few
+  points remain (``implied_min_identifiable_fraction`` /
+  ``implied_min_identifiable_count``), the row is **Not identifiable**
+  (omitted from category/overall rollup so it does not zero admissibility).
+  Compact flags: ``entry["implied_identifiability"]``.
 
 ### Changed
 
@@ -40,6 +43,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (gate-related NaNs on)
   ``constitutive/kinematic_viscosity_from_re/law_burgers_equation/implied_delta``.
   See [`docs/MIGRATION_2.0_to_2.1.md`](docs/MIGRATION_2.0_to_2.1.md).
+- High-Re Taylor–Green (viscous term ≪ inertia) may exclude most points under
+  the default gate and report **Not identifiable**; lower-Re / viscous-dominant
+  regions remain scored.
+
+### Deprecated
+
+- ``Models.dynamic_viscosity_from_re(..., u=...)`` — keyword alias for ``U``.
+  Emits ``DeprecationWarning``; **removal planned in moju 3.0**. Prefer ``U=``.
+
+### Known limitations
+
+- Implied viscosity is identifiable only where the viscous term is a meaningful
+  fraction of the local balance; inertia-dominated regions are excluded by
+  design.
+- Declared ``U`` and ``L`` must match the Reynolds definition used in the law;
+  Moju does not infer them from the velocity field.
+- Fourier / thermal-diffusivity implied rows are unchanged (paper slab-cooling
+  path unaffected).
 
 ## [2.0.0] - 2026-10-11
 

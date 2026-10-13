@@ -156,15 +156,12 @@ def _apply_viscosity_conditioning_t(
             continue
         tmax = torch.maximum(tmax, _vec_norm_last_t(term))
     term_fraction = torch.where(tmax > 0, pt / tmax, torch.zeros_like(pt))
-    den = torch.sum(ba ** 2, dim=-1)
-    rhs_energy = torch.sum(rhs_t ** 2, dim=-1)
-    den_scale = torch.maximum(torch.mean(rhs_energy), torch.as_tensor(1e-30, dtype=rhs_energy.dtype, device=rhs_energy.device))
-    op_ok = den >= (float(threshold) * float(threshold) * den_scale)
     mask = (
         torch.isfinite(fit_quality)
+        & torch.isfinite(term_fraction)
         & torch.isfinite(b)
         & (fit_quality >= float(threshold))
-        & op_ok
+        & (term_fraction >= float(threshold))
     )
     n_tot = int(mask.numel())
     n_ok = int(torch.sum(mask).item())

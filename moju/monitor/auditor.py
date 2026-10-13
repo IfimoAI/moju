@@ -787,12 +787,27 @@ def _compute_log_step_metrics(
                 if prefix in category_keys:
                     category_keys[prefix].append(k)
         category_scores: Dict[str, float] = {}
+        id_map_entry = entry.get("implied_identifiability") or {}
         for cat, keys in category_keys.items():
             if not keys:
                 continue
             vals: List[float] = []
+            scored_keys: List[str] = []
             category_failed = False
             for kk in keys:
+                # Skip not-identifiable implied rows — they must not zero the category.
+                if (
+                    isinstance(id_map_entry, dict)
+                    and kk.startswith("constitutive/")
+                    and kk.endswith("/implied_delta")
+                ):
+                    bn = kk[len("constitutive/") : -len("/implied_delta")]
+                    meta = id_map_entry.get(bn) if isinstance(id_map_entry.get(bn), dict) else None
+                    if meta and (
+                        meta.get("status") == "not_identifiable"
+                        or meta.get("identifiable") is False
+                    ):
+                        continue
                 try:
                     vf = float(admissibility[kk])
                 except (TypeError, ValueError):
@@ -802,10 +817,14 @@ def _compute_log_step_metrics(
                     category_failed = True
                     break
                 vals.append(vf)
+                scored_keys.append(kk)
             if category_failed:
                 category_scores[cat] = 0.0
+            elif not vals:
+                # Only not-identifiable keys in this category: omit from rollup.
+                continue
             elif cat == "constitutive" and any(
-                _key_uses_worst_point_admissibility(kk, entry_scoring) for kk in keys
+                _key_uses_worst_point_admissibility(kk, entry_scoring) for kk in scored_keys
             ):
                 category_scores[cat] = _min_admissibility(vals)
             else:
