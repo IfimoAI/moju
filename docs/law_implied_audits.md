@@ -126,12 +126,14 @@ Do **not** pass the velocity field as the Reynolds velocity argument.
 ### Conditioning gate (viscosity rows)
 
 Implied viscosity is scored only where the viscous contribution is identifiable.
-Both checks use the same threshold `implied_term_fraction` (default **0.1**):
+Both checks are required (defaults **0.1**):
 
-1. **Term fraction** — \(|\beta\nabla^2\mathbf u| / \max_i |\mathrm{term}_i| \ge\) threshold, where \(\mathrm{term}_i\) runs over \(u_t\), advection, \(\nabla p\), optional body force, and the viscous term itself.
-2. **Fit quality** — \(|\beta\nabla^2\mathbf u| / (|\beta\nabla^2\mathbf u| + |\mathrm{rhs}-\beta\nabla^2\mathbf u|) \ge\) threshold.
+1. **Term fraction** — \(|\beta\nabla^2\mathbf u| / \max_i |\mathrm{term}_i| \ge\) `implied_term_fraction`, where \(\mathrm{term}_i\) runs over \(u_t\), advection, \(\nabla p\), optional body force, and the viscous term itself.
+2. **Fit quality** — \(|\beta\nabla^2\mathbf u| / (|\beta\nabla^2\mathbf u| + |\mathrm{rhs}-\beta\nabla^2\mathbf u|) \ge\) `implied_fit_quality_fraction` (defaults to the same value as `implied_term_fraction` when unset).
 
-Configure via constants: `implied_term_fraction`, `implied_min_identifiable_fraction` (default 0.05), `implied_min_identifiable_count` (default 8). Excluded points are NaN in \(\delta\); `closure_debug` reports `term_fraction`, `fit_quality`, `excluded_fraction`, `mu_tilde_global` / `nu_tilde_global`, and `re_tilde_global`. If too few points remain, admissibility for that key is **Not identifiable** (see `log[-1]["implied_identifiability"]`).
+Configure via constants: `implied_term_fraction`, `implied_fit_quality_fraction`, `implied_min_identifiable_fraction` (default 0.05), `implied_min_identifiable_count` (default 8). Excluded points are NaN in \(\delta\); `closure_debug` reports `term_fraction`, `fit_quality`, `excluded_fraction`, `mu_tilde_global` / `nu_tilde_global`, and `re_tilde_global`. If too few points remain, admissibility for that key is **Not identifiable** (see `log[-1]["implied_identifiability"]` and `audit(... )["implied_identifiability"]`).
+
+**“Not identifiable” means the constitutive check could not be evaluated** (too few gated points) — **not** that it passed. The row is shown explicitly with excluded fraction and reason in the Python report object, JSON export, PDF report, and Plotly dashboard / worst-keys listing; it is only omitted from the category/overall rollup so it does not force Non-Admissible.
 
 **When are implied properties identifiable?** Prefer regions where the constitutive term is not dwarfed by the rest of the balance (e.g. viscous-dominated Stokes/low-Re patches). Inertia-dominated high-Re patches may be excluded even when the PDE residual is small — that is intentional, not a law failure. Safe-division rows (Fourier \(\alpha\), Fick \(D\), …) already NaN-mask vanishing denominators; viscosity rows use the gate above.
 

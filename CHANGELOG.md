@@ -23,17 +23,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Reynolds numbers use the same reference scales, never local speed.
   ``Models.dynamic_viscosity_from_re`` uses ``(rho, U, L, re)``. Burgers
   already returned ν̃ from LSQ; it gains the same conditioning gate and
-  ``Rẽ = U L / ν̃`` reporting.
+  ``Rẽ = U L / ν̃`` reporting. On Kovasznay flow (Re = 40, default gate),
+  implied ν recovers the exact value within ~1e-14 relative (machine
+  precision) on kept points with exact derivatives (kept fraction 100% at
+  n = 16 and n = 64); with Path B FD4 fill, mean relative error on kept
+  points decreases with resolution (~10% at n = 32 → ~1% at n = 64).
 
 - **Conditioning gate.** A point is kept only if **both** hold
-  (threshold ``implied_term_fraction``, default **0.1**):
-  (1) **term fraction** ``|β ∇²u| / max_i |term_i|`` ≥ threshold;
-  (2) **fit quality** ``|β ∇²u| / (|β ∇²u| + |rhs − β ∇²u|)`` ≥ threshold.
+  (``implied_term_fraction`` / ``implied_fit_quality_fraction``, defaults
+  **0.1**):
+  (1) **term fraction** ``|β ∇²u| / max_i |term_i|`` ≥ term threshold;
+  (2) **fit quality** ``|β ∇²u| / (|β ∇²u| + |rhs − β ∇²u|)`` ≥ fit threshold.
   Excluded points are NaN-masked; ``excluded_fraction`` is logged. If too few
   points remain (``implied_min_identifiable_fraction`` /
   ``implied_min_identifiable_count``), the row is **Not identifiable**
-  (omitted from category/overall rollup so it does not zero admissibility).
-  Compact flags: ``entry["implied_identifiability"]``.
+  (listed with excluded fraction and reason in the Python report, JSON
+  export, PDF, and Plotly dashboard; omitted from category/overall rollup
+  so it does not zero admissibility — “Not identifiable” means the check
+  could not be evaluated, not that it passed). Compact flags:
+  ``entry["implied_identifiability"]``.
 
 ### Changed
 

@@ -41,17 +41,19 @@ Models.dynamic_viscosity_from_re(rho, L=L, re=re, u=U_ref)  # use U=U_ref instea
 
 ## Conditioning gate and “Not identifiable”
 
-A collocation point is kept only if **both** hold (``implied_term_fraction``, default **0.1**):
+A collocation point is kept only if **both** hold (defaults **0.1**):
 
-1. **Term fraction:** ``|β ∇²u| / max_i |term_i| ≥ threshold``  
+1. **Term fraction:** ``|β ∇²u| / max_i |term_i| ≥ implied_term_fraction``  
    (`term_i` ∈ {``u_t``, advection, ``∇p``, optional body force, viscous term}).
-2. **Fit quality:** ``|β ∇²u| / (|β ∇²u| + |rhs − β ∇²u|) ≥ threshold``.
+2. **Fit quality:** ``|β ∇²u| / (|β ∇²u| + |rhs − β ∇²u|) ≥ implied_fit_quality_fraction``  
+   (defaults to the same value as ``implied_term_fraction`` when unset).
 
-Excluded points are NaN in ``δ``; ``closure_debug`` / ``log[-1]["implied_identifiability"]`` report ``excluded_fraction``. If too few points remain (``implied_min_identifiable_fraction`` default 0.05, ``implied_min_identifiable_count`` default 8), admissibility for that key is **`Not identifiable`**. That key is omitted from constitutive/overall rollup (it does not force Non-Admissible).
+Excluded points are NaN in ``δ``; ``closure_debug`` / ``log[-1]["implied_identifiability"]`` report ``excluded_fraction``. If too few points remain (``implied_min_identifiable_fraction`` default 0.05, ``implied_min_identifiable_count`` default 8), admissibility for that key is **`Not identifiable`**. That means the check **could not be evaluated**, not that it passed — the row remains visible in the report / JSON / PDF / Plotly listing with excluded fraction and reason, but is omitted from constitutive/overall rollup (it does not force Non-Admissible).
 
 | Constant | Default | Meaning |
 |----------|---------|---------|
-| `implied_term_fraction` | `0.1` | Threshold for term fraction **and** fit quality |
+| `implied_term_fraction` | `0.1` | Threshold for term fraction |
+| `implied_fit_quality_fraction` | same as term fraction | Threshold for fit quality |
 | `implied_min_identifiable_fraction` | `0.05` | Min fraction of points kept to score the row |
 | `implied_min_identifiable_count` | `8` | Absolute floor (scaled down on tiny grids) |
 

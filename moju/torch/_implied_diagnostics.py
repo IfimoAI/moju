@@ -72,7 +72,7 @@ def _re_from_viscosity_t(
     return UL / den
 
 
-def _gate_params_t(constants: Dict[str, Any]) -> Tuple[float, float, int]:
+def _gate_params_t(constants: Dict[str, Any]) -> Tuple[float, float, float, int]:
     from moju.monitor.law_implied_diagnostics import (
         DEFAULT_IMPLIED_TERM_FRACTION,
         DEFAULT_MIN_IDENTIFIABLE_COUNT,
@@ -80,13 +80,14 @@ def _gate_params_t(constants: Dict[str, Any]) -> Tuple[float, float, int]:
     )
 
     thr = float(constants.get("implied_term_fraction", DEFAULT_IMPLIED_TERM_FRACTION))
+    fit_thr = float(constants.get("implied_fit_quality_fraction", thr))
     min_frac = float(
         constants.get("implied_min_identifiable_fraction", DEFAULT_MIN_IDENTIFIABLE_FRACTION)
     )
     min_count = int(
         constants.get("implied_min_identifiable_count", DEFAULT_MIN_IDENTIFIABLE_COUNT)
     )
-    return thr, min_frac, min_count
+    return thr, fit_thr, min_frac, min_count
 
 
 def _resolve_ref_UL_t(
@@ -136,10 +137,13 @@ def _apply_viscosity_conditioning_t(
     basis: Any,
     balance_terms: List[Any],
     *,
-    threshold: float,
+    term_threshold: float,
+    fit_threshold: float,
     min_frac: float,
     min_count: int,
 ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
+    from moju.monitor.law_implied_diagnostics import _NOT_IDENTIFIABLE_REASON
+
     b = _as_t(beta)
     ba = _as_t(basis)
     rhs_t = _as_t(rhs)
@@ -160,8 +164,8 @@ def _apply_viscosity_conditioning_t(
         torch.isfinite(fit_quality)
         & torch.isfinite(term_fraction)
         & torch.isfinite(b)
-        & (fit_quality >= float(threshold))
-        & (term_fraction >= float(threshold))
+        & (fit_quality >= float(fit_threshold))
+        & (term_fraction >= float(term_threshold))
     )
     n_tot = int(mask.numel())
     n_ok = int(torch.sum(mask).item())
@@ -172,20 +176,24 @@ def _apply_viscosity_conditioning_t(
     )
     beta_masked = torch.where(mask, b, torch.full_like(b, float("nan")))
     beta_global = _global_scalar_coefficient_t(rhs_t, ba, mask)
+    status = "ok" if identifiable else "not_identifiable"
     meta: Dict[str, Any] = {
         "term_fraction": term_fraction,
         "fit_quality": fit_quality,
-        "conditioning_threshold": float(threshold),
+        "conditioning_threshold": float(term_threshold),
+        "fit_quality_threshold": float(fit_threshold),
         "excluded_fraction": float(excluded_fraction),
         "n_identifiable": int(n_ok),
         "n_total": int(n_tot),
         "identifiable": bool(identifiable),
-        "status": "ok" if identifiable else "not_identifiable",
+        "status": status,
         "min_identifiable_fraction": float(min_frac),
         "min_identifiable_count": int(min_count),
         "nu_star_pointwise": beta_masked,
         "nu_star_global": beta_global,
     }
+    if not identifiable:
+        meta["reason"] = _NOT_IDENTIFIABLE_REASON
     return beta_masked, beta_global, meta
 
 
@@ -313,12 +321,19 @@ def implied_mu_momentum_navier_stokes_torch(law_sm: Dict[str, str]) -> Callable[
             rhs = rhs - f
         u_lap_a = _as_t(u_lap)
         beta = _project_scalar_coefficient_t(rhs, u_lap_a)
-        thr, min_frac, min_count = _gate_params_t(constants)
+        thr, fit_thr, min_frac, min_count = _gate_params_t(constants)
         balance = [_as_t(u_t), adv, _as_t(p_grad)]
         if f is not None:
             balance.append(f)
         beta_m, beta_g, meta = _apply_viscosity_conditioning_t(
-            beta, rhs, u_lap_a, balance, threshold=thr, min_frac=min_frac, min_count=min_count
+            beta,
+            rhs,
+            u_lap_a,
+            balance,
+            term_threshold=thr,
+            fit_threshold=fit_thr,
+            min_frac=min_frac,
+            min_count=min_count,
         )
         scale = _as_t(rho) * _as_t(U) * _as_t(L)
         mu_pw = beta_m * scale
@@ -357,9 +372,16 @@ def implied_mu_stokes_flow_torch(law_sm: Dict[str, str]) -> Callable[..., Any]:
         rhs = _as_t(p_grad)
         u_lap_a = _as_t(u_lap)
         beta = _project_scalar_coefficient_t(rhs, u_lap_a)
-        thr, min_frac, min_count = _gate_params_t(constants)
+        thr, fit_thr, min_frac, min_count = _gate_params_t(constants)
         beta_m, beta_g, meta = _apply_viscosity_conditioning_t(
-            beta, rhs, u_lap_a, [rhs], threshold=thr, min_frac=min_frac, min_count=min_count
+            beta,
+            rhs,
+            u_lap_a,
+            [rhs],
+            term_threshold=thr,
+            fit_threshold=fit_thr,
+            min_frac=min_frac,
+            min_count=min_count,
         )
         scale = _as_t(rho) * _as_t(U) * _as_t(L)
         mu_pw = beta_m * scale
@@ -398,13 +420,14 @@ def implied_nu_burgers_equation_torch(law_sm: Dict[str, str]) -> Callable[..., A
         rhs = _as_t(u_t) + adv
         u_lap_a = _as_t(u_lap)
         beta = _project_scalar_coefficient_t(rhs, u_lap_a)
-        thr, min_frac, min_count = _gate_params_t(constants)
+        thr, fit_thr, min_frac, min_count = _gate_params_t(constants)
         beta_m, beta_g, meta = _apply_viscosity_conditioning_t(
             beta,
             rhs,
             u_lap_a,
             [_as_t(u_t), adv],
-            threshold=thr,
+            term_threshold=thr,
+            fit_threshold=fit_thr,
             min_frac=min_frac,
             min_count=min_count,
         )

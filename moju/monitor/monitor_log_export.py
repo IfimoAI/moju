@@ -218,8 +218,9 @@ def _build_summary(
     per_category = dict(last_m.get("category_admissibility_score") or {})
     plot_keys = list(keys) if keys is not None else list((log[0].get("rms") or {}).keys())
     worst_rows = _worst_keys_table_rows(log, plot_keys, metrics, top_n=worst_keys_top_n)
+    id_map = log[-1].get("implied_identifiability") if isinstance(log[-1], dict) else None
 
-    return {
+    summary: Dict[str, Any] = {
         "per_key": last_report_per_key,
         "per_category": per_category,
         "overall_admissibility_score": overall,
@@ -230,6 +231,9 @@ def _build_summary(
         "worst_keys_rows": worst_rows,
         "plot_keys": plot_keys,
     }
+    if isinstance(id_map, dict) and id_map:
+        summary["implied_identifiability"] = dict(id_map)
+    return summary
 
 
 def _build_audit_block(

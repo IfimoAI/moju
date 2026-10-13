@@ -179,8 +179,9 @@ recover a material coefficient from the same derivatives as the law. That recove
 is well-posed only where the constitutive term is not negligible in the local
 balance. For NS/Stokes/Burgers viscosity, Moju keeps points where
 \(|\nu\nabla^2\mathbf u|\) is at least `implied_term_fraction` (default 0.1) of the
-largest balance term **and** the LSQ fit quality clears the same threshold; otherwise
-the point is excluded or the row is **Not identifiable**. See
+largest balance term **and** the LSQ fit quality clears `implied_fit_quality_fraction`
+(same default); otherwise the point is excluded or the row is **Not identifiable**
+(could not evaluate — not a pass). See
 [`law_implied_audits.md`](law_implied_audits.md). Poor derivatives make implied rows
 noisier than law residuals — prefer supplied or spectral derivatives when those
 audits lead the study.

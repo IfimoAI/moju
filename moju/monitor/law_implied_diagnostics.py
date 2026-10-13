@@ -125,15 +125,22 @@ def _re_from_viscosity(
     return UL / den
 
 
-def _gate_params(constants: Dict[str, Any]) -> Tuple[float, float, int]:
+def _gate_params(constants: Dict[str, Any]) -> Tuple[float, float, float, int]:
+    """
+    Return ``(term_fraction_threshold, fit_quality_threshold, min_frac, min_count)``.
+
+    ``implied_fit_quality_fraction`` defaults to the same value as
+    ``implied_term_fraction`` when unset.
+    """
     thr = float(constants.get("implied_term_fraction", DEFAULT_IMPLIED_TERM_FRACTION))
+    fit_thr = float(constants.get("implied_fit_quality_fraction", thr))
     min_frac = float(
         constants.get("implied_min_identifiable_fraction", DEFAULT_MIN_IDENTIFIABLE_FRACTION)
     )
     min_count = int(
         constants.get("implied_min_identifiable_count", DEFAULT_MIN_IDENTIFIABLE_COUNT)
     )
-    return thr, min_frac, min_count
+    return thr, fit_thr, min_frac, min_count
 
 
 def _resolve_ref_UL(
@@ -179,25 +186,31 @@ def _global_scalar_coefficient(rhs: Any, basis: Any, mask: Any) -> jnp.ndarray:
     return _safe_ratio(numerator, denominator)
 
 
+_NOT_IDENTIFIABLE_REASON = (
+    "Constitutive viscosity check could not be evaluated: too few points satisfy "
+    "the term-fraction and fit-quality gates. This does not mean the check passed."
+)
+
+
 def _apply_viscosity_conditioning(
     beta: Any,
     rhs: Any,
     basis: Any,
     balance_terms: Sequence[Any],
     *,
-    threshold: float,
+    term_threshold: float,
+    fit_threshold: float,
     min_frac: float,
     min_count: int,
 ) -> Tuple[jnp.ndarray, jnp.ndarray, Dict[str, Any]]:
     """
     Gate a pointwise viscosity coefficient for implied-property scoring.
 
-    Both checks are required (``threshold`` = ``implied_term_fraction``, default 0.1):
+    Both checks are required (defaults 0.1 via ``implied_term_fraction`` /
+    ``implied_fit_quality_fraction``):
 
-    1. **Term fraction** — ``|β ∇²u| / max_i |term_i|`` ≥ ``threshold``, where the
-       viscous term is ``β ∇²u`` and ``term_i`` runs over the balance terms
-       (``u_t``, advection, ``∇p``, optional body force, and the viscous term).
-    2. **Fit quality** — ``|β ∇²u| / (|β ∇²u| + |rhs − β ∇²u|)`` ≥ ``threshold``.
+    1. **Term fraction** — ``|β ∇²u| / max_i |term_i|`` ≥ ``term_threshold``.
+    2. **Fit quality** — ``|β ∇²u| / (|β ∇²u| + |rhs − β ∇²u|)`` ≥ ``fit_threshold``.
 
     Returns ``(beta_masked, beta_global, meta)``.
     """
@@ -223,8 +236,8 @@ def _apply_viscosity_conditioning(
         jnp.isfinite(fit_quality)
         & jnp.isfinite(term_fraction)
         & jnp.isfinite(b)
-        & (fit_quality >= float(threshold))
-        & (term_fraction >= float(threshold))
+        & (fit_quality >= float(fit_threshold))
+        & (term_fraction >= float(term_threshold))
     )
     n_tot = int(mask.size)
     n_ok = int(jnp.sum(mask))
@@ -236,20 +249,24 @@ def _apply_viscosity_conditioning(
     )
     beta_masked = jnp.where(mask, b, jnp.nan)
     beta_global = _global_scalar_coefficient(rhs_a, ba, mask)
+    status = "ok" if identifiable else "not_identifiable"
     meta: Dict[str, Any] = {
         "term_fraction": term_fraction,
         "fit_quality": fit_quality,
-        "conditioning_threshold": float(threshold),
+        "conditioning_threshold": float(term_threshold),
+        "fit_quality_threshold": float(fit_threshold),
         "excluded_fraction": float(excluded_fraction),
         "n_identifiable": int(n_ok),
         "n_total": int(n_tot),
         "identifiable": bool(identifiable),
-        "status": "ok" if identifiable else "not_identifiable",
+        "status": status,
         "min_identifiable_fraction": float(min_frac),
         "min_identifiable_count": int(min_count),
         "nu_star_pointwise": beta_masked,
         "nu_star_global": beta_global,
     }
+    if not identifiable:
+        meta["reason"] = _NOT_IDENTIFIABLE_REASON
     return beta_masked, beta_global, meta
 
 
@@ -382,7 +399,7 @@ def implied_mu_momentum_navier_stokes(law_sm: Dict[str, str]) -> Callable[..., A
             rhs = rhs - f
         u_lap_a = jnp.asarray(u_lap)
         beta = _project_scalar_coefficient(rhs, u_lap_a)
-        thr, min_frac, min_count = _gate_params(constants)
+        thr, fit_thr, min_frac, min_count = _gate_params(constants)
         balance = [jnp.asarray(u_t), adv, jnp.asarray(p_grad)]
         if f is not None:
             balance.append(f)
@@ -391,7 +408,8 @@ def implied_mu_momentum_navier_stokes(law_sm: Dict[str, str]) -> Callable[..., A
             rhs,
             u_lap_a,
             balance,
-            threshold=thr,
+            term_threshold=thr,
+            fit_threshold=fit_thr,
             min_frac=min_frac,
             min_count=min_count,
         )
@@ -436,13 +454,14 @@ def implied_mu_stokes_flow(law_sm: Dict[str, str]) -> Callable[..., Any]:
         rhs = jnp.asarray(p_grad)
         u_lap_a = jnp.asarray(u_lap)
         beta = _project_scalar_coefficient(rhs, u_lap_a)
-        thr, min_frac, min_count = _gate_params(constants)
+        thr, fit_thr, min_frac, min_count = _gate_params(constants)
         beta_m, beta_g, meta = _apply_viscosity_conditioning(
             beta,
             rhs,
             u_lap_a,
             [rhs],
-            threshold=thr,
+            term_threshold=thr,
+            fit_threshold=fit_thr,
             min_frac=min_frac,
             min_count=min_count,
         )
@@ -488,13 +507,14 @@ def implied_nu_burgers_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
         rhs = jnp.asarray(u_t) + adv
         u_lap_a = jnp.asarray(u_lap)
         beta = _project_scalar_coefficient(rhs, u_lap_a)
-        thr, min_frac, min_count = _gate_params(constants)
+        thr, fit_thr, min_frac, min_count = _gate_params(constants)
         beta_m, beta_g, meta = _apply_viscosity_conditioning(
             beta,
             rhs,
             u_lap_a,
             [jnp.asarray(u_t), adv],
-            threshold=thr,
+            term_threshold=thr,
+            fit_threshold=fit_thr,
             min_frac=min_frac,
             min_count=min_count,
         )
