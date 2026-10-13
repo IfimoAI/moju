@@ -290,6 +290,7 @@ def test_ns_stokes_implied_mu_and_burgers_implied_nu_balance_near_zero():
          "dynamic_viscosity_from_re/law_stokes_flow/implied_delta"),
     ]
     for law_name, sm, key in ns_stokes:
+        # Catalog μ = ρ U L / Re with declared U (not local |u|). Balance → β=1=1/Re.
         common = {
             "u": jnp.array([2.0, 0.0]),
             "u_grad": jnp.array([[0.0, 0.0], [0.0, 0.0]]),
@@ -299,13 +300,13 @@ def test_ns_stokes_implied_mu_and_burgers_implied_nu_balance_near_zero():
             "rho": jnp.array(1.0),
             "L": jnp.array(1.0),
             "U": jnp.array(1.0),
-            "mu": jnp.array(2.0),
+            "mu": jnp.array(1.0),
             "u_t": jnp.array([0.0, 0.0]),
         }
         engine = ResidualEngine(laws=[{"name": law_name, "state_map": sm}], law_implied_audits=True)
         r = engine.compute_residuals(dict(common))
         assert key in r["constitutive"]
-        assert float(jnp.max(jnp.abs(r["constitutive"][key]))) < 1e-5
+        assert float(jnp.nanmax(jnp.abs(r["constitutive"][key]))) < 1e-5
 
     # Burgers: ν_cat = U L / Re = 1; inertial = ν * u_lap with ν=1 → δ≈0
     burgers_sm = {

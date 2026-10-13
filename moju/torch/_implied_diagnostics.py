@@ -54,18 +54,147 @@ def _vec_norm_last_t(x: Any) -> torch.Tensor:
     a = _as_t(x)
     if a.ndim == 0:
         return torch.abs(a)
-    return torch.sqrt(torch.sum(a ** 2, dim=-1))
+    return torch.sqrt(torch.sum(a ** 2, dim=-1) + 1e-30)
 
 
-def _re_from_mu_t(
-    u: Any,
-    rho: Any,
+def _re_from_viscosity_t(
+    U: Any,
     L: Any,
-    mu_pred: Any,
+    nu_or_mu: Any,
+    *,
+    rho: Any = None,
     eps: float = 1e-30,
 ) -> torch.Tensor:
-    u_char = _vec_norm_last_t(_as_t(u))
-    return (_as_t(rho) * u_char * _as_t(L)) / (_as_t(mu_pred) + eps)
+    UL = _as_t(U) * _as_t(L)
+    den = _as_t(nu_or_mu) + eps
+    if rho is not None:
+        return (_as_t(rho) * UL) / den
+    return UL / den
+
+
+def _gate_params_t(constants: Dict[str, Any]) -> Tuple[float, float, float, int]:
+    from moju.monitor.law_implied_diagnostics import (
+        DEFAULT_IMPLIED_TERM_FRACTION,
+        DEFAULT_MIN_IDENTIFIABLE_COUNT,
+        DEFAULT_MIN_IDENTIFIABLE_FRACTION,
+    )
+
+    thr = float(constants.get("implied_term_fraction", DEFAULT_IMPLIED_TERM_FRACTION))
+    fit_thr = float(constants.get("implied_fit_quality_fraction", thr))
+    min_frac = float(
+        constants.get("implied_min_identifiable_fraction", DEFAULT_MIN_IDENTIFIABLE_FRACTION)
+    )
+    min_count = int(
+        constants.get("implied_min_identifiable_count", DEFAULT_MIN_IDENTIFIABLE_COUNT)
+    )
+    return thr, fit_thr, min_frac, min_count
+
+
+def _resolve_ref_UL_t(
+    state: Dict[str, Any],
+    constants: Dict[str, Any],
+    law_sm: Dict[str, str],
+) -> Tuple[Optional[Any], Optional[Any]]:
+    U = _val_t(state, constants, law_sm, "U")
+    if U is None:
+        U = _sc_t(state, constants, "U")
+    L = _val_t(state, constants, law_sm, "L")
+    if L is None:
+        L = _sc_t(state, constants, "L")
+    return U, L
+
+
+def _optional_body_force_t(
+    state: Dict[str, Any],
+    constants: Dict[str, Any],
+    law_sm: Dict[str, str],
+) -> Optional[torch.Tensor]:
+    f = _val_t(state, constants, law_sm, "f")
+    if f is None:
+        f = _sc_t(state, constants, "f")
+    if f is None:
+        f = _sc_t(state, constants, "body_force")
+    return None if f is None else _as_t(f)
+
+
+def _global_scalar_coefficient_t(rhs: Any, basis: Any, mask: Any) -> torch.Tensor:
+    rhs_t = _as_t(rhs)
+    basis_t = _as_t(basis)
+    m = mask if isinstance(mask, torch.Tensor) else torch.as_tensor(mask)
+    if m.ndim == rhs_t.ndim - 1:
+        w = m.unsqueeze(-1)
+    else:
+        w = m
+    w = torch.where(w.bool(), torch.ones_like(w, dtype=rhs_t.dtype), torch.zeros_like(w, dtype=rhs_t.dtype))
+    numerator = torch.sum(w * rhs_t * basis_t)
+    denominator = torch.sum(w * basis_t * basis_t)
+    return _safe_ratio_t(numerator, denominator)
+
+
+def _apply_viscosity_conditioning_t(
+    beta: Any,
+    rhs: Any,
+    basis: Any,
+    balance_terms: List[Any],
+    *,
+    term_threshold: float,
+    fit_threshold: float,
+    min_frac: float,
+    min_count: int,
+) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
+    from moju.monitor.law_implied_diagnostics import _NOT_IDENTIFIABLE_REASON
+
+    b = _as_t(beta)
+    ba = _as_t(basis)
+    rhs_t = _as_t(rhs)
+    if b.ndim == ba.ndim - 1:
+        visc = b.unsqueeze(-1) * ba
+    else:
+        visc = b * ba
+    pt = _vec_norm_last_t(visc)
+    fit_res = _vec_norm_last_t(rhs_t - visc)
+    fit_quality = pt / (pt + fit_res + 1e-30)
+    tmax = pt
+    for term in balance_terms:
+        if term is None:
+            continue
+        tmax = torch.maximum(tmax, _vec_norm_last_t(term))
+    term_fraction = torch.where(tmax > 0, pt / tmax, torch.zeros_like(pt))
+    mask = (
+        torch.isfinite(fit_quality)
+        & torch.isfinite(term_fraction)
+        & torch.isfinite(b)
+        & (fit_quality >= float(fit_threshold))
+        & (term_fraction >= float(term_threshold))
+    )
+    n_tot = int(mask.numel())
+    n_ok = int(torch.sum(mask).item())
+    excluded_fraction = 1.0 - (float(n_ok) / float(max(n_tot, 1)))
+    eff_min_count = min(int(min_count), max(1, n_tot))
+    identifiable = (n_ok >= eff_min_count) and (
+        float(n_ok) / float(max(n_tot, 1)) >= float(min_frac)
+    )
+    beta_masked = torch.where(mask, b, torch.full_like(b, float("nan")))
+    beta_global = _global_scalar_coefficient_t(rhs_t, ba, mask)
+    status = "ok" if identifiable else "not_identifiable"
+    meta: Dict[str, Any] = {
+        "term_fraction": term_fraction,
+        "fit_quality": fit_quality,
+        "conditioning_threshold": float(term_threshold),
+        "fit_quality_threshold": float(fit_threshold),
+        "excluded_fraction": float(excluded_fraction),
+        "n_identifiable": int(n_ok),
+        "n_total": int(n_tot),
+        "identifiable": bool(identifiable),
+        "status": status,
+        "min_identifiable_fraction": float(min_frac),
+        "min_identifiable_count": int(min_count),
+        "nu_star_pointwise": beta_masked,
+        "nu_star_global": beta_global,
+    }
+    if not identifiable:
+        meta["reason"] = _NOT_IDENTIFIABLE_REASON
+    return beta_masked, beta_global, meta
 
 
 # ---------------------------------------------------------------------------
@@ -168,55 +297,118 @@ def implied_kappa_advection_diffusion_torch(law_sm: Dict[str, str]) -> Callable[
 
 
 def implied_mu_momentum_navier_stokes_torch(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Recover dynamic viscosity by projecting inertial terms onto ``u_laplacian``."""
+    """Recover dynamic viscosity from momentum LSQ with declared reference ``U``, ``L``."""
 
-    def fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[torch.Tensor]:
+    def fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[Any]:
+        from moju.monitor.law_implied_diagnostics import ImpliedPropertyResult
+
         u_t = _val_t(state, constants, law_sm, "u_t")
         u = _val_t(state, constants, law_sm, "u")
         u_grad = _val_t(state, constants, law_sm, "u_grad")
         p_grad = _val_t(state, constants, law_sm, "p_grad")
         u_lap = _val_t(state, constants, law_sm, "u_laplacian")
-        rho = _sc_t(state, constants, "rho")
-        L = _sc_t(state, constants, "L")
-        if any(v is None for v in [u_t, u, u_grad, p_grad, u_lap, rho, L]):
+        rho = _val_t(state, constants, law_sm, "rho")
+        if rho is None:
+            rho = _sc_t(state, constants, "rho")
+        U, L = _resolve_ref_UL_t(state, constants, law_sm)
+        if any(v is None for v in [u_t, u, u_grad, p_grad, u_lap, rho, U, L]):
             return None
         u_t2 = _as_t(u)
         adv = torch.einsum("...ij,...j->...i", _as_t(u_grad), u_t2)
-        inertial = _as_t(u_t) + adv + _as_t(p_grad)
-        beta = _project_scalar_coefficient_t(inertial, u_lap)
-        return beta * _as_t(rho) * _vec_norm_last_t(u_t2) * _as_t(L)
+        f = _optional_body_force_t(state, constants, law_sm)
+        rhs = _as_t(u_t) + adv + _as_t(p_grad)
+        if f is not None:
+            rhs = rhs - f
+        u_lap_a = _as_t(u_lap)
+        beta = _project_scalar_coefficient_t(rhs, u_lap_a)
+        thr, fit_thr, min_frac, min_count = _gate_params_t(constants)
+        balance = [_as_t(u_t), adv, _as_t(p_grad)]
+        if f is not None:
+            balance.append(f)
+        beta_m, beta_g, meta = _apply_viscosity_conditioning_t(
+            beta,
+            rhs,
+            u_lap_a,
+            balance,
+            term_threshold=thr,
+            fit_threshold=fit_thr,
+            min_frac=min_frac,
+            min_count=min_count,
+        )
+        scale = _as_t(rho) * _as_t(U) * _as_t(L)
+        mu_pw = beta_m * scale
+        mu_g = beta_g * scale
+        if not meta["identifiable"]:
+            mu_pw = torch.full_like(mu_pw, float("nan"))
+        meta.update(
+            {
+                "mu_tilde_pointwise": mu_pw,
+                "mu_tilde_global": mu_g,
+                "re_tilde_global": _re_from_viscosity_t(U, L, mu_g, rho=rho),
+                "re_tilde_pointwise": _re_from_viscosity_t(U, L, mu_pw, rho=rho),
+                "reference_U": _as_t(U),
+                "reference_L": _as_t(L),
+            }
+        )
+        return ImpliedPropertyResult(value=mu_pw, meta=meta)
 
     return fn
 
 
 def implied_mu_stokes_flow_torch(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Recover dynamic viscosity by projecting pressure gradient onto ``u_laplacian``."""
+    """Recover dynamic viscosity from Stokes LSQ with declared reference ``U``, ``L``."""
 
-    def fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[torch.Tensor]:
+    def fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[Any]:
+        from moju.monitor.law_implied_diagnostics import ImpliedPropertyResult
+
         p_grad = _val_t(state, constants, law_sm, "p_grad")
         u_lap = _val_t(state, constants, law_sm, "u_laplacian")
-        u = _val_t(state, constants, law_sm, "u")
-        if u is None:
-            u = _sc_t(state, constants, "u")
         rho = _val_t(state, constants, law_sm, "rho")
         if rho is None:
             rho = _sc_t(state, constants, "rho")
-        L = _val_t(state, constants, law_sm, "L")
-        if L is None:
-            L = _sc_t(state, constants, "L")
-        if any(v is None for v in [p_grad, u_lap, u, rho, L]):
+        U, L = _resolve_ref_UL_t(state, constants, law_sm)
+        if any(v is None for v in [p_grad, u_lap, rho, U, L]):
             return None
-        u_t = _as_t(u)
-        beta = _project_scalar_coefficient_t(p_grad, u_lap)
-        return beta * _as_t(rho) * _vec_norm_last_t(u_t) * _as_t(L)
+        rhs = _as_t(p_grad)
+        u_lap_a = _as_t(u_lap)
+        beta = _project_scalar_coefficient_t(rhs, u_lap_a)
+        thr, fit_thr, min_frac, min_count = _gate_params_t(constants)
+        beta_m, beta_g, meta = _apply_viscosity_conditioning_t(
+            beta,
+            rhs,
+            u_lap_a,
+            [rhs],
+            term_threshold=thr,
+            fit_threshold=fit_thr,
+            min_frac=min_frac,
+            min_count=min_count,
+        )
+        scale = _as_t(rho) * _as_t(U) * _as_t(L)
+        mu_pw = beta_m * scale
+        mu_g = beta_g * scale
+        if not meta["identifiable"]:
+            mu_pw = torch.full_like(mu_pw, float("nan"))
+        meta.update(
+            {
+                "mu_tilde_pointwise": mu_pw,
+                "mu_tilde_global": mu_g,
+                "re_tilde_global": _re_from_viscosity_t(U, L, mu_g, rho=rho),
+                "re_tilde_pointwise": _re_from_viscosity_t(U, L, mu_pw, rho=rho),
+                "reference_U": _as_t(U),
+                "reference_L": _as_t(L),
+            }
+        )
+        return ImpliedPropertyResult(value=mu_pw, meta=meta)
 
     return fn
 
 
 def implied_nu_burgers_equation_torch(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Recover kinematic viscosity ν by projecting inertial terms onto ``u_laplacian``."""
+    """Recover kinematic viscosity ν by LSQ with conditioning gate (Torch)."""
 
-    def fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[torch.Tensor]:
+    def fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[Any]:
+        from moju.monitor.law_implied_diagnostics import ImpliedPropertyResult
+
         u_t = _val_t(state, constants, law_sm, "u_t")
         u = _val_t(state, constants, law_sm, "u")
         u_grad = _val_t(state, constants, law_sm, "u_grad")
@@ -225,8 +417,30 @@ def implied_nu_burgers_equation_torch(law_sm: Dict[str, str]) -> Callable[..., A
             return None
         u_t2 = _as_t(u)
         adv = torch.einsum("...ij,...j->...i", _as_t(u_grad), u_t2)
-        inertial = _as_t(u_t) + adv
-        return _project_scalar_coefficient_t(inertial, u_lap)
+        rhs = _as_t(u_t) + adv
+        u_lap_a = _as_t(u_lap)
+        beta = _project_scalar_coefficient_t(rhs, u_lap_a)
+        thr, fit_thr, min_frac, min_count = _gate_params_t(constants)
+        beta_m, beta_g, meta = _apply_viscosity_conditioning_t(
+            beta,
+            rhs,
+            u_lap_a,
+            [_as_t(u_t), adv],
+            term_threshold=thr,
+            fit_threshold=fit_thr,
+            min_frac=min_frac,
+            min_count=min_count,
+        )
+        if not meta["identifiable"]:
+            beta_m = torch.full_like(beta_m, float("nan"))
+        U, L = _resolve_ref_UL_t(state, constants, law_sm)
+        meta.update({"nu_tilde_pointwise": beta_m, "nu_tilde_global": beta_g})
+        if U is not None and L is not None:
+            meta["re_tilde_global"] = _re_from_viscosity_t(U, L, beta_g)
+            meta["re_tilde_pointwise"] = _re_from_viscosity_t(U, L, beta_m)
+            meta["reference_U"] = _as_t(U)
+            meta["reference_L"] = _as_t(L)
+        return ImpliedPropertyResult(value=beta_m, meta=meta)
 
     return fn
 
@@ -359,7 +573,7 @@ _LAW_IMPLIED_ROWS_TORCH: Dict[str, List[Dict[str, Any]]] = {
             "category": "constitutive",
             "name": "dynamic_viscosity_from_re",
             "output_key": "mu",
-            "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
+            "state_map": {"rho": "rho", "U": "U", "L": "L", "re": "re"},
             "implied_maker_torch": implied_mu_momentum_navier_stokes_torch,
             "residual_basename": "dynamic_viscosity_from_re/law_momentum_navier_stokes",
             "include_ref_delta": True,
@@ -370,7 +584,7 @@ _LAW_IMPLIED_ROWS_TORCH: Dict[str, List[Dict[str, Any]]] = {
             "category": "constitutive",
             "name": "dynamic_viscosity_from_re",
             "output_key": "mu",
-            "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
+            "state_map": {"rho": "rho", "U": "U", "L": "L", "re": "re"},
             "implied_maker_torch": implied_mu_stokes_flow_torch,
             "residual_basename": "dynamic_viscosity_from_re/law_stokes_flow",
             "include_ref_delta": True,

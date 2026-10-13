@@ -753,17 +753,45 @@ def _compute_log_step_metrics(
                     admissibility[k] = float("nan")
                 else:
                     admissibility[k] = 1.0 / (1.0 + r_norm[k])
+            level = admissibility_level(admissibility[k])
+            # Law-linked viscosity rows may mark themselves not identifiable.
+            id_map = entry.get("implied_identifiability") or {}
+            id_meta: Optional[Dict[str, Any]] = None
+            if (
+                isinstance(id_map, dict)
+                and k.startswith("constitutive/")
+                and k.endswith("/implied_delta")
+            ):
+                bn = k[len("constitutive/") : -len("/implied_delta")]
+                meta = id_map.get(bn) if isinstance(id_map.get(bn), dict) else None
+                if meta and (
+                    meta.get("status") == "not_identifiable"
+                    or meta.get("identifiable") is False
+                ):
+                    level = "Not identifiable"
+                    id_meta = meta
             key_report: Dict[str, Any] = {
                 "rms": v,
                 "r_norm": r_norm[k],
                 "admissibility_score": admissibility[k],
-                "admissibility_level": admissibility_level(admissibility[k]),
+                "admissibility_level": level,
                 "admissibility_metric": metric,
                 "score_for_admissibility": v_eff,
                 "scale_source": scale_src,
             }
             if k in r_max:
                 key_report["r_max"] = r_max[k]
+            if id_meta is not None:
+                # Explicit per-key sidecar: never treat as passing; rollup skips this key.
+                key_report["identifiability_status"] = "not_identifiable"
+                key_report["excluded_fraction"] = id_meta.get("excluded_fraction")
+                key_report["n_identifiable"] = id_meta.get("n_identifiable")
+                key_report["n_total"] = id_meta.get("n_total")
+                key_report["conditioning_threshold"] = id_meta.get("conditioning_threshold")
+                key_report["fit_quality_threshold"] = id_meta.get("fit_quality_threshold")
+                reason = id_meta.get("reason")
+                if reason:
+                    key_report["identifiability_reason"] = reason
             per_key_report[k] = key_report
         category_keys: Dict[str, List[str]] = {c: [] for c in category_buckets}
         for k in admissibility.keys():
@@ -772,12 +800,27 @@ def _compute_log_step_metrics(
                 if prefix in category_keys:
                     category_keys[prefix].append(k)
         category_scores: Dict[str, float] = {}
+        id_map_entry = entry.get("implied_identifiability") or {}
         for cat, keys in category_keys.items():
             if not keys:
                 continue
             vals: List[float] = []
+            scored_keys: List[str] = []
             category_failed = False
             for kk in keys:
+                # Skip not-identifiable implied rows — they must not zero the category.
+                if (
+                    isinstance(id_map_entry, dict)
+                    and kk.startswith("constitutive/")
+                    and kk.endswith("/implied_delta")
+                ):
+                    bn = kk[len("constitutive/") : -len("/implied_delta")]
+                    meta = id_map_entry.get(bn) if isinstance(id_map_entry.get(bn), dict) else None
+                    if meta and (
+                        meta.get("status") == "not_identifiable"
+                        or meta.get("identifiable") is False
+                    ):
+                        continue
                 try:
                     vf = float(admissibility[kk])
                 except (TypeError, ValueError):
@@ -787,10 +830,14 @@ def _compute_log_step_metrics(
                     category_failed = True
                     break
                 vals.append(vf)
+                scored_keys.append(kk)
             if category_failed:
                 category_scores[cat] = 0.0
+            elif not vals:
+                # Only not-identifiable keys in this category: omit from rollup.
+                continue
             elif cat == "constitutive" and any(
-                _key_uses_worst_point_admissibility(kk, entry_scoring) for kk in keys
+                _key_uses_worst_point_admissibility(kk, entry_scoring) for kk in scored_keys
             ):
                 category_scores[cat] = _min_admissibility(vals)
             else:
@@ -905,6 +952,8 @@ def audit(
         report["derivative_provenance"] = dict(log[-1]["derivative_provenance"])
     if log[-1].get("law_sources"):
         report["law_sources"] = dict(log[-1]["law_sources"])
+    if log[-1].get("implied_identifiability"):
+        report["implied_identifiability"] = dict(log[-1]["implied_identifiability"])
     for opt_key in (
         "term_breakdown",
         "derivative_metadata",
@@ -1101,7 +1150,11 @@ def _worst_keys_table_rows(
     *,
     top_n: int = 12,
 ) -> List[Dict[str, Any]]:
-    """Final-step per-key rows sorted by R_norm descending (for troubleshooting table)."""
+    """Final-step per-key rows sorted by R_norm descending (for troubleshooting table).
+
+    ``Not identifiable`` implied rows are appended after scored keys so they remain
+    visible in the Plotly / export listing (they are never treated as passing).
+    """
     if not log or not metrics:
         return []
     from moju.monitor.visualize_labels import pretty_residual_key
@@ -1110,15 +1163,18 @@ def _worst_keys_table_rows(
     scale_map = last_entry.get("scale") or {}
     per = metrics[-1].get("per_key_report") or {}
     rows: List[Dict[str, Any]] = []
+    not_ident_rows: List[Dict[str, Any]] = []
     for k in plot_keys:
         rep = per.get(k)
         if not isinstance(rep, Mapping):
             continue
+        level = str(rep.get("admissibility_level") or "")
+        is_ni = level == "Not identifiable" or rep.get("identifiability_status") == "not_identifiable"
         try:
             rn_f = float(rep.get("r_norm"))
         except (TypeError, ValueError):
-            continue
-        if not math.isfinite(rn_f):
+            rn_f = float("nan")
+        if not is_ni and not math.isfinite(rn_f):
             continue
         try:
             r_eff = float(rep.get("rms"))
@@ -1130,7 +1186,7 @@ def _worst_keys_table_rows(
         except (TypeError, ValueError):
             sk_f = float("nan")
         if not math.isfinite(sk_f) or sk_f <= 0:
-            if math.isfinite(r_eff) and rn_f != 0.0:
+            if math.isfinite(r_eff) and math.isfinite(rn_f) and rn_f != 0.0:
                 sk_f = abs(r_eff / rn_f)
             else:
                 sk_f = float("nan")
@@ -1139,20 +1195,31 @@ def _worst_keys_table_rows(
         except (TypeError, ValueError):
             adm_f = float("nan")
         prefix = k.split("/", 1)[0] if "/" in str(k) else "other"
-        rows.append(
-            {
-                "key": k,
-                "display": pretty_residual_key(str(k)),
-                "r_eff": r_eff,
-                "scale_k": sk_f,
-                "r_norm": rn_f,
-                "admissibility": adm_f,
-                "category": prefix,
-            }
-        )
+        row: Dict[str, Any] = {
+            "key": k,
+            "display": pretty_residual_key(str(k)),
+            "r_eff": r_eff,
+            "scale_k": sk_f,
+            "r_norm": rn_f,
+            "admissibility": adm_f,
+            "admissibility_score": adm_f,
+            "admissibility_level": level or admissibility_level(adm_f),
+            "category": prefix,
+        }
+        if is_ni:
+            row["admissibility_level"] = "Not identifiable"
+            if rep.get("excluded_fraction") is not None:
+                row["excluded_fraction"] = rep.get("excluded_fraction")
+            if rep.get("identifiability_reason"):
+                row["identifiability_reason"] = rep.get("identifiability_reason")
+            not_ident_rows.append(row)
+        else:
+            rows.append(row)
     rows.sort(key=lambda r: r["r_norm"], reverse=True)
     cap = max(1, int(top_n))
-    return rows[:cap]
+    # Keep scored worst keys first; always surface Not identifiable rows within the cap.
+    scored = rows[: max(0, cap - len(not_ident_rows))]
+    return scored + not_ident_rows[:cap]
 
 
 def _build_visualize_bundle(
@@ -3149,6 +3216,25 @@ class ResidualEngine:
                             f"{info.get('error_over_residual')}, threshold={thr})."
                         )
 
+        # Compact identifiability flags for law-linked implied rows (no heavy tensors).
+        implied_identifiability: Dict[str, Any] = {}
+        for bn, dbg in closure_debug.items():
+            if not isinstance(dbg, dict):
+                continue
+            if "identifiable" in dbg or dbg.get("status") == "not_identifiable":
+                compact: Dict[str, Any] = {
+                    "identifiable": bool(dbg.get("identifiable", True)),
+                    "status": dbg.get("status", "ok"),
+                    "excluded_fraction": dbg.get("excluded_fraction"),
+                    "n_identifiable": dbg.get("n_identifiable"),
+                    "n_total": dbg.get("n_total"),
+                    "conditioning_threshold": dbg.get("conditioning_threshold"),
+                    "fit_quality_threshold": dbg.get("fit_quality_threshold"),
+                }
+                if dbg.get("reason"):
+                    compact["reason"] = dbg["reason"]
+                implied_identifiability[str(bn)] = compact
+
         entry: Dict[str, Any] = {
             "index": self._index,
             "rms": rms_per_key,
@@ -3161,6 +3247,8 @@ class ResidualEngine:
                 "state_units": eff_state_units,
             },
         }
+        if implied_identifiability:
+            entry["implied_identifiability"] = implied_identifiability
         if nondim_scale_source:
             entry["nondim_scale_source"] = nondim_scale_source
         if effective_nd_scales is not None:

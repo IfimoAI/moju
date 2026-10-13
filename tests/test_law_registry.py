@@ -254,7 +254,8 @@ def test_torch_registered_heat_matches_jax():
     try:
         jax_state = heat._state()
         state = {
-            key: torch.as_tensor(np.asarray(value)) for key, value in jax_state.items()
+            key: torch.as_tensor(np.asarray(value), dtype=torch.float64)
+            for key, value in jax_state.items()
         }
         torch_engine = TorchResidualEngine(
             laws=[{"name": "heat_1d"}], law_implied_audits=False
@@ -265,7 +266,9 @@ def test_torch_registered_heat_matches_jax():
         )
         jax_residual = jax_engine.compute_residuals(jax_state)["laws"]["heat_1d"]
         assert torch.allclose(
-            torch_residual.cpu(), torch.as_tensor(np.asarray(jax_residual)), atol=1e-5
+            torch_residual.cpu().to(dtype=torch.float64),
+            torch.as_tensor(np.asarray(jax_residual), dtype=torch.float64),
+            atol=1e-5,
         )
         report = torch_engine.audit(state)
         assert report["law_sources"]["heat_1d"]["source"] == "registered"

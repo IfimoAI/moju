@@ -10,7 +10,7 @@ Requires Plotly (included in core ``moju``).
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
 
 from moju.monitor.auditor import (
     ADM_HIGH_THRESHOLD,
@@ -24,6 +24,7 @@ from moju.monitor.visualize_labels import (
     category_adm_bar_axis_range_percent_full,
     format_admissibility_pct,
     pretty_category_name,
+    pretty_residual_key,
     truncate_display_label,
 )
 from moju.monitor.visualize_constitutive import (
@@ -2060,8 +2061,26 @@ def _build_plotly_monitor_figure_single(
         summary_lines.append(
             "Governing laws satisfied" if is_high_admissibility(laws_last) else "Governing-law violations detected"
         )
-    if math.isfinite(const_last):
-        per_key_last = (metrics[-1].get("per_key_report") if metrics else {}) or {}
+    per_key_last = (metrics[-1].get("per_key_report") if metrics else {}) or {}
+    ni_rows = [
+        (k, v)
+        for k, v in per_key_last.items()
+        if isinstance(v, Mapping)
+        and (
+            v.get("admissibility_level") == "Not identifiable"
+            or v.get("identifiability_status") == "not_identifiable"
+        )
+    ]
+    if ni_rows:
+        parts = []
+        for k, v in ni_rows[:3]:
+            excl = v.get("excluded_fraction")
+            excl_s = f", {100.0 * float(excl):.0f}% excluded" if excl is not None else ""
+            parts.append(f"{pretty_residual_key(str(k))} (Not identifiable{excl_s})")
+        summary_lines.append(
+            "Constitutive check not evaluable (not a pass): " + "; ".join(parts)
+        )
+    elif math.isfinite(const_last):
         closure_summary = build_constitutive_closure_summary(per_key_last)
         if closure_summary:
             summary_lines.append(closure_summary)

@@ -691,8 +691,35 @@ def build_worst_keys_table_card(
     columns = ["Key", "Category", "R_norm", "Admissibility"]
     keys = [pretty_residual_key(r.get("key") or "") for r in rows]
     cats = [pretty_category_name(_classify_residual_category(r.get("key") or "")) for r in rows]
-    rnorms = [f"{float(r.get('r_norm') or 0.0):.3g}" for r in rows]
-    adms = [format_admissibility_pct(float(r.get("admissibility_score") or 0.0)) for r in rows]
+
+    def _rnorm_cell(r: Dict[str, Any]) -> str:
+        if str(r.get("admissibility_level") or "") == "Not identifiable":
+            excl = r.get("excluded_fraction")
+            if excl is not None:
+                try:
+                    return f"N/A ({100.0 * float(excl):.0f}% excl.)"
+                except (TypeError, ValueError):
+                    return "N/A"
+            return "N/A"
+        try:
+            return f"{float(r.get('r_norm')):.3g}"
+        except (TypeError, ValueError):
+            return "N/A"
+
+    def _adm_cell(r: Dict[str, Any]) -> str:
+        level = str(r.get("admissibility_level") or "")
+        if level == "Not identifiable":
+            return "Not identifiable"
+        for field in ("admissibility_score", "admissibility"):
+            if field in r:
+                try:
+                    return format_admissibility_pct(float(r.get(field)))
+                except (TypeError, ValueError):
+                    continue
+        return "N/A"
+
+    rnorms = [_rnorm_cell(r) for r in rows]
+    adms = [_adm_cell(r) for r in rows]
     cell_colors = [
         ["#0b1220" if (i % 2 == 0 and t.name == "dark") else (t.palette.plot_bg if i % 2 == 0 else t.palette.summary_bg) for i in range(len(rows))]
     ] * len(columns)

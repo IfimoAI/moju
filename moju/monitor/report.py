@@ -31,6 +31,37 @@ _CATEGORY_HEADERS: Dict[str, str] = {
 }
 
 
+def _not_identifiable_pdf_notes(report: Dict[str, Any]) -> List[str]:
+    """
+    HTML note lines for PDF: Not identifiable implied rows with excluded fraction + reason.
+
+    “Not identifiable” means the constitutive check could not be evaluated, not that it passed.
+    """
+    id_map = report.get("implied_identifiability") or {}
+    notes: List[str] = []
+    if not isinstance(id_map, dict):
+        return notes
+    for bn, meta in id_map.items():
+        if not isinstance(meta, dict):
+            continue
+        if meta.get("status") != "not_identifiable" and meta.get("identifiable") is not False:
+            continue
+        excl = meta.get("excluded_fraction")
+        reason = meta.get("reason") or (
+            "Constitutive viscosity check could not be evaluated. "
+            "This does not mean the check passed."
+        )
+        try:
+            excl_s = f"{100.0 * float(excl):.1f}%" if excl is not None else "n/a"
+        except (TypeError, ValueError):
+            excl_s = "n/a"
+        label = pretty_residual_key(f"constitutive/{bn}/implied_delta")
+        notes.append(
+            f"<b>{label}</b>: Not identifiable (excluded fraction {excl_s}). {reason}"
+        )
+    return notes
+
+
 def _group_keys_by_category(per_key: Dict[str, Any]) -> List[Tuple[str, List[Tuple[str, Any]]]]:
     buckets: Dict[str, List[Tuple[str, Any]]] = {
         "laws": [],
@@ -439,6 +470,21 @@ def write_audit_pdf(
         story.append(Paragraph(str(closure_summary), body_style))
         story.append(Spacer(1, 16))
 
+    not_ident_notes = _not_identifiable_pdf_notes(report)
+    if not_ident_notes:
+        story.append(Paragraph("Implied property identifiability", heading_style))
+        story.append(
+            Paragraph(
+                '"Not identifiable" means the constitutive check could not be evaluated '
+                "(too few gated points); it is listed below and in the per-key table, "
+                "but omitted from the overall rollup so it is never treated as passing.",
+                body_style,
+            )
+        )
+        for note in not_ident_notes:
+            story.append(Paragraph(note, body_style))
+        story.append(Spacer(1, 12))
+
     # Per-key metrics by category
     per_key_filtered = dict(per_key)
     if training_doc:
@@ -454,7 +500,14 @@ def write_audit_pdf(
         for label, data in items:
             score = data.get("admissibility_score", 0.0)
             level = data.get("admissibility_level", "Non-Admissible")
-            table_data.append([label, format_admissibility_pct(float(score)), level])
+            score_s = format_admissibility_pct(float(score)) if level != "Not identifiable" else "N/A"
+            if level == "Not identifiable" and data.get("excluded_fraction") is not None:
+                try:
+                    excl_pct = 100.0 * float(data["excluded_fraction"])
+                    level = f"Not identifiable ({excl_pct:.1f}% excl.)"
+                except (TypeError, ValueError):
+                    pass
+            table_data.append([label, score_s, level])
         t = Table(table_data, colWidths=[2.5 * inch, 1 * inch, 2.2 * inch])
         t.setStyle(
             TableStyle(

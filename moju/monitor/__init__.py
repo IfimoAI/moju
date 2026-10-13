@@ -39,6 +39,8 @@ from moju.monitor.law_fd_recipes import (
     list_law_fd_supported_laws,
 )
 from moju.monitor.law_implied_diagnostics import (
+    DEFAULT_IMPLIED_TERM_FRACTION,
+    ImpliedPropertyResult,
     LawImpliedCheck,
     implied_by_projection,
     effective_audit_specs_for_fragment,
@@ -133,6 +135,8 @@ __all__ = [
     "fill_path_b_spectral",
     "fill_law_fd_from_primitives",
     "list_law_fd_supported_laws",
+    "DEFAULT_IMPLIED_TERM_FRACTION",
+    "ImpliedPropertyResult",
     "effective_audit_specs_for_fragment",
     "law_implied_unsupported_reasons",
     "list_laws_with_implied_diagnostics",

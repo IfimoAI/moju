@@ -172,6 +172,20 @@ Pass `eval_mask` (boolean, True = keep) to exclude points (for example near wall
 from the RMS/max used in that call. Mask statistics appear under `eval_mask` in the
 report. Omitting the mask preserves prior scoring behaviour.
 
+## Implied properties need an identifiable constitutive term
+
+Law-linked implied audits (e.g. viscosity from momentum, \(\alpha\) from Fourier)
+recover a material coefficient from the same derivatives as the law. That recovery
+is well-posed only where the constitutive term is not negligible in the local
+balance. For NS/Stokes/Burgers viscosity, Moju keeps points where
+\(|\nu\nabla^2\mathbf u|\) is at least `implied_term_fraction` (default 0.1) of the
+largest balance term **and** the LSQ fit quality clears `implied_fit_quality_fraction`
+(same default); otherwise the point is excluded or the row is **Not identifiable**
+(could not evaluate — not a pass). See
+[`law_implied_audits.md`](law_implied_audits.md). Poor derivatives make implied rows
+noisier than law residuals — prefer supplied or spectral derivatives when those
+audits lead the study.
+
 ## Example
 
 See [`examples/cookbook_taylor_green_diagnostics.py`](../examples/cookbook_taylor_green_diagnostics.py)

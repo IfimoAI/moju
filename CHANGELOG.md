@@ -6,6 +6,70 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-13
+
+### Fixed
+
+- **Law-linked implied viscosity (NS / Stokes / Burgers).** Previously the
+  Navier–Stokes and Stokes implied-μ paths recovered
+  ``μ̃ = β · ρ · |u|_local · L`` from a Reynolds-style group that used **local
+  speed**. Viscosity is a material property; that construction biased ``μ̃``
+  wherever local speed differed from the reference (walls, stagnation), even
+  when the momentum residual was at machine precision on exact analytic flows
+  (Kovasznay, Taylor–Green). **2.1** recovers
+  ``ν̃* = argmin ||(u_t + (u·∇)u + ∇p − f) − ν* ∇²u||`` by last-axis LSQ
+  (plus a domain projection on the identifiable set), then
+  ``μ̃ = ρ U L ν̃*`` with **declared** reference ``U`` and ``L``. Implied
+  Reynolds numbers use the same reference scales, never local speed.
+  ``Models.dynamic_viscosity_from_re`` uses ``(rho, U, L, re)``. Burgers
+  already returned ν̃ from LSQ; it gains the same conditioning gate and
+  ``Rẽ = U L / ν̃`` reporting. On Kovasznay flow (Re = 40, default gate),
+  implied ν recovers the exact value within ~1e-14 relative (machine
+  precision) on kept points with exact derivatives (kept fraction 100% at
+  n = 16 and n = 64); with Path B FD4 fill, mean relative error on kept
+  points decreases with resolution (~10% at n = 32 → ~1% at n = 64).
+
+- **Conditioning gate.** A point is kept only if **both** hold
+  (``implied_term_fraction`` / ``implied_fit_quality_fraction``, defaults
+  **0.1**):
+  (1) **term fraction** ``|β ∇²u| / max_i |term_i|`` ≥ term threshold;
+  (2) **fit quality** ``|β ∇²u| / (|β ∇²u| + |rhs − β ∇²u|)`` ≥ fit threshold.
+  Excluded points are NaN-masked; ``excluded_fraction`` is logged. If too few
+  points remain (``implied_min_identifiable_fraction`` /
+  ``implied_min_identifiable_count``), the row is **Not identifiable**
+  (listed with excluded fraction and reason in the Python report, JSON
+  export, PDF, and Plotly dashboard; omitted from category/overall rollup
+  so it does not zero admissibility — “Not identifiable” means the check
+  could not be evaluated, not that it passed). Compact flags:
+  ``entry["implied_identifiability"]``.
+
+### Changed
+
+- Scores/tiers for
+  ``constitutive/dynamic_viscosity_from_re/law_momentum_navier_stokes/implied_delta``,
+  ``constitutive/dynamic_viscosity_from_re/law_stokes_flow/implied_delta``, and
+  (gate-related NaNs on)
+  ``constitutive/kinematic_viscosity_from_re/law_burgers_equation/implied_delta``.
+  See [`docs/MIGRATION_2.0_to_2.1.md`](docs/MIGRATION_2.0_to_2.1.md).
+- High-Re Taylor–Green (viscous term ≪ inertia) may exclude most points under
+  the default gate and report **Not identifiable**; lower-Re / viscous-dominant
+  regions remain scored.
+
+### Deprecated
+
+- ``Models.dynamic_viscosity_from_re(..., u=...)`` — keyword alias for ``U``.
+  Emits ``DeprecationWarning``; **removal planned in moju 3.0**. Prefer ``U=``.
+
+### Known limitations
+
+- Implied viscosity is identifiable only where the viscous term is a meaningful
+  fraction of the local balance; inertia-dominated regions are excluded by
+  design.
+- Declared ``U`` and ``L`` must match the Reynolds definition used in the law;
+  Moju does not infer them from the velocity field.
+- Fourier / thermal-diffusivity implied rows are unchanged (paper slab-cooling
+  path unaffected).
+
 ## [2.0.0] - 2026-10-11
 
 Major release: Path B derivative defaults and residual scoring defaults change.

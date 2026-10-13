@@ -80,6 +80,12 @@ def compute_implied_delta_torch_with_debug(
         implied = implied_fn_torch(state_pred, constants)
     except Exception:  # noqa: BLE001
         return None, None
+    implied_meta: Dict[str, Any] = {}
+    from moju.monitor.law_implied_diagnostics import ImpliedPropertyResult
+
+    if isinstance(implied, ImpliedPropertyResult):
+        implied_meta = dict(implied.meta or {})
+        implied = implied.value
     if implied is None:
         return None, None
     implied_t = _to_tensor(implied)
@@ -89,6 +95,10 @@ def compute_implied_delta_torch_with_debug(
         delta = raw / (torch.abs(pred) + _NORMALIZE_EPS)
     except Exception:  # noqa: BLE001
         return None, None
+    if implied_meta.get("status") == "not_identifiable" or implied_meta.get(
+        "identifiable"
+    ) is False:
+        delta = torch.full_like(delta, float("nan"))
     debug = {
         "pred": pred_debug,
         "implied": implied_debug,
@@ -97,6 +107,8 @@ def compute_implied_delta_torch_with_debug(
         "mode": "subtract",
         "output_key": output_key,
     }
+    if implied_meta:
+        debug.update(implied_meta)
     return delta, debug
 
 
