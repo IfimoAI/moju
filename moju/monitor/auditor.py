@@ -727,7 +727,17 @@ def _compute_log_step_metrics(
                 rms_f = float(v)
             except (TypeError, ValueError):
                 rms_f = float("nan")
-            if _key_uses_worst_point_admissibility(k, entry_scoring):
+            imp_score = None
+            imp_map = entry.get("implied_scoring") or {}
+            if isinstance(imp_map, dict) and k in imp_map and isinstance(imp_map[k], Mapping):
+                imp_score = imp_map[k]
+            if imp_score is not None:
+                try:
+                    v_eff = float(imp_score.get("v_eff", float("nan")))
+                except (TypeError, ValueError):
+                    v_eff = float("nan")
+                metric = str(imp_score.get("admissibility_metric") or "max")
+            elif _key_uses_worst_point_admissibility(k, entry_scoring):
                 try:
                     v_max = float(r_max.get(k, float("nan")))
                 except (TypeError, ValueError):
@@ -781,6 +791,16 @@ def _compute_log_step_metrics(
             }
             if k in r_max:
                 key_report["r_max"] = r_max[k]
+            if imp_score is not None:
+                key_report["implied_metric"] = imp_score.get("implied_metric")
+                key_report["implied_percentile"] = imp_score.get("implied_percentile")
+                key_report["implied_noise_normalization"] = bool(
+                    imp_score.get("implied_noise_normalization", False)
+                )
+                if imp_score.get("r_max_raw") is not None:
+                    key_report["r_max_raw"] = imp_score.get("r_max_raw")
+                    # Always surface raw worst-point alongside the scoring statistic.
+                    key_report["r_max"] = imp_score.get("r_max_raw")
             if id_meta is not None:
                 # Explicit per-key sidecar: never treat as passing; rollup skips this key.
                 key_report["identifiability_status"] = "not_identifiable"
@@ -954,6 +974,8 @@ def audit(
         report["law_sources"] = dict(log[-1]["law_sources"])
     if log[-1].get("implied_identifiability"):
         report["implied_identifiability"] = dict(log[-1]["implied_identifiability"])
+    if log[-1].get("implied_scoring"):
+        report["implied_scoring"] = dict(log[-1]["implied_scoring"])
     for opt_key in (
         "term_breakdown",
         "derivative_metadata",
@@ -1206,6 +1228,13 @@ def _worst_keys_table_rows(
             "admissibility_level": level or admissibility_level(adm_f),
             "category": prefix,
         }
+        if rep.get("implied_metric") is not None:
+            row["implied_metric"] = rep.get("implied_metric")
+            row["implied_percentile"] = rep.get("implied_percentile")
+            row["implied_noise_normalization"] = rep.get("implied_noise_normalization")
+            row["admissibility_metric"] = rep.get("admissibility_metric")
+            if rep.get("r_max_raw") is not None:
+                row["r_max_raw"] = rep.get("r_max_raw")
         if is_ni:
             row["admissibility_level"] = "Not identifiable"
             if rep.get("excluded_fraction") is not None:
@@ -3235,6 +3264,34 @@ class ResidualEngine:
                     compact["reason"] = dbg["reason"]
                 implied_identifiability[str(bn)] = compact
 
+        # Opt-in robust scoring for constitutive implied_delta (defaults = 2.1).
+        from moju.monitor.implied_scoring import (
+            parse_implied_scoring_options,
+            score_implied_delta_array,
+        )
+
+        implied_scoring_opts = parse_implied_scoring_options(self.constants)
+        implied_scoring: Dict[str, Any] = {}
+        for k, arr in flat.items():
+            if not (str(k).startswith("constitutive/") and str(k).endswith("/implied_delta")):
+                continue
+            bn = str(k)[len("constitutive/") : -len("/implied_delta")]
+            dbg = closure_debug.get(bn) if isinstance(closure_debug.get(bn), dict) else {}
+            v_eff, r_max_raw, meta = score_implied_delta_array(
+                arr, dbg, implied_scoring_opts
+            )
+            # Keep entry["r_max"] as the raw worst-point of unnormalized δ.
+            if log_to_python:
+                r_max_per_key[k] = float(r_max_raw)
+                meta = {
+                    **meta,
+                    "r_max_raw": float(r_max_raw),
+                    "v_eff": float(v_eff) if math.isfinite(v_eff) else float("nan"),
+                }
+            else:
+                r_max_per_key[k] = r_max_raw
+            implied_scoring[k] = meta
+
         entry: Dict[str, Any] = {
             "index": self._index,
             "rms": rms_per_key,
@@ -3247,6 +3304,8 @@ class ResidualEngine:
                 "state_units": eff_state_units,
             },
         }
+        if implied_scoring:
+            entry["implied_scoring"] = implied_scoring
         if implied_identifiability:
             entry["implied_identifiability"] = implied_identifiability
         if nondim_scale_source:

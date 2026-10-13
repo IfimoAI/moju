@@ -137,6 +137,21 @@ Configure via constants: `implied_term_fraction`, `implied_fit_quality_fraction`
 
 **When are implied properties identifiable?** Prefer regions where the constitutive term is not dwarfed by the rest of the balance (e.g. viscous-dominated Stokes/low-Re patches). Inertia-dominated high-Re patches may be excluded even when the PDE residual is small — that is intentional, not a law failure. Safe-division rows (Fourier \(\alpha\), Fick \(D\), …) already NaN-mask vanishing denominators; viscosity rows use the gate above.
 
+### Opt-in robust scoring (Moju 2.2)
+
+Defaults match 2.1: ``implied_metric="worst_point"``, ``implied_noise_normalization=False``.
+Governing-law scoring is never changed. See [`MIGRATION_2.1_to_2.2.md`](MIGRATION_2.1_to_2.2.md)
+for the full formula.
+
+| Constant | Default | Use when |
+|----------|---------|----------|
+| `implied_metric` | `"worst_point"` | Set `"percentile"` if a few spikes dominate `max ‖δ‖` |
+| `implied_percentile` | `95` | With percentile metric |
+| `implied_noise_normalization` | `False` | Noisy / derivative-limited data; second-derivative implied properties |
+
+Reports always keep raw ``max ‖δ‖`` as ``r_max_raw`` and record which metric/normalization
+produced ``score_for_admissibility``.
+
 Example: let Moju materialize `k`, `rho`, and `alpha` from `T` (so the Fourier implied `thermal_diffusivity` check can run without you precomputing those fields):
 
 ```python

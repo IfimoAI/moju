@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 import json
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from moju.monitor.visualize_labels import format_admissibility_pct, pretty_residual_key
 
@@ -29,6 +29,19 @@ _CATEGORY_HEADERS: Dict[str, str] = {
     "groups": "Scaling and similarity (legacy key)",
     "models": "Constitutive (legacy key)",
 }
+
+
+def _implied_scoring_pdf_note(data: Mapping[str, Any]) -> str:
+    """Short PDF cell note for opt-in implied scoring + raw worst-point."""
+    if data.get("implied_metric") is None and not data.get("implied_noise_normalization"):
+        return ""
+    parts = [str(data.get("admissibility_metric") or data.get("implied_metric") or "")]
+    if data.get("r_max_raw") is not None:
+        try:
+            parts.append(f"raw max|δ|={float(data['r_max_raw']):.3g}")
+        except (TypeError, ValueError):
+            pass
+    return "; ".join(p for p in parts if p)
 
 
 def _not_identifiable_pdf_notes(report: Dict[str, Any]) -> List[str]:
@@ -496,7 +509,7 @@ def write_audit_pdf(
     grouped = _group_keys_by_category(per_key_filtered)
     for section_header, items in grouped:
         story.append(Paragraph(section_header, heading_style))
-        table_data = [["Metric", "Score", "Level"]]
+        table_data = [["Metric", "Score", "Level", "Scoring note"]]
         for label, data in items:
             score = data.get("admissibility_score", 0.0)
             level = data.get("admissibility_level", "Non-Admissible")
@@ -507,8 +520,9 @@ def write_audit_pdf(
                     level = f"Not identifiable ({excl_pct:.1f}% excl.)"
                 except (TypeError, ValueError):
                     pass
-            table_data.append([label, score_s, level])
-        t = Table(table_data, colWidths=[2.5 * inch, 1 * inch, 2.2 * inch])
+            note = _implied_scoring_pdf_note(data if isinstance(data, Mapping) else {})
+            table_data.append([label, score_s, level, note])
+        t = Table(table_data, colWidths=[2.0 * inch, 0.9 * inch, 1.6 * inch, 1.8 * inch])
         t.setStyle(
             TableStyle(
                 [

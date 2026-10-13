@@ -16,6 +16,7 @@ moju follows [Semantic Versioning](https://semver.org/) (semver) with one clarif
 - **1.0 and later:** Breaking changes are a major bump. 1.x minor and patch releases stay backward compatible.
 - **2.0:** Scoring defaults change (Path B `fd_order=4`, weighted norms with a percentile safeguard). Tier *cutoffs* are unchanged. Reproduce 1.x with `fd_order="legacy"` / `weighted_norms=False`, or `moju<2`. See [`docs/MIGRATION_1x_to_2.0.md`](docs/MIGRATION_1x_to_2.0.md).
 - **2.1:** Law-linked implied viscosity uses momentum LSQ and declared reference ``U`` (not local ``|u|``). See [`docs/MIGRATION_2.0_to_2.1.md`](docs/MIGRATION_2.0_to_2.1.md).
+- **2.2:** Opt-in robust scoring for implied constitutive rows (percentile / noise normalization). Defaults unchanged from 2.1. See [`docs/MIGRATION_2.1_to_2.2.md`](docs/MIGRATION_2.1_to_2.2.md).
 
 ## Releases
 

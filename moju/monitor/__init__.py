@@ -38,6 +38,11 @@ from moju.monitor.law_fd_recipes import (
     fill_law_fd_from_primitives,
     list_law_fd_supported_laws,
 )
+from moju.monitor.implied_scoring import (
+    DEFAULT_IMPLIED_METRIC,
+    DEFAULT_IMPLIED_PERCENTILE,
+    parse_implied_scoring_options,
+)
 from moju.monitor.law_implied_diagnostics import (
     DEFAULT_IMPLIED_TERM_FRACTION,
     ImpliedPropertyResult,
@@ -136,6 +141,9 @@ __all__ = [
     "fill_law_fd_from_primitives",
     "list_law_fd_supported_laws",
     "DEFAULT_IMPLIED_TERM_FRACTION",
+    "DEFAULT_IMPLIED_METRIC",
+    "DEFAULT_IMPLIED_PERCENTILE",
+    "parse_implied_scoring_options",
     "ImpliedPropertyResult",
     "effective_audit_specs_for_fragment",
     "law_implied_unsupported_reasons",

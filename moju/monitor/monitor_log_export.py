@@ -219,6 +219,7 @@ def _build_summary(
     plot_keys = list(keys) if keys is not None else list((log[0].get("rms") or {}).keys())
     worst_rows = _worst_keys_table_rows(log, plot_keys, metrics, top_n=worst_keys_top_n)
     id_map = log[-1].get("implied_identifiability") if isinstance(log[-1], dict) else None
+    scoring_map = log[-1].get("implied_scoring") if isinstance(log[-1], dict) else None
 
     summary: Dict[str, Any] = {
         "per_key": last_report_per_key,
@@ -233,6 +234,8 @@ def _build_summary(
     }
     if isinstance(id_map, dict) and id_map:
         summary["implied_identifiability"] = dict(id_map)
+    if isinstance(scoring_map, dict) and scoring_map:
+        summary["implied_scoring"] = dict(scoring_map)
     return summary
 
 
