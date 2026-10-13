@@ -753,11 +753,26 @@ def _compute_log_step_metrics(
                     admissibility[k] = float("nan")
                 else:
                     admissibility[k] = 1.0 / (1.0 + r_norm[k])
+            level = admissibility_level(admissibility[k])
+            # Law-linked viscosity rows may mark themselves not identifiable.
+            id_map = entry.get("implied_identifiability") or {}
+            if (
+                isinstance(id_map, dict)
+                and k.startswith("constitutive/")
+                and k.endswith("/implied_delta")
+            ):
+                bn = k[len("constitutive/") : -len("/implied_delta")]
+                meta = id_map.get(bn) if isinstance(id_map.get(bn), dict) else None
+                if meta and (
+                    meta.get("status") == "not_identifiable"
+                    or meta.get("identifiable") is False
+                ):
+                    level = "Not identifiable"
             key_report: Dict[str, Any] = {
                 "rms": v,
                 "r_norm": r_norm[k],
                 "admissibility_score": admissibility[k],
-                "admissibility_level": admissibility_level(admissibility[k]),
+                "admissibility_level": level,
                 "admissibility_metric": metric,
                 "score_for_admissibility": v_eff,
                 "scale_source": scale_src,
@@ -3149,6 +3164,21 @@ class ResidualEngine:
                             f"{info.get('error_over_residual')}, threshold={thr})."
                         )
 
+        # Compact identifiability flags for law-linked implied rows (no heavy tensors).
+        implied_identifiability: Dict[str, Any] = {}
+        for bn, dbg in closure_debug.items():
+            if not isinstance(dbg, dict):
+                continue
+            if "identifiable" in dbg or dbg.get("status") == "not_identifiable":
+                implied_identifiability[str(bn)] = {
+                    "identifiable": bool(dbg.get("identifiable", True)),
+                    "status": dbg.get("status", "ok"),
+                    "excluded_fraction": dbg.get("excluded_fraction"),
+                    "n_identifiable": dbg.get("n_identifiable"),
+                    "n_total": dbg.get("n_total"),
+                    "conditioning_threshold": dbg.get("conditioning_threshold"),
+                }
+
         entry: Dict[str, Any] = {
             "index": self._index,
             "rms": rms_per_key,
@@ -3161,6 +3191,8 @@ class ResidualEngine:
                 "state_units": eff_state_units,
             },
         }
+        if implied_identifiability:
+            entry["implied_identifiability"] = implied_identifiability
         if nondim_scale_source:
             entry["nondim_scale_source"] = nondim_scale_source
         if effective_nd_scales is not None:

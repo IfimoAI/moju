@@ -115,11 +115,11 @@ def _closure_wave_speed_from_st(state: Dict, constants: Dict) -> Optional[Any]:
 
 
 def _closure_dynamic_viscosity_from_re(state: Dict, constants: Dict) -> Optional[Any]:
-    if not _all_present(state, constants, ("mu", "rho", "u", "L", "re")):
+    if not _all_present(state, constants, ("mu", "rho", "U", "L", "re")):
         return None
     return _val(state, constants, "mu") - Models.dynamic_viscosity_from_re(
         _val(state, constants, "rho"),
-        _val(state, constants, "u"),
+        _val(state, constants, "U"),
         _val(state, constants, "L"),
         _val(state, constants, "re"),
     )

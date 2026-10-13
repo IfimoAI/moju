@@ -25,8 +25,11 @@ is what is scored.
    ``viscous_acceleration = u_t + (u·grad) u + grad p`` from the momentum balance) so the
    engine can compute element-wise ``Models.F(pred) - implied``.  μ rows (NS / Stokes) and
    Burgers **ν** use :func:`_project_scalar_coefficient` (LSQ projection onto ``u_laplacian``)
-   to recover a per-point scalar from a vector balance; Burgers compares that
-   ``nu_tilde`` to ``Models.kinematic_viscosity_from_re``.
+   to recover a per-point scalar viscosity from the momentum balance. Catalog μ / ν and any
+   reported Reynolds number use **declared** reference velocity ``U`` and length ``L`` —
+   never local ``|u|``. Ill-conditioned points (viscous term below
+   :data:`DEFAULT_IMPLIED_TERM_FRACTION` of the largest balance term) are NaN-masked; when
+   too few points remain the row is reported as **not identifiable**.
 
 Both flavours feed into the same fractional residual via
 :func:`moju.monitor.closure_registry.compute_implied_delta_with_debug`, producing an array
@@ -75,23 +78,187 @@ def _state_or_const(state: Dict[str, Any], constants: Dict[str, Any], key: str) 
     return v
 
 
+# Conditioning gate for implied material properties (configurable via constants).
+DEFAULT_IMPLIED_TERM_FRACTION: float = 0.1
+DEFAULT_MIN_IDENTIFIABLE_FRACTION: float = 0.05
+DEFAULT_MIN_IDENTIFIABLE_COUNT: int = 8
+
+
+@dataclass
+class ImpliedPropertyResult:
+    """
+    Optional return type from ``implied_fn`` carrying a value plus conditioning metadata.
+
+    :func:`moju.monitor.closure_registry.compute_implied_delta_with_debug` unwraps this into
+    the residual array and merges ``meta`` into ``closure_debug``.
+    """
+
+    value: Any
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+
 def _vec_norm_last(x: Any) -> jnp.ndarray:
     a = jnp.asarray(x)
     if a.ndim == 0:
         return jnp.abs(a)
-    return jnp.sqrt(jnp.sum(a**2, axis=-1))
+    return jnp.sqrt(jnp.sum(a**2, axis=-1) + 1e-30)
 
 
-def _re_from_mu(
-    u: Any,
-    rho: Any,
+def _re_from_viscosity(
+    U: Any,
     L: Any,
-    mu_pred: Any,
+    nu_or_mu: Any,
     *,
+    rho: Any = None,
     eps: float = 1e-30,
 ) -> jnp.ndarray:
-    u_char = _vec_norm_last(jnp.asarray(u))
-    return (jnp.asarray(rho) * u_char * jnp.asarray(L)) / (jnp.asarray(mu_pred) + eps)
+    """
+    Reynolds number from a viscosity estimate and declared reference scales.
+
+    With ``rho`` provided: ``Re = rho U L / mu``. Otherwise ``Re = U L / nu``.
+    Never uses local ``|u|``.
+    """
+    UL = jnp.asarray(U) * jnp.asarray(L)
+    den = jnp.asarray(nu_or_mu) + eps
+    if rho is not None:
+        return (jnp.asarray(rho) * UL) / den
+    return UL / den
+
+
+def _gate_params(constants: Dict[str, Any]) -> Tuple[float, float, int]:
+    thr = float(constants.get("implied_term_fraction", DEFAULT_IMPLIED_TERM_FRACTION))
+    min_frac = float(
+        constants.get("implied_min_identifiable_fraction", DEFAULT_MIN_IDENTIFIABLE_FRACTION)
+    )
+    min_count = int(
+        constants.get("implied_min_identifiable_count", DEFAULT_MIN_IDENTIFIABLE_COUNT)
+    )
+    return thr, min_frac, min_count
+
+
+def _resolve_ref_UL(
+    state: Dict[str, Any],
+    constants: Dict[str, Any],
+    law_sm: Dict[str, str],
+) -> Tuple[Optional[Any], Optional[Any]]:
+    """Declared reference velocity ``U`` and length ``L`` (law map, then state/constants)."""
+    U = _val(state, constants, law_sm, "U")
+    if U is None:
+        U = _state_or_const(state, constants, "U")
+    L = _val(state, constants, law_sm, "L")
+    if L is None:
+        L = _state_or_const(state, constants, "L")
+    return U, L
+
+
+def _optional_body_force(
+    state: Dict[str, Any],
+    constants: Dict[str, Any],
+    law_sm: Dict[str, str],
+) -> Optional[jnp.ndarray]:
+    f = _val(state, constants, law_sm, "f")
+    if f is None:
+        f = _state_or_const(state, constants, "f")
+    if f is None:
+        f = _state_or_const(state, constants, "body_force")
+    return None if f is None else jnp.asarray(f)
+
+
+def _global_scalar_coefficient(rhs: Any, basis: Any, mask: Any) -> jnp.ndarray:
+    """Domain LSQ coefficient ``coef`` for ``rhs ~= coef * basis`` on ``mask``."""
+    rhs_a = jnp.asarray(rhs)
+    basis_a = jnp.asarray(basis)
+    m = jnp.asarray(mask)
+    if m.ndim == rhs_a.ndim - 1:
+        w = m[..., None]
+    else:
+        w = m
+    w = jnp.where(w, 1.0, 0.0)
+    numerator = jnp.sum(w * rhs_a * basis_a)
+    denominator = jnp.sum(w * basis_a * basis_a)
+    return _safe_ratio(numerator, denominator)
+
+
+def _apply_viscosity_conditioning(
+    beta: Any,
+    rhs: Any,
+    basis: Any,
+    balance_terms: Sequence[Any],
+    *,
+    threshold: float,
+    min_frac: float,
+    min_count: int,
+) -> Tuple[jnp.ndarray, jnp.ndarray, Dict[str, Any]]:
+    """
+    Gate a pointwise viscosity coefficient for implied-property scoring.
+
+    Two checks (both required):
+
+    1. **Fit quality** — ``|β ∇²u| / (|β ∇²u| + |rhs − β ∇²u|)`` ≥ ``threshold``.
+       This stays high when large inertial/pressure terms cancel and the viscous
+       term is small but consistent (e.g. Taylor–Green at moderate Re).
+    2. **Operator energy** — ``|∇²u|²`` must exceed a relative floor of the RHS
+       energy so a vanishing Laplacian cannot yield a huge unstable ``β``.
+
+    Also reports ``term_fraction = |β ∇²u| / max_i |term_i|`` for diagnostics.
+    Returns ``(beta_masked, beta_global, meta)``.
+    """
+    b = jnp.asarray(beta)
+    ba = jnp.asarray(basis)
+    rhs_a = jnp.asarray(rhs)
+    if b.ndim == ba.ndim - 1:
+        visc = b[..., None] * ba
+    else:
+        visc = b * ba
+    pt = _vec_norm_last(visc)
+    fit_res = _vec_norm_last(rhs_a - visc)
+    fit_quality = pt / (pt + fit_res + 1e-30)
+
+    tmax = pt
+    for term in balance_terms:
+        if term is None:
+            continue
+        tmax = jnp.maximum(tmax, _vec_norm_last(term))
+    term_fraction = jnp.where(tmax > 0, pt / tmax, jnp.zeros_like(pt))
+
+    den = jnp.sum(jnp.square(ba), axis=-1)
+    rhs_energy = jnp.sum(jnp.square(rhs_a), axis=-1)
+    # Relative operator floor: reject points (and whole fields) where ∇²u is ~0
+    # compared to the momentum RHS that β is asked to explain.
+    den_scale = jnp.maximum(jnp.mean(rhs_energy), 1e-30)
+    op_ok = den >= (float(threshold) * float(threshold) * den_scale)
+
+    mask = (
+        jnp.isfinite(fit_quality)
+        & jnp.isfinite(b)
+        & (fit_quality >= float(threshold))
+        & op_ok
+    )
+    n_tot = int(mask.size)
+    n_ok = int(jnp.sum(mask))
+    excluded_fraction = 1.0 - (float(n_ok) / float(max(n_tot, 1)))
+    # Absolute floor scales down on tiny evaluation sets (unit tests / single points).
+    eff_min_count = min(int(min_count), max(1, n_tot))
+    identifiable = (n_ok >= eff_min_count) and (
+        float(n_ok) / float(max(n_tot, 1)) >= float(min_frac)
+    )
+    beta_masked = jnp.where(mask, b, jnp.nan)
+    beta_global = _global_scalar_coefficient(rhs_a, ba, mask)
+    meta: Dict[str, Any] = {
+        "term_fraction": term_fraction,
+        "fit_quality": fit_quality,
+        "conditioning_threshold": float(threshold),
+        "excluded_fraction": float(excluded_fraction),
+        "n_identifiable": int(n_ok),
+        "n_total": int(n_tot),
+        "identifiable": bool(identifiable),
+        "status": "ok" if identifiable else "not_identifiable",
+        "min_identifiable_fraction": float(min_frac),
+        "min_identifiable_count": int(min_count),
+        "nu_star_pointwise": beta_masked,
+        "nu_star_global": beta_global,
+    }
+    return beta_masked, beta_global, meta
 
 
 # ---------------------------------------------------------------------------
@@ -191,71 +358,169 @@ def implied_kappa_advection_diffusion(law_sm: Dict[str, str]) -> Callable[..., A
 
 
 def implied_mu_momentum_navier_stokes(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Recover dynamic viscosity by projecting inertial terms onto ``u_laplacian``."""
+    """
+    Recover dynamic viscosity from the nondimensional momentum balance by LSQ.
 
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+    Solves pointwise (and globally on the identifiable set)
+
+        ν̃* = argmin || (u_t + (u·∇)u + ∇p − f) − ν* ∇²u ||
+
+    then ``μ̃ = ρ U L ν̃*`` with **declared** reference ``U``, ``L`` (never local ``|u|``).
+    """
+
+    def implied_fn(
+        state: Dict[str, Any], constants: Dict[str, Any]
+    ) -> Optional[ImpliedPropertyResult]:
         u_t = _val(state, constants, law_sm, "u_t")
         u = _val(state, constants, law_sm, "u")
         u_grad = _val(state, constants, law_sm, "u_grad")
         p_grad = _val(state, constants, law_sm, "p_grad")
         u_lap = _val(state, constants, law_sm, "u_laplacian")
-        rho = _state_or_const(state, constants, "rho")
-        L = _state_or_const(state, constants, "L")
-        if u_t is None or u is None or u_grad is None or p_grad is None or u_lap is None:
-            return None
-        if rho is None or L is None:
+        rho = _val(state, constants, law_sm, "rho")
+        if rho is None:
+            rho = _state_or_const(state, constants, "rho")
+        U, L = _resolve_ref_UL(state, constants, law_sm)
+        if any(v is None for v in (u_t, u, u_grad, p_grad, u_lap, rho, U, L)):
             return None
         u_a = jnp.asarray(u)
         adv = jnp.einsum("...ij,...j->...i", jnp.asarray(u_grad), u_a)
-        inertial = jnp.asarray(u_t) + adv + jnp.asarray(p_grad)
-        beta = _project_scalar_coefficient(inertial, u_lap)
-        return beta * jnp.asarray(rho) * _vec_norm_last(u_a) * jnp.asarray(L)
+        f = _optional_body_force(state, constants, law_sm)
+        rhs = jnp.asarray(u_t) + adv + jnp.asarray(p_grad)
+        if f is not None:
+            rhs = rhs - f
+        u_lap_a = jnp.asarray(u_lap)
+        beta = _project_scalar_coefficient(rhs, u_lap_a)
+        thr, min_frac, min_count = _gate_params(constants)
+        balance = [jnp.asarray(u_t), adv, jnp.asarray(p_grad)]
+        if f is not None:
+            balance.append(f)
+        beta_m, beta_g, meta = _apply_viscosity_conditioning(
+            beta,
+            rhs,
+            u_lap_a,
+            balance,
+            threshold=thr,
+            min_frac=min_frac,
+            min_count=min_count,
+        )
+        scale = jnp.asarray(rho) * jnp.asarray(U) * jnp.asarray(L)
+        mu_pw = beta_m * scale
+        mu_g = beta_g * scale
+        if not meta["identifiable"]:
+            mu_pw = jnp.full_like(mu_pw, jnp.nan)
+        meta.update(
+            {
+                "mu_tilde_pointwise": mu_pw,
+                "mu_tilde_global": mu_g,
+                "re_tilde_global": _re_from_viscosity(U, L, mu_g, rho=rho),
+                "re_tilde_pointwise": _re_from_viscosity(U, L, mu_pw, rho=rho),
+                "reference_U": jnp.asarray(U),
+                "reference_L": jnp.asarray(L),
+            }
+        )
+        return ImpliedPropertyResult(value=mu_pw, meta=meta)
 
     return implied_fn
 
 
 def implied_mu_stokes_flow(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Recover dynamic viscosity by projecting pressure gradient onto ``u_laplacian``."""
+    """
+    Recover dynamic viscosity from Stokes balance by LSQ onto ``u_laplacian``.
 
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+    ``ν̃* = argmin || ∇p − ν* ∇²u ||``, then ``μ̃ = ρ U L ν̃*`` with declared ``U``, ``L``.
+    """
+
+    def implied_fn(
+        state: Dict[str, Any], constants: Dict[str, Any]
+    ) -> Optional[ImpliedPropertyResult]:
         p_grad = _val(state, constants, law_sm, "p_grad")
         u_lap = _val(state, constants, law_sm, "u_laplacian")
-        u = _val(state, constants, law_sm, "u")
-        if u is None:
-            u = _state_or_const(state, constants, "u")
         rho = _val(state, constants, law_sm, "rho")
         if rho is None:
             rho = _state_or_const(state, constants, "rho")
-        L = _val(state, constants, law_sm, "L")
-        if L is None:
-            L = _state_or_const(state, constants, "L")
-        if p_grad is None or u_lap is None or u is None or rho is None or L is None:
+        U, L = _resolve_ref_UL(state, constants, law_sm)
+        if any(v is None for v in (p_grad, u_lap, rho, U, L)):
             return None
-        u_a = jnp.asarray(u)
-        beta = _project_scalar_coefficient(p_grad, u_lap)
-        return beta * jnp.asarray(rho) * _vec_norm_last(u_a) * jnp.asarray(L)
+        rhs = jnp.asarray(p_grad)
+        u_lap_a = jnp.asarray(u_lap)
+        beta = _project_scalar_coefficient(rhs, u_lap_a)
+        thr, min_frac, min_count = _gate_params(constants)
+        beta_m, beta_g, meta = _apply_viscosity_conditioning(
+            beta,
+            rhs,
+            u_lap_a,
+            [rhs],
+            threshold=thr,
+            min_frac=min_frac,
+            min_count=min_count,
+        )
+        scale = jnp.asarray(rho) * jnp.asarray(U) * jnp.asarray(L)
+        mu_pw = beta_m * scale
+        mu_g = beta_g * scale
+        if not meta["identifiable"]:
+            mu_pw = jnp.full_like(mu_pw, jnp.nan)
+        meta.update(
+            {
+                "mu_tilde_pointwise": mu_pw,
+                "mu_tilde_global": mu_g,
+                "re_tilde_global": _re_from_viscosity(U, L, mu_g, rho=rho),
+                "re_tilde_pointwise": _re_from_viscosity(U, L, mu_pw, rho=rho),
+                "reference_U": jnp.asarray(U),
+                "reference_L": jnp.asarray(L),
+            }
+        )
+        return ImpliedPropertyResult(value=mu_pw, meta=meta)
 
     return implied_fn
 
 
 def implied_nu_burgers_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
-    """Recover kinematic viscosity ν by projecting inertial terms onto ``u_laplacian``.
+    """
+    Recover kinematic viscosity ν by LSQ of Burgers inertial terms onto ``u_laplacian``.
 
-    Same last-axis LSQ projection as the former μ path, but returns ν̃ directly
-    (no ρ·|u| conversion). Works for vector Burgers with last axis d ∈ {1,2,3}.
+    Returns ν̃ directly (catalog ``ν = U L / Re``). Declared ``U``, ``L`` are used only when
+    reporting ``Rẽ = U L / ν̃``. Conditioning gate matches NS/Stokes.
     """
 
-    def implied_fn(state: Dict[str, Any], constants: Dict[str, Any]) -> Optional[jnp.ndarray]:
+    def implied_fn(
+        state: Dict[str, Any], constants: Dict[str, Any]
+    ) -> Optional[ImpliedPropertyResult]:
         u_t = _val(state, constants, law_sm, "u_t")
         u = _val(state, constants, law_sm, "u")
         u_grad = _val(state, constants, law_sm, "u_grad")
         u_lap = _val(state, constants, law_sm, "u_laplacian")
-        if u_t is None or u is None or u_grad is None or u_lap is None:
+        if any(v is None for v in (u_t, u, u_grad, u_lap)):
             return None
         u_a = jnp.asarray(u)
         adv = jnp.einsum("...ij,...j->...i", jnp.asarray(u_grad), u_a)
-        inertial = jnp.asarray(u_t) + adv
-        return _project_scalar_coefficient(inertial, u_lap)
+        rhs = jnp.asarray(u_t) + adv
+        u_lap_a = jnp.asarray(u_lap)
+        beta = _project_scalar_coefficient(rhs, u_lap_a)
+        thr, min_frac, min_count = _gate_params(constants)
+        beta_m, beta_g, meta = _apply_viscosity_conditioning(
+            beta,
+            rhs,
+            u_lap_a,
+            [jnp.asarray(u_t), adv],
+            threshold=thr,
+            min_frac=min_frac,
+            min_count=min_count,
+        )
+        if not meta["identifiable"]:
+            beta_m = jnp.full_like(beta_m, jnp.nan)
+        U, L = _resolve_ref_UL(state, constants, law_sm)
+        meta.update(
+            {
+                "nu_tilde_pointwise": beta_m,
+                "nu_tilde_global": beta_g,
+            }
+        )
+        if U is not None and L is not None:
+            meta["re_tilde_global"] = _re_from_viscosity(U, L, beta_g)
+            meta["re_tilde_pointwise"] = _re_from_viscosity(U, L, beta_m)
+            meta["reference_U"] = jnp.asarray(U)
+            meta["reference_L"] = jnp.asarray(L)
+        return ImpliedPropertyResult(value=beta_m, meta=meta)
 
     return implied_fn
 
@@ -386,7 +651,7 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "category": "constitutive",
             "name": "dynamic_viscosity_from_re",
             "output_key": "mu",
-            "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
+            "state_map": {"rho": "rho", "U": "U", "L": "L", "re": "re"},
             "implied_maker": implied_mu_momentum_navier_stokes,
             "residual_basename": "dynamic_viscosity_from_re/law_momentum_navier_stokes",
             "include_ref_delta": True,
@@ -397,7 +662,7 @@ _LAW_IMPLIED_ROWS: Dict[str, List[Dict[str, Any]]] = {
             "category": "constitutive",
             "name": "dynamic_viscosity_from_re",
             "output_key": "mu",
-            "state_map": {"rho": "rho", "u": "u", "L": "L", "re": "re"},
+            "state_map": {"rho": "rho", "U": "U", "L": "L", "re": "re"},
             "implied_maker": implied_mu_stokes_flow,
             "residual_basename": "dynamic_viscosity_from_re/law_stokes_flow",
             "include_ref_delta": True,

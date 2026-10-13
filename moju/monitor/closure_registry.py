@@ -154,8 +154,16 @@ def compute_implied_delta_with_debug(
 
     if implied_value_key is not None:
         implied = _val(state_pred, constants, implied_value_key)
+        implied_meta: Dict[str, Any] = {}
     else:
         implied = implied_fn(state_pred, constants)  # type: ignore[misc]
+        implied_meta = {}
+        # Optional sidecar from viscosity / property recovery (conditioning, Rẽ, …).
+        from moju.monitor.law_implied_diagnostics import ImpliedPropertyResult
+
+        if isinstance(implied, ImpliedPropertyResult):
+            implied_meta = dict(implied.meta or {})
+            implied = implied.value
     if implied is None:
         return None, None
     implied = jnp.asarray(implied)
@@ -172,6 +180,11 @@ def compute_implied_delta_with_debug(
         delta = raw / (jnp.abs(pred_a) + _NORMALIZE_EPS)
     except (TypeError, ValueError):
         return None, None
+    # Drop non-identifiable rows from scoring (all-NaN delta) while keeping debug.
+    if implied_meta.get("status") == "not_identifiable" or implied_meta.get(
+        "identifiable"
+    ) is False:
+        delta = jnp.full_like(jnp.asarray(delta), jnp.nan)
     debug = {
         "pred": pred_debug,
         "implied": implied_debug,
@@ -180,6 +193,8 @@ def compute_implied_delta_with_debug(
         "mode": "subtract",
         "output_key": output_key,
     }
+    if implied_meta:
+        debug.update(implied_meta)
     return delta, debug
 
 

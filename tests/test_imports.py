@@ -107,6 +107,8 @@ def test_monitor_module_has_all():
         "effective_audit_specs_for_fragment",
         "law_implied_unsupported_reasons",
         "list_laws_with_implied_diagnostics",
+        "DEFAULT_IMPLIED_TERM_FRACTION",
+        "ImpliedPropertyResult",
         "merge_law_implied_audit_specs",
         "merge_fragment_law_implied_audit_specs",
         "MODEL_DERIVED_REGISTRY",

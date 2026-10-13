@@ -90,9 +90,9 @@ The mapping lives in **`moju/monitor/law_implied_diagnostics.py`** (`_LAW_IMPLIE
 | `fick_diffusion` | `mass_diffusivity` | Implied \(D = \phi_t / \phi_{\text{laplacian}}\); model uses **fo_mass**, **t**, **L**. |
 | `wave_equation` | `wave_speed_from_st` | Implied \(c = \sqrt{\phi_{tt}/\phi_{\text{laplacian}}}\); negative or ill-conditioned ratios become **NaN**. |
 | `advection_diffusion` | `scalar_diffusivity_from_pe` | Implied \(\kappa = (\phi_t + \mathbf u\!\cdot\!\nabla\phi)|\mathbf u|L / \phi_{\text{laplacian}}\). |
-| `momentum_navier_stokes` | `dynamic_viscosity_from_re` | Implied **μ** from least-squares projection of \(u_t + u\cdot\nabla u + \nabla p\) onto \(\nabla^2u\). |
-| `stokes_flow` | `dynamic_viscosity_from_re` | Implied **μ** from least-squares projection of \(\nabla p\) onto \(\nabla^2u\). |
-| `burgers_equation` | `kinematic_viscosity_from_re` | Implied **ν** from least-squares projection of \(u_t + u\cdot\nabla u\) onto \(\nabla^2u\) (last vector axis; works for 1D/2D/3D). Catalog \(\nu = U L/\mathrm{Re}\) matches the law coefficient. The former Burgers **μ** implied row was removed (relative δ was redundant with ν and fragile at low \(\|u\|\)). |
+| `momentum_navier_stokes` | `dynamic_viscosity_from_re` | Implied **μ** from LSQ \(\tilde\nu^* = \mathrm{argmin}\|(u_t+(u\cdot\nabla)u+\nabla p-f)-\nu^*\nabla^2u\|\), then \(\tilde\mu=\rho U L\,\tilde\nu^*\) with **declared** reference \(U,L\) (never local \(\|u\|\)). Conditioning gate masks weak points; see below. |
+| `stokes_flow` | `dynamic_viscosity_from_re` | Implied **μ** from LSQ of \(\nabla p\) onto \(\nabla^2u\), same \(\rho U L\) conversion and gate. |
+| `burgers_equation` | `kinematic_viscosity_from_re` | Implied **ν** from LSQ of \(u_t + u\cdot\nabla u\) onto \(\nabla^2u\) (1D/2D/3D). Catalog \(\nu = U L/\mathrm{Re}\). Same conditioning gate; reported \(\widetilde{\mathrm{Re}}=U L/\tilde\nu\). |
 | `momentum_incompressible_newtonian_laplacian` | `turbulent_viscous_acceleration_*` | Three auto rows: k-ω, k-ε, and Smagorinsky; **subtract** mode **`pred − implied_fn`**. |
 | `momentum_compressible_newtonian_laplacian` | `turbulent_viscous_acceleration_compressible_*` | Three auto rows: compressible k-ω, k-ε, and Smagorinsky; **subtract** mode. |
 
@@ -118,6 +118,19 @@ If you still want implied constitutive checks for unsupported laws, add explicit
 If a law-linked implied constitutive row requires inputs like **`k`**, **`rho`**, or **`mu`**, you can supply them either as arrays/scalars in `state_pred` / `constants`, **or** as Python callables keyed by the **output state key** via `ResidualEngine(user_fns=...)`.
 
 For **Burgers**, the law-linked row is **`kinematic_viscosity_from_re`** with **`output_key="nu"`**. Catalog **ν** needs **`U`**, **`L`**, and **`re`** (resolved through the law `state_map`, e.g. `"re": "Re"`). The implied side is recovered from the velocity fields alone via last-axis projection; you do **not** need **`mu`** or local **`|u|`** for that audit.
+
+For **Navier–Stokes / Stokes** implied **μ**, the catalog model is
+\(\mu=\rho U L/\mathrm{Re}\) with the same declared **`U`**, **`L`**, **`rho`**, **`re`**.
+Do **not** pass the velocity field as the Reynolds velocity argument.
+
+### Conditioning gate (viscosity rows)
+
+Implied viscosity is scored only where the viscous fit is well-posed:
+
+- **Fit quality** \(|\beta\nabla^2u| / (|\beta\nabla^2u| + |\mathrm{rhs}-\beta\nabla^2u|) \ge\) `implied_term_fraction` (default **0.1**).
+- **Operator energy**: \(|\nabla^2u|^2\) must exceed a relative floor of the RHS energy (rejects vanishing Laplacians that would inflate \(\beta\)).
+
+Configure via constants: `implied_term_fraction`, `implied_min_identifiable_fraction` (default 0.05), `implied_min_identifiable_count` (default 8). Excluded points are NaN in \(\delta\); `closure_debug` reports `excluded_fraction`, `mu_tilde_global` / `nu_tilde_global`, and `re_tilde_global`. If too few points remain, admissibility for that key is **Not identifiable** (see `log[-1]["implied_identifiability"]`).
 
 Example: let Moju materialize `k`, `rho`, and `alpha` from `T` (so the Fourier implied `thermal_diffusivity` check can run without you precomputing those fields):
 

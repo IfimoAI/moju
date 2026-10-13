@@ -237,19 +237,23 @@ class Models:
 
     @staticmethod
     @jax.jit
-    def dynamic_viscosity_from_re(rho, u, L, re):
+    def dynamic_viscosity_from_re(rho, U, L, re):
         """
-        Dynamic viscosity from Reynolds number definition using local speed magnitude.
+        Dynamic viscosity from Reynolds number with a declared reference velocity.
+
+        :math:`\\mu = \\rho U L / \\mathrm{Re}`. Viscosity is a material property; ``U`` must
+        be the same characteristic / reference speed used to define ``Re`` (never local
+        ``|u|``, which varies near walls and stagnation and would bias ``μ``).
 
         :param rho: Density [kg/m^3].
-        :param u: Velocity vector [m/s] or scalar speed.
+        :param U: Characteristic / reference velocity [m/s] (scalar or broadcastable).
         :param L: Characteristic length [m].
         :param re: Reynolds number.
         :return: Dynamic viscosity mu [Pa*s].
         """
-        u_arr = jnp.asarray(u)
-        u_mag = jnp.abs(u_arr) if u_arr.ndim == 0 else jnp.sqrt(jnp.sum(u_arr**2, axis=-1))
-        return (jnp.asarray(rho) * u_mag * jnp.asarray(L)) / (jnp.asarray(re) + 1e-30)
+        return (
+            jnp.asarray(rho) * jnp.asarray(U) * jnp.asarray(L)
+        ) / (jnp.asarray(re) + 1e-30)
 
     @staticmethod
     @jax.jit

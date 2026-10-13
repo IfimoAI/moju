@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-13
+
+### Fixed
+
+- **Law-linked implied viscosity (NS / Stokes / Burgers).** Previously the
+  Navier–Stokes and Stokes implied-μ paths recovered
+  ``μ̃ = β · ρ · |u|_local · L`` from a Reynolds-style group that used **local
+  speed**. Viscosity is a material property; that construction biased ``μ̃``
+  wherever local speed differed from the reference (walls, stagnation), even
+  when the momentum residual was at machine precision on exact analytic flows
+  (Kovasznay, Taylor–Green). **2.1** recovers
+  ``ν̃* = argmin ||(u_t + (u·∇)u + ∇p − f) − ν* ∇²u||`` by last-axis LSQ
+  (plus a domain projection on the identifiable set), then
+  ``μ̃ = ρ U L ν̃*`` with **declared** reference ``U`` and ``L``. Implied
+  Reynolds numbers use the same reference scales, never local ``|u|``.
+  ``Models.dynamic_viscosity_from_re`` now takes ``(rho, U, L, re)`` instead of
+  ``(rho, u, L, re)``. Burgers already returned ν̃ from LSQ; it gains the same
+  conditioning gate and ``Rẽ = U L / ν̃`` reporting.
+
+- **Conditioning gate.** Points where the viscous fit is weak (fit quality or
+  Laplacian operator energy below ``implied_term_fraction``, default **0.1**)
+  are NaN-masked and counted in ``excluded_fraction``. If too few points remain
+  (``implied_min_identifiable_fraction`` / ``implied_min_identifiable_count``),
+  the implied row is reported as **Not identifiable** rather than scored.
+  Compact flags are logged under ``entry["implied_identifiability"]``.
+
+### Changed
+
+- Scores/tiers for
+  ``constitutive/dynamic_viscosity_from_re/law_momentum_navier_stokes/implied_delta``,
+  ``constitutive/dynamic_viscosity_from_re/law_stokes_flow/implied_delta``, and
+  (gate-related NaNs on)
+  ``constitutive/kinematic_viscosity_from_re/law_burgers_equation/implied_delta``.
+  See [`docs/MIGRATION_2.0_to_2.1.md`](docs/MIGRATION_2.0_to_2.1.md).
+
 ## [2.0.0] - 2026-10-11
 
 Major release: Path B derivative defaults and residual scoring defaults change.
