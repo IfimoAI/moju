@@ -137,6 +137,60 @@ Configure via constants: `implied_term_fraction`, `implied_fit_quality_fraction`
 
 **When are implied properties identifiable?** Prefer regions where the constitutive term is not dwarfed by the rest of the balance (e.g. viscous-dominated Stokes/low-Re patches). Inertia-dominated high-Re patches may be excluded even when the PDE residual is small — that is intentional, not a law failure. Safe-division rows (Fourier \(\alpha\), Fick \(D\), …) already NaN-mask vanishing denominators; viscosity rows use the gate above.
 
+### Opt-in robust scoring (Moju 2.2)
+
+Defaults match 2.1: ``implied_metric="worst_point"``, ``implied_noise_normalization=False``.
+Governing-law scoring is never changed. See [`MIGRATION_2.1_to_2.2.md`](MIGRATION_2.1_to_2.2.md)
+for the full formula, per-call API, and precedence (per-call kwarg > constructor kwarg >
+`constants` > default).
+
+| Option | Default | Use when |
+|--------|---------|----------|
+| `implied_metric` | `"worst_point"` | Set `"percentile"` if a few spikes dominate `max ‖δ‖` |
+| `implied_percentile` | `95` | With percentile metric |
+| `implied_noise_normalization` | `False` | See [when to prefer noise normalization](#when-to-prefer-noise-normalization) |
+
+Reports always keep raw ``max ‖δ‖`` as ``r_max_raw`` and record which metric/normalization
+produced ``score_for_admissibility``. Every ``audit`` / ``evaluate`` result also carries
+``implied_scoring_settings`` (metric, percentile, noise flag, Moju version). **Default and
+opt-in scores/tiers are not directly comparable** — cite the settings with any number you
+publish.
+
+#### When to prefer noise normalization
+
+**What it corrects.** Raw fractional δ compares ``F − implied`` to ``|F|`` alone. When the
+local balance residual is already large relative to the constitutive term, that deviation is
+partly explained by residual/derivative noise rather than a systematic property mismatch.
+Noise normalization softens δ by adding a per-point noise level
+``ε = |r_balance| / (|basis| + ε_m)`` in the denominator, so
+``δ_nn = (F − implied) / (|F| + ε + ε_norm)``. When ``|F − implied| ≈ ε``, ``|δ_nn|`` drops
+relative to raw ``|δ|``; when ``ε → 0``, ``δ_nn`` recovers the 2.1 fractional δ.
+
+**When it can change a verdict.** Sparse spikes or Path B FD noise near boundaries can push
+``max |δ|`` across a tier cut while most of the field is fine. Combining
+``implied_noise_normalization=True`` with ``implied_metric="percentile"`` often keeps High
+or Moderate when the default worst-point path drops a tier on those spikes — without
+changing governing-law scores.
+
+**When not to use it.** Do **not** enable it to “pass” a genuine constitutive mismatch (half-
+domain wrong viscosity, wrong catalog α, etc.): those cases stay Low / Non-Admissible under
+opt-in. Prefer defaults for paper reproduction and for comparing runs bit-identically to 2.1.
+Noise normalization is also unnecessary when derivatives are exact (analytic Path A) and
+``max |δ|`` already reflects a clean field.
+
+**Small generic example** (1-D Fourier-style ratio residual):
+
+```python
+# F = 1, raw deviation = F − implied
+# At a quiet point: raw=0.01 → δ≈0.01, δ_nn≈0.01/1.01 (almost unchanged)
+# At a noisy point: raw=1.0  → δ≈1.0,  δ_nn≈1.0/2.0 = 0.5 (softened)
+from moju.monitor.implied_scoring import noise_normalized_delta
+import jax.numpy as jnp
+F = jnp.array([1.0, 1.0])
+raw = jnp.array([0.01, 1.0])
+d_nn = noise_normalized_delta(pred=F, implied=F - raw, raw=raw, debug={})
+```
+
 Example: let Moju materialize `k`, `rho`, and `alpha` from `T` (so the Fourier implied `thermal_diffusivity` check can run without you precomputing those fields):
 
 ```python

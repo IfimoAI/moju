@@ -688,7 +688,7 @@ def build_worst_keys_table_card(
     header_fill = "#1f2937" if t.name == "dark" else "#0f172a"
     header_font = dict(family=t.typography.font_family, color="#ffffff", size=12)
     cell_font = t.tick_font_dict()
-    columns = ["Key", "Category", "R_norm", "Admissibility"]
+    columns = ["Key", "Category", "R_norm", "Admissibility", "Implied scoring"]
     keys = [pretty_residual_key(r.get("key") or "") for r in rows]
     cats = [pretty_category_name(_classify_residual_category(r.get("key") or "")) for r in rows]
 
@@ -718,8 +718,20 @@ def build_worst_keys_table_card(
                     continue
         return "N/A"
 
+    def _implied_scoring_cell(r: Dict[str, Any]) -> str:
+        parts = []
+        if r.get("admissibility_metric"):
+            parts.append(str(r.get("admissibility_metric")))
+        if r.get("r_max_raw") is not None:
+            try:
+                parts.append(f"raw max|δ|={float(r['r_max_raw']):.3g}")
+            except (TypeError, ValueError):
+                pass
+        return "; ".join(parts) if parts else "—"
+
     rnorms = [_rnorm_cell(r) for r in rows]
     adms = [_adm_cell(r) for r in rows]
+    scoring_notes = [_implied_scoring_cell(r) for r in rows]
     cell_colors = [
         ["#0b1220" if (i % 2 == 0 and t.name == "dark") else (t.palette.plot_bg if i % 2 == 0 else t.palette.summary_bg) for i in range(len(rows))]
     ] * len(columns)
@@ -734,7 +746,7 @@ def build_worst_keys_table_card(
                     height=32,
                 ),
                 cells=dict(
-                    values=[keys, cats, rnorms, adms],
+                    values=[keys, cats, rnorms, adms, scoring_notes],
                     fill_color=cell_colors,
                     font=cell_font,
                     align="left",

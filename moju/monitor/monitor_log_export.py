@@ -219,6 +219,25 @@ def _build_summary(
     plot_keys = list(keys) if keys is not None else list((log[0].get("rms") or {}).keys())
     worst_rows = _worst_keys_table_rows(log, plot_keys, metrics, top_n=worst_keys_top_n)
     id_map = log[-1].get("implied_identifiability") if isinstance(log[-1], dict) else None
+    scoring_map = log[-1].get("implied_scoring") if isinstance(log[-1], dict) else None
+    settings = None
+    if isinstance(log[-1], dict):
+        settings = log[-1].get("implied_scoring_settings")
+        if settings is None:
+            ms = log[-1].get("monitor_settings") or {}
+            if isinstance(ms.get("implied_scoring"), dict):
+                settings = ms["implied_scoring"]
+        if settings is None:
+            from moju import __version__ as _moju_version
+            from moju.monitor.implied_scoring import (
+                implied_scoring_settings_payload,
+                parse_implied_scoring_options,
+            )
+
+            settings = implied_scoring_settings_payload(
+                parse_implied_scoring_options(log[-1].get("constants") or {}),
+                moju_version=_moju_version,
+            )
 
     summary: Dict[str, Any] = {
         "per_key": last_report_per_key,
@@ -230,9 +249,15 @@ def _build_summary(
         "monitor_run_mode": log[-1].get("run_mode") if isinstance(log[-1], dict) else None,
         "worst_keys_rows": worst_rows,
         "plot_keys": plot_keys,
+        "implied_scoring_settings": dict(settings) if isinstance(settings, dict) else settings,
+        "moju_version": (
+            settings.get("moju_version") if isinstance(settings, dict) else None
+        ),
     }
     if isinstance(id_map, dict) and id_map:
         summary["implied_identifiability"] = dict(id_map)
+    if isinstance(scoring_map, dict) and scoring_map:
+        summary["implied_scoring"] = dict(scoring_map)
     return summary
 
 

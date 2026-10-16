@@ -1,0 +1,39 @@
+{
+  "architecture": "8x8x8_n2",
+  "moju_version": "2.2.0",
+  "settings": {
+    "implied_metric": "worst_point",
+    "implied_percentile": 95.0,
+    "implied_noise_normalization": false,
+    "scale_k_implied": 0.01,
+    "admissibility_formula": "1 / (1 + r_max / scale_k)",
+    "paper_quantity": "nanmax(|delta_grid|) from constitutive_fields.npz \u2192 score_from_r_max"
+  },
+  "input_sha256": {
+    "zip": "f1f1caf57b0776adda453a0ad561a1361cc4212b3b5bdc9d97a2225227e61e05",
+    "category_scores.np.npy": "288a83c6aa943735d84a843c86c6689b02afe7e162b179e138775bdd0c1bc424",
+    "category_scores.npy": "77b4305ed92a5604f517b069fb2bbbf7686c39b1eeeb375bb112f7f3755e26d6",
+    "constitutive_fields.npz": "052fca01e5e6393f6ddad1cd8b465c3b822fa84f2e00feacdd5feb1a3b348286",
+    "training_admissibility.npy": "cee6a1aa80cfc49f14787bf83ffa27ac2e03d7e707f50c30c64468d4516a788f"
+  },
+  "expected": {
+    "paper_figure": {
+      "quantity": "constitutive_fields.npz nanmax(|delta_grid|)",
+      "r_max": 0.0029509372517703245,
+      "admissibility_score": 0.7721448884815694,
+      "admissibility_percent": 77.21,
+      "admissibility_level": "Moderate Admissibility"
+    },
+    "training_log_endpoint": {
+      "governing_admissibility": 0.9999919530984922,
+      "constitutive_admissibility": 0.7721448884991632,
+      "constitutive_worst_point_r_max": 0.0029509372517703245,
+      "constitutive_admissibility_level": "Moderate Admissibility",
+      "constitutive_admissibility_percent": 77.21
+    },
+    "category_scores": {
+      "laws/fourier_conduction": 0.9999883871301629,
+      "constitutive/thermal_diffusivity/law_fourier_conduction/implied_delta": 0.7584783100686565
+    }
+  }
+}

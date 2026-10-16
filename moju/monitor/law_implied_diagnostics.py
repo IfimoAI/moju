@@ -426,6 +426,10 @@ def implied_mu_momentum_navier_stokes(law_sm: Dict[str, str]) -> Callable[..., A
                 "re_tilde_pointwise": _re_from_viscosity(U, L, mu_pw, rho=rho),
                 "reference_U": jnp.asarray(U),
                 "reference_L": jnp.asarray(L),
+                # Opt-in noise normalization (Moju 2.2): ε_μ from catalog-β balance.
+                "noise_rhs": rhs,
+                "noise_basis": u_lap_a,
+                "noise_scale": scale,
             }
         )
         return ImpliedPropertyResult(value=mu_pw, meta=meta)
@@ -478,6 +482,9 @@ def implied_mu_stokes_flow(law_sm: Dict[str, str]) -> Callable[..., Any]:
                 "re_tilde_pointwise": _re_from_viscosity(U, L, mu_pw, rho=rho),
                 "reference_U": jnp.asarray(U),
                 "reference_L": jnp.asarray(L),
+                "noise_rhs": rhs,
+                "noise_basis": u_lap_a,
+                "noise_scale": scale,
             }
         )
         return ImpliedPropertyResult(value=mu_pw, meta=meta)
@@ -525,6 +532,8 @@ def implied_nu_burgers_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
             {
                 "nu_tilde_pointwise": beta_m,
                 "nu_tilde_global": beta_g,
+                "noise_rhs": rhs,
+                "noise_basis": u_lap_a,
             }
         )
         if U is not None and L is not None:

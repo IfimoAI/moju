@@ -221,6 +221,11 @@ models/weights/
 data/raw/
 data/processed/
 
+# Paper audit bundles (MOJU_PAPER_DATA); never commit zips or extracted arrays
+*_moju_data.zip
+*_moju_data/
+**/constitutive_fields.npz
+
 # --- OpenFOAM & CFD Data (CRITICAL) ---
 # Ignore massive mesh and field data 
 # We only want to track metadata and scripts

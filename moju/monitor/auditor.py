@@ -32,9 +32,10 @@ consistency indicators, not certification.
 from __future__ import annotations
 
 import datetime
-import math
-from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
 import inspect
+import math
+import warnings
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Literal, Mapping, Optional, Sequence, Set, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -727,7 +728,17 @@ def _compute_log_step_metrics(
                 rms_f = float(v)
             except (TypeError, ValueError):
                 rms_f = float("nan")
-            if _key_uses_worst_point_admissibility(k, entry_scoring):
+            imp_score = None
+            imp_map = entry.get("implied_scoring") or {}
+            if isinstance(imp_map, dict) and k in imp_map and isinstance(imp_map[k], Mapping):
+                imp_score = imp_map[k]
+            if imp_score is not None:
+                try:
+                    v_eff = float(imp_score.get("v_eff", float("nan")))
+                except (TypeError, ValueError):
+                    v_eff = float("nan")
+                metric = str(imp_score.get("admissibility_metric") or "max")
+            elif _key_uses_worst_point_admissibility(k, entry_scoring):
                 try:
                     v_max = float(r_max.get(k, float("nan")))
                 except (TypeError, ValueError):
@@ -781,6 +792,16 @@ def _compute_log_step_metrics(
             }
             if k in r_max:
                 key_report["r_max"] = r_max[k]
+            if imp_score is not None:
+                key_report["implied_metric"] = imp_score.get("implied_metric")
+                key_report["implied_percentile"] = imp_score.get("implied_percentile")
+                key_report["implied_noise_normalization"] = bool(
+                    imp_score.get("implied_noise_normalization", False)
+                )
+                if imp_score.get("r_max_raw") is not None:
+                    key_report["r_max_raw"] = imp_score.get("r_max_raw")
+                    # Always surface raw worst-point alongside the scoring statistic.
+                    key_report["r_max"] = imp_score.get("r_max_raw")
             if id_meta is not None:
                 # Explicit per-key sidecar: never treat as passing; rollup skips this key.
                 key_report["identifiability_status"] = "not_identifiable"
@@ -887,6 +908,74 @@ def _report_header() -> Dict[str, Any]:
     }
 
 
+def _apply_implied_scoring_to_entry(
+    entry: Dict[str, Any],
+    residual_dict: Optional[Dict[str, Any]],
+    *,
+    constants: Optional[Mapping[str, Any]] = None,
+    engine_defaults: Optional[Mapping[str, Any]] = None,
+    implied_metric: Optional[str] = None,
+    implied_percentile: Optional[float] = None,
+    implied_noise_normalization: Optional[bool] = None,
+) -> None:
+    """
+    Recompute ``entry['implied_scoring']`` / ``r_max`` from residual arrays when
+    ``residual_dict`` provides constitutive ``implied_delta`` fields.
+    """
+    if residual_dict is None:
+        if any(
+            v is not None
+            for v in (implied_metric, implied_percentile, implied_noise_normalization)
+        ):
+            warnings.warn(
+                "audit(... implied_metric/percentile/noise_normalization=...) has no effect "
+                "without last_residual_dict (cannot rebuild pointwise δ). "
+                "Pass last_residual_dict=engine.last_residuals or set options on "
+                "ResidualEngine / compute_residuals.",
+                UserWarning,
+                stacklevel=3,
+            )
+        return
+    from moju import __version__ as _moju_version
+    from moju.monitor.implied_scoring import (
+        implied_scoring_settings_payload,
+        resolve_implied_scoring_options,
+        score_implied_delta_array,
+    )
+
+    flat = _flatten_residual_dict(residual_dict)
+    closure_debug = residual_dict.get("closure_debug") or {}
+    opts = resolve_implied_scoring_options(
+        constants=constants,
+        engine_defaults=engine_defaults,
+        implied_metric=implied_metric,
+        implied_percentile=implied_percentile,
+        implied_noise_normalization=implied_noise_normalization,
+    )
+    settings = implied_scoring_settings_payload(opts, moju_version=_moju_version)
+    entry["implied_scoring_settings"] = settings
+    ms = dict(entry.get("monitor_settings") or {})
+    ms["implied_scoring"] = settings
+    entry["monitor_settings"] = ms
+    r_max = dict(entry.get("r_max") or {})
+    implied_scoring: Dict[str, Any] = {}
+    for k, arr in flat.items():
+        if not (str(k).startswith("constitutive/") and str(k).endswith("/implied_delta")):
+            continue
+        bn = str(k)[len("constitutive/") : -len("/implied_delta")]
+        dbg = closure_debug.get(bn) if isinstance(closure_debug.get(bn), dict) else {}
+        v_eff, r_max_raw, meta = score_implied_delta_array(arr, dbg, opts)
+        r_max[k] = float(r_max_raw)
+        implied_scoring[k] = {
+            **meta,
+            "r_max_raw": float(r_max_raw),
+            "v_eff": float(v_eff) if math.isfinite(v_eff) else float("nan"),
+        }
+    if implied_scoring:
+        entry["r_max"] = r_max
+        entry["implied_scoring"] = implied_scoring
+
+
 def audit(
     log: List[Dict[str, Any]],
     r_ref: Optional[Dict[str, float]] = None,
@@ -897,6 +986,10 @@ def audit(
     last_residual_dict: Optional[Dict[str, Any]] = None,
     model_name: Optional[str] = None,
     model_id: Optional[str] = None,
+    implied_metric: Optional[str] = None,
+    implied_percentile: Optional[float] = None,
+    implied_noise_normalization: Optional[bool] = None,
+    constants: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Physics admissibility from logged **R_eff** (field ``rms``) and scales.
@@ -931,6 +1024,39 @@ def audit(
             "overall_admissibility_score": 0.0,
             "overall_admissibility_level": "Non-Admissible",
         }
+    if any(
+        v is not None
+        for v in (implied_metric, implied_percentile, implied_noise_normalization)
+    ):
+        _apply_implied_scoring_to_entry(
+            log[-1],
+            last_residual_dict,
+            constants=constants if constants is not None else (log[-1].get("constants") or {}),
+            implied_metric=implied_metric,
+            implied_percentile=implied_percentile,
+            implied_noise_normalization=implied_noise_normalization,
+        )
+    # Ensure scoring-settings provenance is present even when audit does not re-score.
+    if log[-1].get("implied_scoring_settings") is None:
+        from moju import __version__ as _moju_version
+        from moju.monitor.implied_scoring import (
+            implied_scoring_settings_payload,
+            resolve_implied_scoring_options,
+        )
+
+        _ms = log[-1].get("monitor_settings") or {}
+        if isinstance(_ms.get("implied_scoring"), dict):
+            log[-1]["implied_scoring_settings"] = dict(_ms["implied_scoring"])
+        else:
+            _opts = resolve_implied_scoring_options(
+                constants=constants if constants is not None else (log[-1].get("constants") or {}),
+                implied_metric=implied_metric,
+                implied_percentile=implied_percentile,
+                implied_noise_normalization=implied_noise_normalization,
+            )
+            log[-1]["implied_scoring_settings"] = implied_scoring_settings_payload(
+                _opts, moju_version=_moju_version
+            )
     step_metrics = _compute_log_step_metrics(log, r_ref)
     last_report_per_key: Dict[str, Any] = {}
     for entry, m in zip(log, step_metrics):
@@ -947,6 +1073,7 @@ def audit(
         "overall_admissibility_score": overall,
         "overall_admissibility_level": admissibility_level(overall),
         "monitor_run_mode": (log[-1].get("run_mode") if log else None),
+        "implied_scoring_settings": dict(log[-1]["implied_scoring_settings"]),
     }
     if log[-1].get("derivative_provenance"):
         report["derivative_provenance"] = dict(log[-1]["derivative_provenance"])
@@ -954,6 +1081,8 @@ def audit(
         report["law_sources"] = dict(log[-1]["law_sources"])
     if log[-1].get("implied_identifiability"):
         report["implied_identifiability"] = dict(log[-1]["implied_identifiability"])
+    if log[-1].get("implied_scoring"):
+        report["implied_scoring"] = dict(log[-1]["implied_scoring"])
     for opt_key in (
         "term_breakdown",
         "derivative_metadata",
@@ -1206,6 +1335,13 @@ def _worst_keys_table_rows(
             "admissibility_level": level or admissibility_level(adm_f),
             "category": prefix,
         }
+        if rep.get("implied_metric") is not None:
+            row["implied_metric"] = rep.get("implied_metric")
+            row["implied_percentile"] = rep.get("implied_percentile")
+            row["implied_noise_normalization"] = rep.get("implied_noise_normalization")
+            row["admissibility_metric"] = rep.get("admissibility_metric")
+            if rep.get("r_max_raw") is not None:
+                row["r_max_raw"] = rep.get("r_max_raw")
         if is_ni:
             row["admissibility_level"] = "Not identifiable"
             if rep.get("excluded_fraction") is not None:
@@ -2033,6 +2169,9 @@ class ResidualEngine:
         undeclared_keys: str = "warn",
         derivatives: str = "auto",
         bound_checks: Optional[Sequence[Any]] = None,
+        implied_metric: Optional[str] = None,
+        implied_percentile: Optional[float] = None,
+        implied_noise_normalization: Optional[bool] = None,
     ):
         law_implied_enabled = bool(law_implied_audits)
         cfg_law_scale_mode: Optional[str] = None
@@ -2133,6 +2272,21 @@ class ResidualEngine:
         if len(set(_bnames)) != len(_bnames):
             raise ValueError(f"bound check names must be unique, got {_bnames}")
         self._scoring_by_key = self._build_scoring_map()
+        # Opt-in implied constitutive scoring (Moju 2.2); None → resolve from constants / defaults.
+        self.implied_metric = implied_metric
+        self.implied_percentile = implied_percentile
+        self.implied_noise_normalization = implied_noise_normalization
+        from moju.monitor.implied_scoring import resolve_implied_scoring_options
+
+        # Validate constructor / constants combination at init (raises on bad values).
+        resolve_implied_scoring_options(
+            constants=self.constants,
+            engine_defaults={
+                "implied_metric": implied_metric,
+                "implied_percentile": implied_percentile,
+                "implied_noise_normalization": implied_noise_normalization,
+            },
+        )
 
         # Config-time validation (low effort)
         def _validate_specs(
@@ -2277,6 +2431,9 @@ class ResidualEngine:
         safeguard_error_aware: bool = False,
         safeguard_deriv_error: Optional[Dict[str, Any]] = None,
         resolution_sensor: Any = False,
+        implied_metric: Optional[str] = None,
+        implied_percentile: Optional[float] = None,
+        implied_noise_normalization: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Compute residuals.
@@ -2352,6 +2509,9 @@ class ResidualEngine:
             safeguard_error_aware=safeguard_error_aware,
             safeguard_deriv_error=safeguard_deriv_error,
             resolution_sensor=resolution_sensor,
+            implied_metric=implied_metric,
+            implied_percentile=implied_percentile,
+            implied_noise_normalization=implied_noise_normalization,
         )
         self._log.append(entry)
         self._index += 1
@@ -2386,6 +2546,9 @@ class ResidualEngine:
         safeguard_error_aware: bool = False,
         safeguard_deriv_error: Optional[Dict[str, Any]] = None,
         resolution_sensor: Any = False,
+        implied_metric: Optional[str] = None,
+        implied_percentile: Optional[float] = None,
+        implied_noise_normalization: Optional[bool] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Compute residuals and one log entry without touching the engine log."""
         if run_mode not in ("training", "eval"):
@@ -3235,6 +3398,49 @@ class ResidualEngine:
                     compact["reason"] = dbg["reason"]
                 implied_identifiability[str(bn)] = compact
 
+        # Opt-in robust scoring for constitutive implied_delta (defaults = 2.1).
+        from moju import __version__ as _moju_version
+        from moju.monitor.implied_scoring import (
+            implied_scoring_settings_payload,
+            resolve_implied_scoring_options,
+            score_implied_delta_array,
+        )
+
+        implied_scoring_opts = resolve_implied_scoring_options(
+            constants=self.constants,
+            engine_defaults={
+                "implied_metric": self.implied_metric,
+                "implied_percentile": self.implied_percentile,
+                "implied_noise_normalization": self.implied_noise_normalization,
+            },
+            implied_metric=implied_metric,
+            implied_percentile=implied_percentile,
+            implied_noise_normalization=implied_noise_normalization,
+        )
+        implied_scoring_settings = implied_scoring_settings_payload(
+            implied_scoring_opts, moju_version=_moju_version
+        )
+        implied_scoring: Dict[str, Any] = {}
+        for k, arr in flat.items():
+            if not (str(k).startswith("constitutive/") and str(k).endswith("/implied_delta")):
+                continue
+            bn = str(k)[len("constitutive/") : -len("/implied_delta")]
+            dbg = closure_debug.get(bn) if isinstance(closure_debug.get(bn), dict) else {}
+            v_eff, r_max_raw, meta = score_implied_delta_array(
+                arr, dbg, implied_scoring_opts
+            )
+            # Keep entry["r_max"] as the raw worst-point of unnormalized δ.
+            if log_to_python:
+                r_max_per_key[k] = float(r_max_raw)
+                meta = {
+                    **meta,
+                    "r_max_raw": float(r_max_raw),
+                    "v_eff": float(v_eff) if math.isfinite(v_eff) else float("nan"),
+                }
+            else:
+                r_max_per_key[k] = r_max_raw
+            implied_scoring[k] = meta
+
         entry: Dict[str, Any] = {
             "index": self._index,
             "rms": rms_per_key,
@@ -3245,8 +3451,12 @@ class ResidualEngine:
             "monitor_settings": {
                 "law_scale_mode": eff_law_scale_mode,
                 "state_units": eff_state_units,
+                "implied_scoring": implied_scoring_settings,
             },
+            "implied_scoring_settings": implied_scoring_settings,
         }
+        if implied_scoring:
+            entry["implied_scoring"] = implied_scoring
         if implied_identifiability:
             entry["implied_identifiability"] = implied_identifiability
         if nondim_scale_source:
@@ -3408,6 +3618,9 @@ def evaluate(
     run_mode: str = "eval",
     r_ref: Optional[Dict[str, float]] = None,
     return_residuals: bool = False,
+    implied_metric: Optional[str] = None,
+    implied_percentile: Optional[float] = None,
+    implied_noise_normalization: Optional[bool] = None,
     **compute_kwargs: Any,
 ) -> List[Dict[str, Any]]:
     """
@@ -3419,9 +3632,40 @@ def evaluate(
     loop (``report["execution"] == "loop"``).
 
     ``state_refs``, when given, must have the same length as ``candidates``. Further keywords are
-    forwarded to :meth:`ResidualEngine._compute_entry` (``law_scale_mode``, ``state_units``, and so on).
+    forwarded to :meth:`ResidualEngine._compute_entry` (``law_scale_mode``, ``state_units``,
+    ``implied_metric`` / ``implied_percentile`` / ``implied_noise_normalization``, and so on).
+    Explicit implied-scoring kwargs take precedence over ``engine.constants`` (see
+    :func:`moju.monitor.implied_scoring.resolve_implied_scoring_options`).
     Set ``return_residuals=True`` to attach each candidate's residual dict under ``"residuals"``.
     """
+    if "implied_metric" in compute_kwargs or "implied_percentile" in compute_kwargs or (
+        "implied_noise_normalization" in compute_kwargs
+    ):
+        raise TypeError(
+            "pass implied_metric / implied_percentile / implied_noise_normalization as "
+            "explicit keyword arguments to evaluate(...), not via **compute_kwargs"
+        )
+    scoring_kwargs = {
+        "implied_metric": implied_metric,
+        "implied_percentile": implied_percentile,
+        "implied_noise_normalization": implied_noise_normalization,
+    }
+    from moju.monitor.implied_scoring import (
+        is_default_implied_scoring,
+        resolve_implied_scoring_options,
+    )
+
+    resolved_scoring = resolve_implied_scoring_options(
+        constants=engine.constants,
+        engine_defaults={
+            "implied_metric": engine.implied_metric,
+            "implied_percentile": engine.implied_percentile,
+            "implied_noise_normalization": engine.implied_noise_normalization,
+        },
+        **scoring_kwargs,
+    )
+    # Batched evaluate path scores with 2.1 worst-point only; opt-in settings use the loop.
+    force_loop = not is_default_implied_scoring(resolved_scoring)
     n = len(candidates)
     if state_refs is None:
         refs: Sequence[Optional[Mapping[str, Any]]] = (None,) * n
@@ -3432,7 +3676,7 @@ def evaluate(
             )
         refs = state_refs
     fd_fill = bool(compute_kwargs.get("auto_path_b_derivatives") or compute_kwargs.get("fill_law_fd"))
-    if not fd_fill:
+    if not fd_fill and not force_loop:
         from moju.monitor.evaluate_batch import evaluate_batched
 
         batched = evaluate_batched(
@@ -3453,6 +3697,7 @@ def evaluate(
             state,
             ref,
             run_mode=run_mode,
+            **scoring_kwargs,
             **compute_kwargs,
         )
         entry["index"] = i

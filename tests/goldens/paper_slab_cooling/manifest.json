@@ -1,0 +1,21 @@
+{
+  "moju_version": "2.2.0",
+  "settings": {
+    "implied_metric": "worst_point",
+    "implied_percentile": 95.0,
+    "implied_noise_normalization": false,
+    "scale_k_implied": 0.01,
+    "admissibility_formula": "1 / (1 + r_max / scale_k)",
+    "paper_quantity": "nanmax(|delta_grid|) from constitutive_fields.npz \u2192 score_from_r_max"
+  },
+  "architectures": [
+    "2x2x2_xs",
+    "4x4x4_sm",
+    "8x8x8_n2",
+    "16x16x16_n1",
+    "32x32x32_opt",
+    "64x64x64_w1",
+    "128x128x128_w2"
+  ],
+  "notes": "Paper constitutive % uses fields max|\u03b4| (e.g. 32x32x32: 0.931850 \u2192 93.19%). Training-log constitutive for the same arch can differ slightly (e.g. 0.934237 \u2192 93.42%) because the logged r_max is the training-collocation worst-point, not the eval-grid fields export."
+}

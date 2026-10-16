@@ -348,6 +348,9 @@ def implied_mu_momentum_navier_stokes_torch(law_sm: Dict[str, str]) -> Callable[
                 "re_tilde_pointwise": _re_from_viscosity_t(U, L, mu_pw, rho=rho),
                 "reference_U": _as_t(U),
                 "reference_L": _as_t(L),
+                "noise_rhs": rhs,
+                "noise_basis": u_lap_a,
+                "noise_scale": scale,
             }
         )
         return ImpliedPropertyResult(value=mu_pw, meta=meta)
@@ -396,6 +399,9 @@ def implied_mu_stokes_flow_torch(law_sm: Dict[str, str]) -> Callable[..., Any]:
                 "re_tilde_pointwise": _re_from_viscosity_t(U, L, mu_pw, rho=rho),
                 "reference_U": _as_t(U),
                 "reference_L": _as_t(L),
+                "noise_rhs": rhs,
+                "noise_basis": u_lap_a,
+                "noise_scale": scale,
             }
         )
         return ImpliedPropertyResult(value=mu_pw, meta=meta)
@@ -434,7 +440,14 @@ def implied_nu_burgers_equation_torch(law_sm: Dict[str, str]) -> Callable[..., A
         if not meta["identifiable"]:
             beta_m = torch.full_like(beta_m, float("nan"))
         U, L = _resolve_ref_UL_t(state, constants, law_sm)
-        meta.update({"nu_tilde_pointwise": beta_m, "nu_tilde_global": beta_g})
+        meta.update(
+            {
+                "nu_tilde_pointwise": beta_m,
+                "nu_tilde_global": beta_g,
+                "noise_rhs": rhs,
+                "noise_basis": u_lap_a,
+            }
+        )
         if U is not None and L is not None:
             meta["re_tilde_global"] = _re_from_viscosity_t(U, L, beta_g)
             meta["re_tilde_pointwise"] = _re_from_viscosity_t(U, L, beta_m)

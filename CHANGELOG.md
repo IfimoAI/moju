@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-13
+
+### Added
+
+- **Opt-in robust scoring for law-linked ``implied_delta`` rows.** Defaults are
+  unchanged from 2.1 (``implied_metric="worst_point"``,
+  ``implied_noise_normalization=False``), so published slab-cooling paper
+  results reproduce exactly under default settings. Governing-law scoring is
+  unaffected.
+  - ``implied_metric="percentile"`` with ``implied_percentile`` (default **95**)
+    aggregates ``|δ|`` (or noise-normalized ``|δ_nn|``) by percentile instead of
+    ``max``.
+  - ``implied_noise_normalization=True`` scores
+    ``δ_nn = (F − implied) / (|F| + ε + ε_norm)`` where
+    ``ε = |r_balance| / (|basis| + ε_m)`` is the property-unit noise level from
+    the catalog/model balance residual (ratio recovery: ``ε = |F − implied|``;
+    LSQ viscosity: ``ε`` from ``|rhs − β_F · ∇²u| / |∇²u|``, scaled to μ when
+    needed). Use for noisy or derivative-limited data and second-derivative-based
+    implied properties; combine with either metric.
+  - **Per-call configuration:** ``implied_metric``, ``implied_percentile``, and
+    ``implied_noise_normalization`` are accepted on ``ResidualEngine`` /
+    ``TorchResidualEngine`` constructors, ``compute_residuals``, ``audit``, and
+    ``evaluate``. Precedence: **per-call kwarg > constructor kwarg >
+    ``constants`` > module default**. Any conflict between sources raises a
+    ``UserWarning`` naming both sources and the value used. The ``constants``
+    route remains supported (no deprecation in 2.2). Invalid values raise clear
+    errors. ``MonitorConfig`` does not yet expose these fields (follow-up).
+  - **Scoring provenance:** every ``audit`` / ``evaluate`` report (and JSON
+    export summary) records ``implied_scoring_settings``
+    (``implied_metric``, ``implied_percentile``, ``implied_noise_normalization``,
+    ``moju_version``). Scores and tiers from default vs opt-in settings are not
+    directly comparable.
+  - Reports (Python ``audit()``, JSON export, PDF, Plotly worst-keys) record the
+    metric / normalization used for every implied row and always show the raw
+    worst-point ``max |δ|`` alongside (``r_max_raw``).
+  - Paper goldens for all seven slab-cooling architectures under
+    ``tests/goldens/paper_slab_cooling/`` (SHA-256 + expected scores/tiers);
+    opt-in via ``MOJU_PAPER_DATA`` (bundles never committed). Docs: reproducing
+    paper figures (93.19% fields vs 93.42% training-log) and when to prefer
+    noise normalization.
+
 ## [2.1.0] - 2026-10-13
 
 ### Fixed
