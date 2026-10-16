@@ -53,6 +53,8 @@ from moju.monitor.closure_registry import (
 from moju.monitor.derived_state_chain import all_ref_keys_from_chain, keys_produced_by_chain
 from moju.monitor.model_derived_registry import enrich_derived_state_from_constitutive_audits
 from moju.monitor.law_implied_diagnostics import (
+    is_not_identifiable,
+    materialize_identifiability_meta,
     merge_fragment_law_implied_audit_specs,
     merge_law_implied_audit_specs,
     supported_auto_implied_laws_for,
@@ -776,8 +778,7 @@ def _compute_log_step_metrics(
                 bn = k[len("constitutive/") : -len("/implied_delta")]
                 meta = id_map.get(bn) if isinstance(id_map.get(bn), dict) else None
                 if meta and (
-                    meta.get("status") == "not_identifiable"
-                    or meta.get("identifiable") is False
+                    is_not_identifiable(meta)
                 ):
                     level = "Not identifiable"
                     id_meta = meta
@@ -837,10 +838,7 @@ def _compute_log_step_metrics(
                 ):
                     bn = kk[len("constitutive/") : -len("/implied_delta")]
                     meta = id_map_entry.get(bn) if isinstance(id_map_entry.get(bn), dict) else None
-                    if meta and (
-                        meta.get("status") == "not_identifiable"
-                        or meta.get("identifiable") is False
-                    ):
+                    if meta and is_not_identifiable(meta):
                         continue
                 try:
                     vf = float(admissibility[kk])
@@ -3150,6 +3148,22 @@ class ResidualEngine:
                         debug["category"] = category
                         debug["model_name"] = str(name)
                         debug["state_map"] = dict(state_map)
+                        # Host path: materialize tracer-friendly identifiability scalars.
+                        if log_to_python and (
+                            "identifiable" in debug or debug.get("status") == "not_identifiable"
+                        ):
+                            debug.update(
+                                materialize_identifiability_meta(
+                                    {
+                                        "identifiable": debug.get("identifiable", True),
+                                        "status": debug.get("status"),
+                                        "excluded_fraction": debug.get("excluded_fraction"),
+                                        "n_identifiable": debug.get("n_identifiable"),
+                                        "n_total": debug.get("n_total"),
+                                        "reason": debug.get("reason"),
+                                    }
+                                )
+                            )
                         debug_collector[base] = debug
 
             return out
@@ -3525,17 +3539,18 @@ class ResidualEngine:
             if not isinstance(dbg, dict):
                 continue
             if "identifiable" in dbg or dbg.get("status") == "not_identifiable":
-                compact: Dict[str, Any] = {
-                    "identifiable": bool(dbg.get("identifiable", True)),
-                    "status": dbg.get("status", "ok"),
-                    "excluded_fraction": dbg.get("excluded_fraction"),
-                    "n_identifiable": dbg.get("n_identifiable"),
-                    "n_total": dbg.get("n_total"),
-                    "conditioning_threshold": dbg.get("conditioning_threshold"),
-                    "fit_quality_threshold": dbg.get("fit_quality_threshold"),
-                }
-                if dbg.get("reason"):
-                    compact["reason"] = dbg["reason"]
+                compact = materialize_identifiability_meta(
+                    {
+                        "identifiable": dbg.get("identifiable", True),
+                        "status": dbg.get("status"),
+                        "excluded_fraction": dbg.get("excluded_fraction"),
+                        "n_identifiable": dbg.get("n_identifiable"),
+                        "n_total": dbg.get("n_total"),
+                        "conditioning_threshold": dbg.get("conditioning_threshold"),
+                        "fit_quality_threshold": dbg.get("fit_quality_threshold"),
+                        "reason": dbg.get("reason"),
+                    }
+                )
                 implied_identifiability[str(bn)] = compact
 
         # Opt-in robust scoring for constitutive implied_delta (defaults = 2.1).
@@ -3830,15 +3845,18 @@ def evaluate(
     regions: Any = None,
     region_names: Optional[Mapping[Any, str]] = None,
     region_min_points: Optional[int] = None,
+    evaluate_debug_loop: bool = False,
     **compute_kwargs: Any,
 ) -> List[Dict[str, Any]]:
     """
     One :func:`audit` report per candidate; ``engine.log`` is not modified.
 
     Same-shaped candidates are scored in one :func:`jax.jit` / :func:`jax.vmap` call
-    (``report["execution"] == "batched"``). Mismatched shapes, an untraceable callable, or
-    derivative fill (``auto_path_b_derivatives`` / ``fill_law_fd``) keep the per-candidate
-    loop (``report["execution"] == "loop"``).
+    (``report["execution"] == "batched"``), including when ``regions`` is set (masks are
+    static across the batch). Mismatched shapes, an untraceable callable, or derivative
+    fill (``auto_path_b_derivatives`` / ``fill_law_fd``) keep the per-candidate loop
+    (``report["execution"] == "loop"``) when ``regions`` is ``None``. With ``regions`` set,
+    batching is required unless ``evaluate_debug_loop=True``.
 
     ``state_refs``, when given, must have the same length as ``candidates``. Further keywords are
     forwarded to :meth:`ResidualEngine._compute_entry` (``law_scale_mode``, ``state_units``,
@@ -3854,7 +3872,7 @@ def evaluate(
             "pass implied_metric / implied_percentile / implied_noise_normalization as "
             "explicit keyword arguments to evaluate(...), not via **compute_kwargs"
         )
-    for banned in ("regions", "region_names", "region_min_points"):
+    for banned in ("regions", "region_names", "region_min_points", "evaluate_debug_loop"):
         if banned in compute_kwargs:
             raise TypeError(
                 f"pass {banned} as an explicit keyword argument to evaluate(...), "
@@ -3885,8 +3903,12 @@ def evaluate(
         implied_noise_normalization=implied_noise_normalization,
     )
     eff_regions = engine.regions if regions is None else regions
-    # Batched evaluate path scores with 2.1 worst-point only; opt-in / regions use the loop.
-    force_loop = (not is_default_implied_scoring(resolved_scoring)) or (eff_regions is not None)
+    # Opt-in global implied scoring (percentile / noise-norm) still uses the loop when
+    # regions are absent; with regions, the batch path always runs (region tables honor
+    # metric/percentile; global scores remain the default R_eff path inside the batch).
+    force_loop_optin = (not is_default_implied_scoring(resolved_scoring)) and (
+        eff_regions is None
+    )
     n = len(candidates)
     if state_refs is None:
         refs: Sequence[Optional[Mapping[str, Any]]] = (None,) * n
@@ -3897,7 +3919,13 @@ def evaluate(
             )
         refs = state_refs
     fd_fill = bool(compute_kwargs.get("auto_path_b_derivatives") or compute_kwargs.get("fill_law_fd"))
-    if not fd_fill and not force_loop:
+    use_debug_loop = bool(evaluate_debug_loop)
+    if eff_regions is not None and fd_fill and not use_debug_loop:
+        raise RuntimeError(
+            "evaluate(..., regions=...) cannot combine Path B / fill_law_fd with the "
+            "batched region path. Omit derivative fill, or pass evaluate_debug_loop=True."
+        )
+    if not fd_fill and not force_loop_optin and not use_debug_loop:
         from moju.monitor.evaluate_batch import evaluate_batched
 
         batched = evaluate_batched(
@@ -3907,11 +3935,25 @@ def evaluate(
             run_mode=run_mode,
             r_ref=r_ref,
             return_residuals=return_residuals,
+            regions=eff_regions,
+            region_names=region_names if regions is not None else (
+                engine.region_names if eff_regions is not None else None
+            ),
+            region_min_points=region_min_points,
+            implied_metric=implied_metric,
+            implied_percentile=implied_percentile,
+            implied_noise_normalization=implied_noise_normalization,
+            require_batch=(eff_regions is not None),
         )
         if batched is not None:
             for report in batched:
                 report["execution"] = "batched"
             return batched
+        if eff_regions is not None:
+            # evaluate_batched raises when require_batch; defensive guard.
+            raise RuntimeError(
+                "evaluate(..., regions=...) requires the batched jit/vmap path"
+            )
     reports: List[Dict[str, Any]] = []
     for i, (state, ref) in enumerate(zip(candidates, refs)):
         residuals, entry = engine._compute_entry(

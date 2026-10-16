@@ -45,7 +45,7 @@ See README "Law-linked implied audits" and :func:`merge_law_implied_audit_specs`
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import jax.numpy as jnp
 
@@ -239,35 +239,80 @@ def _apply_viscosity_conditioning(
         & (fit_quality >= float(fit_threshold))
         & (term_fraction >= float(term_threshold))
     )
-    n_tot = int(mask.size)
-    n_ok = int(jnp.sum(mask))
-    excluded_fraction = 1.0 - (float(n_ok) / float(max(n_tot, 1)))
+    # Keep counts / flags as JAX arrays so this path is jit/vmap-safe. Host code
+    # converts with bool()/int() when building reports outside a transform.
+    n_tot = int(mask.size)  # static shape → concrete Python int
+    n_ok = jnp.sum(mask.astype(jnp.int32))
+    excluded_fraction = 1.0 - (n_ok.astype(jnp.float32) / float(max(n_tot, 1)))
     # Absolute floor scales down on tiny evaluation sets (unit tests / single points).
     eff_min_count = min(int(min_count), max(1, n_tot))
-    identifiable = (n_ok >= eff_min_count) and (
-        float(n_ok) / float(max(n_tot, 1)) >= float(min_frac)
+    identifiable = (n_ok >= int(eff_min_count)) & (
+        n_ok.astype(jnp.float32) / float(max(n_tot, 1)) >= float(min_frac)
     )
     beta_masked = jnp.where(mask, b, jnp.nan)
     beta_global = _global_scalar_coefficient(rhs_a, ba, mask)
-    status = "ok" if identifiable else "not_identifiable"
     meta: Dict[str, Any] = {
         "term_fraction": term_fraction,
         "fit_quality": fit_quality,
         "conditioning_threshold": float(term_threshold),
         "fit_quality_threshold": float(fit_threshold),
-        "excluded_fraction": float(excluded_fraction),
-        "n_identifiable": int(n_ok),
-        "n_total": int(n_tot),
-        "identifiable": bool(identifiable),
-        "status": status,
+        "excluded_fraction": excluded_fraction,
+        "n_identifiable": n_ok,
+        "n_total": n_tot,
+        "identifiable": identifiable,
+        # Status string is derived on the host from ``identifiable`` (see
+        # ``materialize_identifiability_meta``); do not branch on tracers here.
         "min_identifiable_fraction": float(min_frac),
         "min_identifiable_count": int(min_count),
         "nu_star_pointwise": beta_masked,
         "nu_star_global": beta_global,
+        "reason": _NOT_IDENTIFIABLE_REASON,  # only meaningful when not identifiable
     }
-    if not identifiable:
-        meta["reason"] = _NOT_IDENTIFIABLE_REASON
     return beta_masked, beta_global, meta
+
+
+def _as_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    try:
+        return bool(jnp.asarray(value).item())
+    except (TypeError, ValueError, AttributeError):
+        return bool(value)
+
+
+def is_not_identifiable(meta: Optional[Mapping[str, Any]]) -> bool:
+    """True when a closure_debug / identifiability meta marks the row not identifiable."""
+    if not meta:
+        return False
+    if meta.get("status") == "not_identifiable":
+        return True
+    if "identifiable" in meta:
+        return not _as_bool(meta.get("identifiable"), default=True)
+    return False
+
+
+def materialize_identifiability_meta(meta: Mapping[str, Any]) -> Dict[str, Any]:
+    """Convert tracer-friendly identifiability fields to host Python scalars/strings."""
+    out = dict(meta)
+    ident_b = _as_bool(out.get("identifiable", True), default=True)
+    out["identifiable"] = ident_b
+    out["status"] = "ok" if ident_b else "not_identifiable"
+    for key in ("n_identifiable", "n_total"):
+        if key in out and out[key] is not None:
+            try:
+                out[key] = int(jnp.asarray(out[key]).item())
+            except (TypeError, ValueError):
+                out[key] = int(out[key])
+    if "excluded_fraction" in out and out["excluded_fraction"] is not None:
+        try:
+            out["excluded_fraction"] = float(jnp.asarray(out["excluded_fraction"]).item())
+        except (TypeError, ValueError):
+            out["excluded_fraction"] = float(out["excluded_fraction"])
+    if ident_b:
+        out.pop("reason", None)
+    elif "reason" not in out:
+        out["reason"] = _NOT_IDENTIFIABLE_REASON
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -416,8 +461,7 @@ def implied_mu_momentum_navier_stokes(law_sm: Dict[str, str]) -> Callable[..., A
         scale = jnp.asarray(rho) * jnp.asarray(U) * jnp.asarray(L)
         mu_pw = beta_m * scale
         mu_g = beta_g * scale
-        if not meta["identifiable"]:
-            mu_pw = jnp.full_like(mu_pw, jnp.nan)
+        mu_pw = jnp.where(meta["identifiable"], mu_pw, jnp.full_like(mu_pw, jnp.nan))
         meta.update(
             {
                 "mu_tilde_pointwise": mu_pw,
@@ -472,8 +516,7 @@ def implied_mu_stokes_flow(law_sm: Dict[str, str]) -> Callable[..., Any]:
         scale = jnp.asarray(rho) * jnp.asarray(U) * jnp.asarray(L)
         mu_pw = beta_m * scale
         mu_g = beta_g * scale
-        if not meta["identifiable"]:
-            mu_pw = jnp.full_like(mu_pw, jnp.nan)
+        mu_pw = jnp.where(meta["identifiable"], mu_pw, jnp.full_like(mu_pw, jnp.nan))
         meta.update(
             {
                 "mu_tilde_pointwise": mu_pw,
@@ -525,8 +568,7 @@ def implied_nu_burgers_equation(law_sm: Dict[str, str]) -> Callable[..., Any]:
             min_frac=min_frac,
             min_count=min_count,
         )
-        if not meta["identifiable"]:
-            beta_m = jnp.full_like(beta_m, jnp.nan)
+        beta_m = jnp.where(meta["identifiable"], beta_m, jnp.full_like(beta_m, jnp.nan))
         U, L = _resolve_ref_UL(state, constants, law_sm)
         meta.update(
             {

@@ -29,6 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     ``ok``).
   - ``audit(..., regions=/region_names=/region_min_points=)`` supported
     (per-call > constructor; needs ``last_residual_dict`` when setting regions).
+  - ``evaluate(..., regions=...)`` uses the batched ``jax.jit`` / ``jax.vmap``
+    path (static 0/1 weight stacks); status strings derived on the host. No
+    silent loop fallback when regions are set (``evaluate_debug_loop=True`` only).
   - Provenance: region names, point counts, mask SHA-256, ``region_min_points``,
     plus existing ``implied_scoring_settings`` and Moju version.
   - Docs: [`docs/MIGRATION_2.2_to_2.3.md`](docs/MIGRATION_2.2_to_2.3.md),

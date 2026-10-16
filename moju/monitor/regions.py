@@ -274,6 +274,41 @@ def align_weights_to_residual(weights_flat: Any, residual: Any) -> jnp.ndarray:
     return jnp.reshape(w, shape)
 
 
+def weighted_reduce_magnitude_arrays(
+    arr: Any,
+    weights: Any,
+    *,
+    metric: str = "worst_point",
+    percentile: float = 95.0,
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """
+    Jit-safe masked magnitude reduce.
+
+    Returns ``(v_eff, worst_flat_index)`` as arrays. ``worst_flat_index`` is ``-1``
+    when the region has no finite in-mask points. Percentile uses NaN-masking
+    (``jnp.nanpercentile``) so out-of-region points are excluded.
+    """
+    a = jnp.asarray(arr)
+    if a.ndim >= 1 and a.shape[-1] in (2, 3) and a.ndim >= 2:
+        mag = jnp.sqrt(jnp.sum(jnp.square(a), axis=-1) + 1e-30)
+    else:
+        mag = jnp.abs(a)
+    mag_flat = jnp.reshape(mag, (-1,))
+    w = jnp.asarray(weights, dtype=jnp.float32).reshape(-1)
+    # NaN-mask out-of-region and non-finite so percentile/max ignore them.
+    scored = jnp.where((w > 0.5) & jnp.isfinite(mag_flat), mag_flat, jnp.nan)
+    has = jnp.any(jnp.isfinite(scored))
+    if metric == "percentile":
+        v = jnp.nanpercentile(scored, float(percentile))
+    else:
+        v = jnp.nanmax(scored)
+    for_argmax = jnp.where(jnp.isfinite(scored), scored, -jnp.inf)
+    worst_idx = jnp.argmax(for_argmax).astype(jnp.int32)
+    v = jnp.where(has, v, jnp.asarray(jnp.nan, dtype=mag_flat.dtype))
+    worst_idx = jnp.where(has, worst_idx, jnp.asarray(-1, dtype=jnp.int32))
+    return v, worst_idx
+
+
 def weighted_reduce_magnitude(
     arr: Any,
     weights: Any,
@@ -288,35 +323,27 @@ def weighted_reduce_magnitude(
     of the maximum in-region magnitude (or None when empty / non-finite).
     """
     a = jnp.asarray(arr)
+    mag = a
     if a.ndim >= 1 and a.shape[-1] in (2, 3) and a.ndim >= 2:
         mag = jnp.sqrt(jnp.sum(jnp.square(a), axis=-1) + 1e-30)
     else:
         mag = jnp.abs(a)
     mag_flat = jnp.reshape(mag, (-1,))
     w = jnp.asarray(weights, dtype=jnp.float32).reshape(-1)
-    if w.shape[0] != mag_flat.shape[0]:
-        # Try numpy-side refine using align
+    if int(w.shape[0]) != int(mag_flat.shape[0]):
         w = align_weights_to_residual(weights, mag).reshape(-1)
-    if w.shape[0] != mag_flat.shape[0]:
+    if int(w.shape[0]) != int(mag_flat.shape[0]):
         raise ValueError(
             f"weight length {int(w.shape[0])} != magnitude length {int(mag_flat.shape[0])}"
         )
-    # NaN-mask out-of-region and non-finite so percentile/max ignore them.
-    scored = jnp.where((w > 0.5) & jnp.isfinite(mag_flat), mag_flat, jnp.nan)
-    finite = scored[jnp.isfinite(scored)]
-    if finite.size == 0:
-        return float("nan"), None
-    if metric == "percentile":
-        v = float(jnp.nanpercentile(scored, float(percentile)))
-    else:
-        v = float(jnp.nanmax(scored))
-    # Worst-point index among in-region finite points (argmax of mag where weight)
-    # Replace nan with -inf for argmax.
-    for_argmax = jnp.where(jnp.isfinite(scored), scored, -jnp.inf)
-    worst_idx = int(jnp.argmax(for_argmax))
-    if not math.isfinite(float(for_argmax[worst_idx])):
-        return v, None
-    return v, worst_idx
+    v, worst_idx = weighted_reduce_magnitude_arrays(
+        a, w, metric=metric, percentile=percentile
+    )
+    v_f = float(v)
+    wi = int(worst_idx)
+    if wi < 0 or not math.isfinite(v_f):
+        return (float("nan") if not math.isfinite(v_f) else v_f), None
+    return v_f, wi
 
 
 def weighted_reduce_magnitude_numpy_reference(
@@ -352,6 +379,75 @@ def _spatial_shape_for_field(field: Any) -> Tuple[int, ...]:
     return tuple(int(s) for s in a.shape)
 
 
+def regional_viscosity_fit_arrays(
+    *,
+    rhs: Any,
+    basis: Any,
+    region_weights: Any,
+    term_fraction: Any,
+    fit_quality: Any,
+    term_threshold: float,
+    fit_threshold: float,
+    min_frac: float,
+    min_count: int,
+    region_min_points: int,
+    scale: Optional[Any] = None,
+) -> Dict[str, jnp.ndarray]:
+    """
+    Jit-safe regional viscosity LSQ. Returns only numeric arrays:
+
+    ``n_points``, ``n_identifiable``, ``identifiability_ratio``, ``nu_tilde``,
+    ``mu_tilde``, ``fit_quality_median``, ``insufficient`` (0/1), ``identifiable`` (bool).
+    """
+    from moju.monitor.law_implied_diagnostics import _global_scalar_coefficient
+
+    spatial = _spatial_shape_for_field(rhs)
+    w = jnp.reshape(jnp.asarray(region_weights, dtype=jnp.float32), spatial)
+    n_region = jnp.sum((w > 0.5).astype(jnp.int32))
+    insufficient = n_region < int(region_min_points)
+
+    tf = jnp.reshape(jnp.asarray(term_fraction), spatial)
+    fq = jnp.reshape(jnp.asarray(fit_quality), spatial)
+    gate = (
+        (w > 0.5)
+        & jnp.isfinite(tf)
+        & jnp.isfinite(fq)
+        & (tf >= float(term_threshold))
+        & (fq >= float(fit_threshold))
+    )
+    n_ok = jnp.sum(gate.astype(jnp.int32))
+    # eff_min uses static Python ints from min_count and region_min_points floor only
+    # when n_region is known statically for the insufficient branch; under jit we use
+    # jnp.minimum against the traced n_region.
+    eff_min = jnp.minimum(
+        jnp.asarray(int(min_count), dtype=jnp.int32),
+        jnp.maximum(jnp.asarray(1, dtype=jnp.int32), n_region),
+    )
+    identifiable = (~insufficient) & (n_ok >= eff_min) & (
+        n_ok.astype(jnp.float32) / jnp.maximum(n_region.astype(jnp.float32), 1.0)
+        >= float(min_frac)
+    )
+    fq_in = jnp.where(w > 0.5, fq, jnp.nan)
+    fq_med = jnp.nanmedian(fq_in)
+    nu = _global_scalar_coefficient(rhs, basis, gate)
+    nu = jnp.where(identifiable, nu, jnp.asarray(jnp.nan, dtype=jnp.result_type(nu)))
+    if scale is not None:
+        mu = jnp.asarray(scale) * nu
+    else:
+        mu = jnp.asarray(jnp.nan, dtype=jnp.result_type(nu))
+    ratio = n_ok.astype(jnp.float32) / jnp.maximum(n_region.astype(jnp.float32), 1.0)
+    return {
+        "n_points": n_region,
+        "n_identifiable": n_ok,
+        "identifiability_ratio": ratio,
+        "nu_tilde": nu,
+        "mu_tilde": mu,
+        "fit_quality_median": fq_med,
+        "insufficient": insufficient.astype(jnp.int32),
+        "identifiable": identifiable,
+    }
+
+
 def regional_viscosity_fit(
     *,
     rhs: Any,
@@ -371,12 +467,27 @@ def regional_viscosity_fit(
 
     ``scale`` optional (``ρ U L``) to convert ν̃* → μ̃. Returns status / ν̃ / counts.
     """
-    from moju.monitor.law_implied_diagnostics import _global_scalar_coefficient
-
-    spatial = _spatial_shape_for_field(rhs)
-    w = jnp.reshape(jnp.asarray(region_weights, dtype=jnp.float32), spatial)
-    n_region = int(jnp.sum(w > 0.5))
-    if n_region < int(region_min_points):
+    nums = regional_viscosity_fit_arrays(
+        rhs=rhs,
+        basis=basis,
+        region_weights=region_weights,
+        term_fraction=term_fraction,
+        fit_quality=fit_quality,
+        term_threshold=term_threshold,
+        fit_threshold=fit_threshold,
+        min_frac=min_frac,
+        min_count=min_count,
+        region_min_points=region_min_points,
+        scale=scale,
+    )
+    n_region = int(jnp.asarray(nums["n_points"]).item())
+    n_ok = int(jnp.asarray(nums["n_identifiable"]).item())
+    insufficient = bool(jnp.asarray(nums["insufficient"]).item())
+    identifiable = bool(jnp.asarray(nums["identifiable"]).item())
+    fq_med = float(jnp.asarray(nums["fit_quality_median"]).item())
+    nu_f = float(jnp.asarray(nums["nu_tilde"]).item())
+    mu_f = float(jnp.asarray(nums["mu_tilde"]).item())
+    if insufficient:
         return {
             "status": "insufficient_points",
             "n_points": n_region,
@@ -388,25 +499,6 @@ def regional_viscosity_fit(
                 f"Region has {n_region} points; region_min_points={int(region_min_points)}."
             ),
         }
-
-    tf = jnp.reshape(jnp.asarray(term_fraction), spatial)
-    fq = jnp.reshape(jnp.asarray(fit_quality), spatial)
-
-    gate = (
-        (w > 0.5)
-        & jnp.isfinite(tf)
-        & jnp.isfinite(fq)
-        & (tf >= float(term_threshold))
-        & (fq >= float(fit_threshold))
-    )
-    n_ok = int(jnp.sum(gate))
-    eff_min = min(int(min_count), max(1, n_region))
-    identifiable = (n_ok >= eff_min) and (
-        float(n_ok) / float(max(n_region, 1)) >= float(min_frac)
-    )
-    fq_in = jnp.where(w > 0.5, fq, jnp.nan)
-    fq_med = float(jnp.nanmedian(fq_in)) if n_region > 0 else float("nan")
-
     if not identifiable:
         return {
             "status": "not_identifiable",
@@ -420,21 +512,50 @@ def regional_viscosity_fit(
                 "too few points satisfy the term-fraction and fit-quality gates."
             ),
         }
-
-    nu = _global_scalar_coefficient(rhs, basis, gate)
-    nu_f = float(nu) if math.isfinite(float(nu)) else float("nan")
-    mu_f = float("nan")
-    if scale is not None and math.isfinite(nu_f):
-        mu_f = float(jnp.asarray(scale) * nu)
     return {
         "status": "ok",
         "n_points": n_region,
         "n_identifiable": n_ok,
-        "nu_tilde": nu_f,
-        "mu_tilde": mu_f,
-        "fit_quality_median": fq_med,
+        "nu_tilde": nu_f if math.isfinite(nu_f) else float("nan"),
+        "mu_tilde": mu_f if math.isfinite(mu_f) else float("nan"),
+        "fit_quality_median": fq_med if math.isfinite(fq_med) else float("nan"),
         "reason": None,
     }
+
+
+def status_from_region_numerics(
+    *,
+    n_points: int,
+    region_min_points: int,
+    identifiable: bool,
+    n_identifiable: int,
+    metric: str,
+    percentile: float,
+) -> Dict[str, Any]:
+    """Host-side status / percentile flags from batched numeric outputs."""
+    out: Dict[str, Any] = {"n_points": int(n_points)}
+    if int(n_points) < int(region_min_points):
+        out["status"] = "insufficient_points"
+        out["reason"] = (
+            f"Region has {int(n_points)} points; region_min_points={int(region_min_points)}."
+        )
+        out["viscosity_status"] = "insufficient_points"
+    elif not identifiable:
+        out["status"] = "ok"
+        out["reason"] = None
+        out["viscosity_status"] = "not_identifiable"
+        out["viscosity_reason"] = (
+            "Constitutive viscosity check could not be evaluated in this region: "
+            "too few points satisfy the term-fraction and fit-quality gates."
+        )
+    else:
+        out["status"] = "ok"
+        out["reason"] = None
+        out["viscosity_status"] = "ok"
+    out["n_identifiable"] = int(n_identifiable)
+    if metric == "percentile":
+        out.update(percentile_tail_adequacy(int(n_points), float(percentile)))
+    return out
 
 
 def _scale_k_for_key(entry: Mapping[str, Any], key: str, *, default: float = 1.0e-2) -> float:
@@ -675,8 +796,11 @@ __all__ = [
     "regions_provenance",
     "align_weights_to_residual",
     "weighted_reduce_magnitude",
+    "weighted_reduce_magnitude_arrays",
     "weighted_reduce_magnitude_numpy_reference",
     "regional_viscosity_fit",
+    "regional_viscosity_fit_arrays",
+    "status_from_region_numerics",
     "compute_region_results",
 ]
 

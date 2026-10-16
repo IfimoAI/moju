@@ -57,7 +57,9 @@ def _not_identifiable_pdf_notes(report: Dict[str, Any]) -> List[str]:
     for bn, meta in id_map.items():
         if not isinstance(meta, dict):
             continue
-        if meta.get("status") != "not_identifiable" and meta.get("identifiable") is not False:
+        from moju.monitor.law_implied_diagnostics import is_not_identifiable
+
+        if not is_not_identifiable(meta):
             continue
         excl = meta.get("excluded_fraction")
         reason = meta.get("reason") or (

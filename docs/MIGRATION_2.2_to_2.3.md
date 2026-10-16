@@ -25,6 +25,13 @@ same kwargs; per-call > constructor / any ``region_results`` already on the log.
 **Precedence:** per-call keyword argument > constructor. Regions are **not**
 accepted via ``constants``.
 
+``evaluate(..., regions=...)`` scores the batch in one ``jax.jit`` / ``jax.vmap``
+call with region masks as stacked 0/1 weights ``(n_regions, n_points)``. Numeric
+per-region outputs (ν̃, fit quality, scores, worst-point index, tail count) are
+computed inside the transform; status strings are derived afterward. There is no
+silent per-item loop when regions are set — pass ``evaluate_debug_loop=True`` only
+for debugging.
+
 Masks are boolean or 0/1 arrays matching the point layout. Regions may overlap;
 the report records ``n_unassigned`` for points in no region.
 

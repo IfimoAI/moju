@@ -466,8 +466,8 @@ def test_below_region_min_points_insufficient():
     assert pk["admissibility_level"] == "Insufficient points"
 
 
-def test_evaluate_with_regions_forces_loop_not_batched_jit_vmap():
-    """Regions force the evaluate loop path (batched jit/vmap is default-scoring only)."""
+def test_evaluate_with_regions_uses_batched_jit_vmap():
+    """Regions use the batched jit/vmap path (masks static across the batch)."""
     state, X, _ = _kov_state(24)
     near = np.asarray(X < 0.5)
     eng = ResidualEngine(
@@ -482,16 +482,14 @@ def test_evaluate_with_regions_forces_loop_not_batched_jit_vmap():
         region_min_points=8,
         weighted_norms=False,
     )
-    assert reports[0]["execution"] == "loop"
-    assert reports[1]["execution"] == "loop"
+    assert reports[0]["execution"] == "batched"
+    assert reports[1]["execution"] == "batched"
     assert "region_results" in reports[0]
     prov = reports[0]["region_results"]["provenance"]
     assert prov["region_min_points"] == 8
     assert set(prov["region_names"]) == {"far", "near"}
     assert "mask_sha256" in prov
     assert prov["moju_version"] == "2.3.0"
-    # Regions force loop even when candidates are same-shaped (batched jit/vmap
-    # is reserved for default implied scoring with regions=None).
 
 
 def test_mask_hashes_and_region_provenance_in_report_and_json():

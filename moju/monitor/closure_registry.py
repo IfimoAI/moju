@@ -185,21 +185,31 @@ def compute_implied_delta_with_debug(
     except (TypeError, ValueError):
         return None, None
     # Drop non-identifiable rows from scoring (all-NaN delta) while keeping debug.
-    if implied_meta.get("status") == "not_identifiable" or implied_meta.get(
-        "identifiable"
-    ) is False:
-        delta = jnp.full_like(jnp.asarray(delta), jnp.nan)
+    # ``identifiable`` may be a 0-d JAX bool under jit/vmap — use jnp.where, not Python `if`.
+    delta_a = jnp.asarray(delta)
+    ident = implied_meta.get("identifiable", True)
+    if implied_meta.get("status") == "not_identifiable":
+        delta_a = jnp.full_like(delta_a, jnp.nan)
+    elif ident is False:
+        delta_a = jnp.full_like(delta_a, jnp.nan)
+    else:
+        try:
+            ident_arr = jnp.asarray(ident)
+            if ident_arr.dtype == jnp.bool_ or ident_arr.dtype == bool:
+                delta_a = jnp.where(ident_arr, delta_a, jnp.full_like(delta_a, jnp.nan))
+        except (TypeError, ValueError):
+            pass
     debug = {
         "pred": pred_debug,
         "implied": implied_debug,
         "raw": raw,
-        "delta": jnp.asarray(delta),
+        "delta": delta_a,
         "mode": "subtract",
         "output_key": output_key,
     }
     if implied_meta:
         debug.update(implied_meta)
-    return delta, debug
+    return delta_a, debug
 
 
 def compute_implied_delta(

@@ -15,6 +15,18 @@ from moju.monitor.derivative_provenance import (
 from moju.monitor.derived_state_chain import keys_produced_by_chain
 from moju.monitor.law_scale_recipes import _resolve_scale_recipe, _term_rms_array
 
+# Incremented once per successful compiled batch invocation (tests assert a single call).
+_BATCH_TRACE_COUNT: int = 0
+
+
+def reset_batch_trace_count() -> None:
+    global _BATCH_TRACE_COUNT
+    _BATCH_TRACE_COUNT = 0
+
+
+def get_batch_trace_count() -> int:
+    return int(_BATCH_TRACE_COUNT)
+
 
 def evaluate_batched(
     engine: Any,
@@ -24,22 +36,53 @@ def evaluate_batched(
     run_mode: str,
     r_ref: Optional[Dict[str, float]],
     return_residuals: bool,
+    regions: Any = None,
+    region_names: Optional[Mapping[Any, str]] = None,
+    region_min_points: Optional[int] = None,
+    implied_metric: Optional[str] = None,
+    implied_percentile: Optional[float] = None,
+    implied_noise_normalization: Optional[bool] = None,
+    require_batch: bool = False,
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Score every candidate in one compiled call.
 
-    Returns ``None`` when the batch cannot be traced, so the caller keeps the Python loop.
-    ``derivatives="supplied_only"`` still raises :class:`MissingSuppliedDerivativeError` before
-    that call when a required derivative is absent.
+    When ``regions`` is set, region masks are static across the batch and enter the
+    jitted function as stacked 0/1 weights ``(n_regions, n_points)``. Numeric
+    per-region outputs are computed inside the transform; status strings are
+    derived on the host afterward.
+
+    Returns ``None`` when the batch cannot be traced **and** ``require_batch`` is
+    False (caller may loop). When ``require_batch`` is True (regions path),
+    failures raise instead of returning ``None``.
+    ``derivatives="supplied_only"`` still raises :class:`MissingSuppliedDerivativeError`
+    before that call when a required derivative is absent.
     """
+    global _BATCH_TRACE_COUNT
+
+    def _fail(exc: Optional[BaseException] = None) -> Optional[List[Dict[str, Any]]]:
+        if require_batch:
+            if exc is not None:
+                raise RuntimeError(
+                    "evaluate(..., regions=...) requires the batched jit/vmap path; "
+                    "batching failed. Pass evaluate_debug_loop=True only for debugging."
+                ) from exc
+            raise RuntimeError(
+                "evaluate(..., regions=...) requires the batched jit/vmap path; "
+                "batching is unavailable for this engine/candidate set. "
+                "Pass evaluate_debug_loop=True only for debugging."
+            )
+        return None
+
     if not candidates:
         return []
     if engine.best_effort_partial or engine.user_fns:
-        return None
+        return _fail()
     if not _uniform(candidates) or not _uniform_refs(refs):
-        return None
+        return _fail()
     _require_supplied_derivatives(engine, candidates)
 
+    from moju import __version__ as _moju_version
     from moju.monitor.auditor import (
         DEFAULT_NONDIM_R_NORM_SCALE_K,
         _SCALE_EPS,
@@ -51,7 +94,27 @@ def evaluate_batched(
         _rms_scalar,
         audit,
     )
-    from moju.monitor.closure_registry import MODEL_FNS, compute_implied_delta, compute_ref_delta
+    from moju.monitor.closure_registry import (
+        MODEL_FNS,
+        compute_implied_delta_with_debug,
+        compute_ref_delta,
+    )
+    from moju.monitor.implied_scoring import (
+        DEFAULT_IMPLIED_METRIC,
+        DEFAULT_IMPLIED_PERCENTILE,
+        resolve_implied_scoring_options,
+        score_from_r_max,
+    )
+    from moju.monitor.law_implied_diagnostics import _gate_params
+    from moju.monitor.regions import (
+        DEFAULT_REGION_MIN_POINTS,
+        normalize_regions,
+        regional_viscosity_fit_arrays,
+        regions_provenance,
+        status_from_region_numerics,
+        validate_region_min_points,
+        weighted_reduce_magnitude_arrays,
+    )
     from moju.piratio.groups import Groups
     from moju.piratio.laws import Laws
 
@@ -70,6 +133,61 @@ def evaluate_batched(
         floor=float(DEFAULT_NONDIM_R_NORM_SCALE_K),
         scale_eps=float(_SCALE_EPS),
     )
+    scoring_opts = resolve_implied_scoring_options(
+        constants=engine.constants,
+        engine_defaults={
+            "implied_metric": engine.implied_metric,
+            "implied_percentile": engine.implied_percentile,
+            "implied_noise_normalization": engine.implied_noise_normalization,
+        },
+        implied_metric=implied_metric,
+        implied_percentile=implied_percentile,
+        implied_noise_normalization=implied_noise_normalization,
+    )
+    metric = str(scoring_opts.get("implied_metric", DEFAULT_IMPLIED_METRIC))
+    pct = float(scoring_opts.get("implied_percentile", DEFAULT_IMPLIED_PERCENTILE))
+    # Batched path currently scores global residuals with default worst-point R_eff;
+    # region tables honor metric/percentile. Opt-in global noise-norm still uses loop
+    # unless regions force the batch path (region scores then use worst_point/percentile
+    # on raw δ unless noise-norm arrays are available in closure_debug).
+    term_thr, fit_thr, min_frac, min_count = _gate_params(engine.constants)
+
+    region_pack: Optional[Dict[str, Any]] = None
+    region_weights = None
+    eff_rmin = DEFAULT_REGION_MIN_POINTS
+    if regions is not None:
+        # Infer reference shape from a residual-sized state field.
+        ref_shape = None
+        sample = candidates[0]
+        for key in ("u", "T", "u_laplacian", "T_laplacian"):
+            if key in sample:
+                a = jnp.asarray(sample[key])
+                if a.ndim >= 2 and a.shape[-1] in (2, 3):
+                    ref_shape = a.shape[:-1]
+                else:
+                    ref_shape = a.shape
+                break
+        normalized = normalize_regions(
+            regions, reference_shape=ref_shape, region_names=region_names
+        )
+        names = list(normalized["names"])
+        weights_list = [jnp.asarray(normalized["weights"][n], dtype=jnp.float32).reshape(-1) for n in names]
+        region_weights = jnp.stack(weights_list, axis=0)
+        eff_rmin = (
+            validate_region_min_points(region_min_points)
+            if region_min_points is not None
+            else int(
+                getattr(engine, "region_min_points", None) or DEFAULT_REGION_MIN_POINTS
+            )
+        )
+        region_pack = {
+            "names": names,
+            "normalized": normalized,
+            "n_points": [int(normalized["n_points"][n]) for n in names],
+            "region_min_points": eff_rmin,
+            "moju_version": _moju_version,
+        }
+
     stacked_state = _stack(candidates)
     stacked_ref = _stack([r or {} for r in refs]) if use_ref else None
 
@@ -81,8 +199,16 @@ def evaluate_batched(
             r_eff=_r_eff_scalar,
             r_max=_r_max_scalar,
             rms_scalar=_rms_scalar,
-            implied=compute_implied_delta,
+            implied_with_debug=compute_implied_delta_with_debug,
             ref_delta=compute_ref_delta,
+            region_weights=region_weights,
+            region_min_points=eff_rmin,
+            region_metric=metric,
+            region_percentile=pct,
+            term_threshold=term_thr,
+            fit_threshold=fit_thr,
+            min_frac=min_frac,
+            min_count=min_count,
         )
 
     try:
@@ -92,16 +218,17 @@ def evaluate_batched(
         else:
             compiled = jax.jit(jax.vmap(lambda state: one(state, {})))
             out = compiled(stacked_state)
+        _BATCH_TRACE_COUNT += 1
     except MissingSuppliedDerivativeError:
         raise
-    except Exception:
-        return None
+    except Exception as exc:
+        return _fail(exc)
 
     flags = out["recipe_ok"]
     if flags:
         ok = jnp.stack([jnp.asarray(v) for v in flags.values()])
         if not bool(jnp.all(ok)):
-            return None
+            return _fail()
 
     provenance = _provenance(engine, candidates[0])
     reports: List[Dict[str, Any]] = []
@@ -116,6 +243,20 @@ def evaluate_batched(
             run_mode=run_mode,
             worst=_key_uses_worst_point_admissibility,
         )
+        if region_pack is not None and "region_numeric" in out:
+            entry["region_results"] = _assemble_region_results(
+                out["region_numeric"],
+                index=i,
+                region_pack=region_pack,
+                flat_keys=list(_flat(residuals)),
+                scale=entry.get("scale") or {},
+                metric=metric,
+                percentile=pct,
+                score_from_r_max=score_from_r_max,
+            )
+            ms = dict(entry.get("monitor_settings") or {})
+            ms["regions"] = entry["region_results"].get("provenance")
+            entry["monitor_settings"] = ms
         report = audit([entry], r_ref=r_ref)
         if return_residuals:
             report["residuals"] = residuals
@@ -214,7 +355,30 @@ class _Plan:
         return plan
 
 
-def _score_one(state, ref, plan: _Plan, *, r_eff, r_max, rms_scalar, implied, ref_delta) -> Dict[str, Any]:
+def _score_one(
+    state,
+    ref,
+    plan: _Plan,
+    *,
+    r_eff,
+    r_max,
+    rms_scalar,
+    implied_with_debug,
+    ref_delta,
+    region_weights=None,
+    region_min_points: int = 16,
+    region_metric: str = "worst_point",
+    region_percentile: float = 95.0,
+    term_threshold: float = 0.1,
+    fit_threshold: float = 0.1,
+    min_frac: float = 0.05,
+    min_count: int = 8,
+) -> Dict[str, Any]:
+    from moju.monitor.regions import (
+        regional_viscosity_fit_arrays,
+        weighted_reduce_magnitude_arrays,
+    )
+
     merged: Dict[str, Any] = {**plan.constants, **dict(state)}
     if plan.derived:
         from moju.monitor.derived_state_chain import apply_derived_state_chain
@@ -235,6 +399,12 @@ def _score_one(state, ref, plan: _Plan, *, r_eff, r_max, rms_scalar, implied, re
     for name, fn, state_map, _spec in plan.laws:
         laws[name] = fn(**_kwargs(merged, plan.constants, state_map))
     constitutive: Dict[str, Any] = {}
+    # Numeric sidecars for regional viscosity (kept inside the transform).
+    visc_rhs = None
+    visc_basis = None
+    visc_tf = None
+    visc_fq = None
+    visc_scale = None
     for audit_spec in plan.audits:
         spec = audit_spec["spec"]
         reg = audit_spec["reg"]
@@ -259,7 +429,7 @@ def _score_one(state, ref, plan: _Plan, *, r_eff, r_max, rms_scalar, implied, re
             if arr is not None:
                 constitutive[f"{base}/ref_delta"] = jnp.asarray(arr)
         if has_implied:
-            arr = implied(
+            arr, dbg = implied_with_debug(
                 fn=fn,
                 arg_names=list(arg_names),
                 state_map=state_map,
@@ -271,6 +441,20 @@ def _score_one(state, ref, plan: _Plan, *, r_eff, r_max, rms_scalar, implied, re
             )
             if arr is not None:
                 constitutive[f"{base}/implied_delta"] = jnp.asarray(arr)
+            if (
+                isinstance(dbg, dict)
+                and dbg.get("noise_rhs") is not None
+                and dbg.get("noise_basis") is not None
+                and dbg.get("term_fraction") is not None
+                and dbg.get("fit_quality") is not None
+                and visc_rhs is None
+            ):
+                visc_rhs = jnp.asarray(dbg["noise_rhs"])
+                visc_basis = jnp.asarray(dbg["noise_basis"])
+                visc_tf = jnp.asarray(dbg["term_fraction"])
+                visc_fq = jnp.asarray(dbg["fit_quality"])
+                if dbg.get("noise_scale") is not None:
+                    visc_scale = jnp.asarray(dbg["noise_scale"])
     for name, fn in plan.customs:
         constitutive[f"custom/{name}"] = jnp.asarray(fn(merged, plan.constants))
     for check in plan.bounds:
@@ -319,7 +503,226 @@ def _score_one(state, ref, plan: _Plan, *, r_eff, r_max, rms_scalar, implied, re
     for key, value in plan.static_scale.items():
         if key not in dynamic_scale:
             dynamic_scale[key] = jnp.asarray(value)
-    return {"residuals": residuals, "rms": rms, "r_max": rmax, "scale": dynamic_scale, "recipe_ok": recipe_ok}
+
+    out: Dict[str, Any] = {
+        "residuals": residuals,
+        "rms": rms,
+        "r_max": rmax,
+        "scale": dynamic_scale,
+        "recipe_ok": recipe_ok,
+    }
+
+    if region_weights is not None:
+        # region_weights: (R, P). Static Python loop over R unrolls under jit.
+        n_regions = int(region_weights.shape[0])
+        # Per-key stacks: (R,)
+        v_eff_by_key: Dict[str, Any] = {}
+        worst_by_key: Dict[str, Any] = {}
+        for k, arr in flat.items():
+            veffs = []
+            worsts = []
+            for r in range(n_regions):
+                v, wi = weighted_reduce_magnitude_arrays(
+                    arr,
+                    region_weights[r],
+                    metric=region_metric,
+                    percentile=region_percentile,
+                )
+                veffs.append(v)
+                worsts.append(wi)
+            v_eff_by_key[k] = jnp.stack(veffs)
+            worst_by_key[k] = jnp.stack(worsts)
+
+        # Viscosity numerics per region (or NaNs if no sidecar).
+        nu_list, mu_list, fq_list, n_ok_list, ident_list, insuf_list, n_pts_list = (
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
+        for r in range(n_regions):
+            if visc_rhs is None:
+                nan = jnp.asarray(jnp.nan)
+                nu_list.append(nan)
+                mu_list.append(nan)
+                fq_list.append(nan)
+                n_ok_list.append(jnp.asarray(0, dtype=jnp.int32))
+                ident_list.append(jnp.asarray(False))
+                insuf_list.append(jnp.asarray(1, dtype=jnp.int32))
+                n_pts_list.append(jnp.sum((region_weights[r] > 0.5).astype(jnp.int32)))
+            else:
+                fit = regional_viscosity_fit_arrays(
+                    rhs=visc_rhs,
+                    basis=visc_basis,
+                    region_weights=region_weights[r],
+                    term_fraction=visc_tf,
+                    fit_quality=visc_fq,
+                    term_threshold=term_threshold,
+                    fit_threshold=fit_threshold,
+                    min_frac=min_frac,
+                    min_count=min_count,
+                    region_min_points=region_min_points,
+                    scale=visc_scale,
+                )
+                nu_list.append(fit["nu_tilde"])
+                mu_list.append(fit["mu_tilde"])
+                fq_list.append(fit["fit_quality_median"])
+                n_ok_list.append(fit["n_identifiable"])
+                ident_list.append(fit["identifiable"])
+                insuf_list.append(fit["insufficient"])
+                n_pts_list.append(fit["n_points"])
+        out["region_numeric"] = {
+            "v_eff": v_eff_by_key,
+            "worst_idx": worst_by_key,
+            "nu_tilde": jnp.stack(nu_list),
+            "mu_tilde": jnp.stack(mu_list),
+            "fit_quality_median": jnp.stack(fq_list),
+            "n_identifiable": jnp.stack(n_ok_list),
+            "identifiable": jnp.stack(ident_list),
+            "insufficient": jnp.stack(insuf_list),
+            "n_points": jnp.stack(n_pts_list),
+        }
+    return out
+
+
+def _assemble_region_results(
+    region_numeric: Mapping[str, Any],
+    *,
+    index: int,
+    region_pack: Mapping[str, Any],
+    flat_keys: Sequence[str],
+    scale: Mapping[str, float],
+    metric: str,
+    percentile: float,
+    score_from_r_max,
+) -> Dict[str, Any]:
+    """Host-side: turn batched numeric region outputs into the report schema."""
+    from moju.monitor.auditor import admissibility_level
+    from moju.monitor.regions import regions_provenance, status_from_region_numerics
+
+    names = list(region_pack["names"])
+    normalized = region_pack["normalized"]
+    rmin = int(region_pack["region_min_points"])
+    prov = regions_provenance(
+        normalized,
+        region_min_points=rmin,
+        moju_version=str(region_pack["moju_version"]),
+    )
+    out_regions: Dict[str, Any] = {}
+    for r, name in enumerate(names):
+        n_pts = int(jnp.asarray(region_numeric["n_points"][index, r]).item())
+        ident = bool(jnp.asarray(region_numeric["identifiable"][index, r]).item())
+        n_ok = int(jnp.asarray(region_numeric["n_identifiable"][index, r]).item())
+        insuf = bool(jnp.asarray(region_numeric["insufficient"][index, r]).item())
+        flags = status_from_region_numerics(
+            n_points=n_pts,
+            region_min_points=rmin,
+            identifiable=ident and not insuf,
+            n_identifiable=n_ok,
+            metric=metric,
+            percentile=percentile,
+        )
+        nu = float(jnp.asarray(region_numeric["nu_tilde"][index, r]).item())
+        mu = float(jnp.asarray(region_numeric["mu_tilde"][index, r]).item())
+        fq = float(jnp.asarray(region_numeric["fit_quality_median"][index, r]).item())
+        vis_status = flags.get("viscosity_status", "ok")
+        viscosity_meta: Optional[Dict[str, Any]] = {
+            "status": vis_status,
+            "n_points": n_pts,
+            "n_identifiable": n_ok,
+            "nu_tilde": nu if vis_status == "ok" else float("nan"),
+            "mu_tilde": mu if vis_status == "ok" else float("nan"),
+            "fit_quality_median": fq if vis_status != "insufficient_points" else float("nan"),
+            "reason": flags.get("viscosity_reason")
+            or (flags.get("reason") if vis_status == "insufficient_points" else None),
+        }
+        per_key: Dict[str, Any] = {}
+        for k in flat_keys:
+            if k not in region_numeric["v_eff"]:
+                continue
+            v_eff = float(jnp.asarray(region_numeric["v_eff"][k][index, r]).item())
+            wi = int(jnp.asarray(region_numeric["worst_idx"][k][index, r]).item())
+            key_row: Dict[str, Any] = {"n_points": n_pts}
+            if flags["status"] == "insufficient_points" or insuf:
+                key_row.update(
+                    {
+                        "status": "insufficient_points",
+                        "admissibility_score": float("nan"),
+                        "admissibility_level": "Insufficient points",
+                        "score_for_admissibility": float("nan"),
+                        "worst_point_index": None,
+                        "reason": flags.get("reason"),
+                    }
+                )
+                per_key[k] = key_row
+                continue
+            is_implied = str(k).startswith("constitutive/") and str(k).endswith(
+                "/implied_delta"
+            )
+            if is_implied and vis_status in ("insufficient_points", "not_identifiable"):
+                key_row.update(
+                    {
+                        "status": vis_status,
+                        "admissibility_score": float("nan"),
+                        "admissibility_level": (
+                            "Insufficient points"
+                            if vis_status == "insufficient_points"
+                            else "Not identifiable"
+                        ),
+                        "nu_tilde": viscosity_meta.get("nu_tilde"),
+                        "mu_tilde": viscosity_meta.get("mu_tilde"),
+                        "fit_quality": viscosity_meta.get("fit_quality_median"),
+                        "n_identifiable": n_ok,
+                        "reason": viscosity_meta.get("reason"),
+                        "worst_point_index": None,
+                    }
+                )
+                per_key[k] = key_row
+                continue
+            if is_implied:
+                key_row["nu_tilde"] = viscosity_meta.get("nu_tilde")
+                key_row["mu_tilde"] = viscosity_meta.get("mu_tilde")
+                key_row["fit_quality"] = viscosity_meta.get("fit_quality_median")
+                key_row["n_identifiable"] = n_ok
+            scale_k = float(scale.get(k, 1.0e-2) or 1.0e-2)
+            if not (scale_k > 0.0):
+                scale_k = 1.0e-2
+            score = (
+                float("nan")
+                if not (v_eff == v_eff)  # NaN check
+                else float(score_from_r_max(v_eff, scale_k=scale_k))
+            )
+            key_row.update(
+                {
+                    "status": "ok",
+                    "score_for_admissibility": v_eff if v_eff == v_eff else float("nan"),
+                    "admissibility_score": score,
+                    "admissibility_level": admissibility_level(score),
+                    "admissibility_metric": (
+                        f"p{percentile:g}" if metric == "percentile" else "max"
+                    ),
+                    "worst_point_index": None if wi < 0 else wi,
+                    "scale_k": scale_k,
+                }
+            )
+            per_key[k] = key_row
+        block: Dict[str, Any] = {
+            "n_points": n_pts,
+            "status": flags["status"],
+            "reason": flags.get("reason"),
+            "mask_sha256": normalized["mask_sha256"][name],
+            "per_key": per_key,
+            "viscosity": viscosity_meta,
+        }
+        if metric == "percentile":
+            for key in ("percentile_status", "percentile_tail_count", "percentile"):
+                if key in flags:
+                    block[key] = flags[key]
+        out_regions[name] = block
+    return {"provenance": prov, "regions": out_regions}
 
 
 def _generic_scale(merged: Mapping[str, Any], constants: Mapping[str, Any], spec: Mapping[str, Any]) -> jnp.ndarray:
