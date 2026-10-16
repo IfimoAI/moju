@@ -20,6 +20,17 @@ Train the paper's `32×32×32` PINN (`[2, 32, 32, 32, 1]`), run L-BFGS for **14,
 
 **Maintainers:** strip outputs before commit (`nbstripout` or clear all outputs in Jupyter) so notebooks stay small on GitHub.
 
+## Reproducing the paper figures
+
+Published constitutive percentages use the **eval-grid fields** quantity:
+`constitutive_fields.npz` → `nanmax(|delta_grid|)` → score `1/(1 + r_max/1e-2)`.
+For `32×32×32` that is `max|δ| ≈ 0.00073134` → **0.93185 → 93.19%**. The
+training-log constitutive endpoint for the same run can read **93.42%** because it
+uses the collocation-grid worst-point logged during training, not the fields export.
+Point `MOJU_PAPER_DATA` at a local folder of the seven `*_moju_data.zip` bundles and
+run `pytest tests/test_paper_goldens.py` (bundles are never committed). Details:
+[`docs/MIGRATION_2.1_to_2.2.md`](../../docs/MIGRATION_2.1_to_2.2.md).
+
 ## Reference data (`reference/32x32x32_opt/`)
 
 Paper reference audit artifacts for the `32×32×32` architecture (Table 1 / §4.2 eval grid). These are **not** MLP checkpoints — they validate agreement of Moju endpoint scores and constitutive fields within tolerance after you re-run training.

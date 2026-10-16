@@ -155,10 +155,16 @@ class TorchResidualEngine:
         bound_checks: Optional[Sequence[Any]] = None,
         constitutive_custom: Optional[Sequence[Any]] = None,
         derivatives: str = "auto",
+        implied_metric: Optional[str] = None,
+        implied_percentile: Optional[float] = None,
+        implied_noise_normalization: Optional[bool] = None,
     ) -> None:
         if derivatives not in ("auto", "supplied_only"):
             raise ValueError(f"derivatives must be 'auto' or 'supplied_only', got {derivatives!r}")
         self._derivatives = derivatives
+        self._implied_metric = implied_metric
+        self._implied_percentile = implied_percentile
+        self._implied_noise_normalization = implied_noise_normalization
         from moju.registry import resolve_law_specs
 
         self._laws_spec: List[Dict[str, Any]] = resolve_law_specs(specs_to_engine_dicts(laws))
@@ -683,6 +689,9 @@ class TorchResidualEngine:
             state_units=eff_state_units,
             nondim_scales=self._scales,
             nondim_scales_overrides=self._nondim_scales_overrides or None,
+            implied_metric=self._implied_metric,
+            implied_percentile=self._implied_percentile,
+            implied_noise_normalization=self._implied_noise_normalization,
         )
         from moju.monitor.path_b_derivatives import PathBGridConfig
 

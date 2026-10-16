@@ -111,6 +111,8 @@ def test_monitor_module_has_all():
         "DEFAULT_IMPLIED_METRIC",
         "DEFAULT_IMPLIED_PERCENTILE",
         "parse_implied_scoring_options",
+        "resolve_implied_scoring_options",
+        "score_from_r_max",
         "ImpliedPropertyResult",
         "merge_law_implied_audit_specs",
         "merge_fragment_law_implied_audit_specs",
