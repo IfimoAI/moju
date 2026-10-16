@@ -40,10 +40,10 @@ Applied to the scoring field (``δ`` or ``δ_nn``), finite points only:
 
 Configuration precedence
 ------------------------
-Explicit keyword argument > ``constants`` > module default.
-If an explicit kwarg and ``constants`` both set the same option and disagree,
-the kwarg wins and a :class:`UserWarning` is raised. The ``constants`` route
-remains supported (no deprecation in 2.2).
+Per-call keyword argument > constructor keyword argument > ``constants`` >
+module default. Any conflict between two sources that set the same option to
+different values raises a :class:`UserWarning` naming both sources and the
+value used. The ``constants`` route remains supported (no deprecation in 2.2).
 """
 
 from __future__ import annotations
@@ -127,6 +127,22 @@ def parse_implied_scoring_options(constants: Optional[Mapping[str, Any]]) -> Dic
     }
 
 
+def _warn_implied_conflict(
+    key: str,
+    *,
+    winner_source: str,
+    winner_value: Any,
+    loser_source: str,
+    loser_value: Any,
+) -> None:
+    warnings.warn(
+        f"{key}: {winner_source} value {winner_value!r} overrides {loser_source} value "
+        f"{loser_value!r} (using {winner_value!r}).",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
 def resolve_implied_scoring_options(
     *,
     constants: Optional[Mapping[str, Any]] = None,
@@ -138,61 +154,146 @@ def resolve_implied_scoring_options(
     """
     Resolve implied scoring options with precedence::
 
-        explicit kwarg > constants > engine constructor defaults > module default
+        per-call kwarg > constructor kwarg > constants > module default
 
-    When an explicit kwarg and ``constants`` both provide the same option with
-    different values, the kwarg wins and a :class:`UserWarning` is emitted.
+    A :class:`UserWarning` is emitted for every conflict between two sources that
+    both set the same option to different values. The higher-precedence value is
+    used; the warning names both sources and the value chosen.
     """
-    const_opts = parse_implied_scoring_options(constants)
-    eng = dict(engine_defaults or {})
-    # Start from module defaults, then engine constructor (validated), then constants.
-    base = {
-        "implied_metric": DEFAULT_IMPLIED_METRIC,
-        "implied_percentile": DEFAULT_IMPLIED_PERCENTILE,
-        "implied_noise_normalization": False,
-    }
-    if "implied_metric" in eng and eng["implied_metric"] is not None:
-        base["implied_metric"] = _validate_metric(eng["implied_metric"])
-    if "implied_percentile" in eng and eng["implied_percentile"] is not None:
-        base["implied_percentile"] = _validate_percentile(eng["implied_percentile"])
-    if "implied_noise_normalization" in eng and eng["implied_noise_normalization"] is not None:
-        base["implied_noise_normalization"] = _validate_noise_flag(
-            eng["implied_noise_normalization"]
-        )
-    # constants override engine defaults (existing 2.2 constants route).
     c = dict(constants or {})
-    if "implied_metric" in c:
-        base["implied_metric"] = const_opts["implied_metric"]
-    if "implied_percentile" in c:
-        base["implied_percentile"] = const_opts["implied_percentile"]
-    if "implied_noise_normalization" in c:
-        base["implied_noise_normalization"] = const_opts["implied_noise_normalization"]
-
+    eng = dict(engine_defaults or {})
+    const_present = {k: k in c for k in _OPTION_KEYS}
+    eng_present = {
+        k: (k in eng and eng[k] is not None) for k in _OPTION_KEYS
+    }
     explicit = {
         "implied_metric": implied_metric,
         "implied_percentile": implied_percentile,
         "implied_noise_normalization": implied_noise_normalization,
     }
-    for key, val in explicit.items():
-        if val is None:
-            continue
-        if key == "implied_metric":
-            resolved = _validate_metric(val)
-        elif key == "implied_percentile":
-            resolved = _validate_percentile(val)
+    call_present = {k: explicit[k] is not None for k in _OPTION_KEYS}
+
+    const_vals = {
+        "implied_metric": (
+            _validate_metric(c["implied_metric"]) if const_present["implied_metric"] else None
+        ),
+        "implied_percentile": (
+            _validate_percentile(c["implied_percentile"])
+            if const_present["implied_percentile"]
+            else None
+        ),
+        "implied_noise_normalization": (
+            _validate_noise_flag(c["implied_noise_normalization"])
+            if const_present["implied_noise_normalization"]
+            else None
+        ),
+    }
+    eng_vals = {
+        "implied_metric": (
+            _validate_metric(eng["implied_metric"]) if eng_present["implied_metric"] else None
+        ),
+        "implied_percentile": (
+            _validate_percentile(eng["implied_percentile"])
+            if eng_present["implied_percentile"]
+            else None
+        ),
+        "implied_noise_normalization": (
+            _validate_noise_flag(eng["implied_noise_normalization"])
+            if eng_present["implied_noise_normalization"]
+            else None
+        ),
+    }
+    call_vals = {
+        "implied_metric": (
+            _validate_metric(explicit["implied_metric"])
+            if call_present["implied_metric"]
+            else None
+        ),
+        "implied_percentile": (
+            _validate_percentile(explicit["implied_percentile"])
+            if call_present["implied_percentile"]
+            else None
+        ),
+        "implied_noise_normalization": (
+            _validate_noise_flag(explicit["implied_noise_normalization"])
+            if call_present["implied_noise_normalization"]
+            else None
+        ),
+    }
+    module_defaults = {
+        "implied_metric": DEFAULT_IMPLIED_METRIC,
+        "implied_percentile": DEFAULT_IMPLIED_PERCENTILE,
+        "implied_noise_normalization": False,
+    }
+
+    resolved: Dict[str, Any] = {}
+    for key in _OPTION_KEYS:
+        # Precedence: per-call > constructor > constants > module default.
+        if call_present[key]:
+            winner_src, winner = "per-call kwarg", call_vals[key]
+        elif eng_present[key]:
+            winner_src, winner = "constructor kwarg", eng_vals[key]
+        elif const_present[key]:
+            winner_src, winner = "constants", const_vals[key]
         else:
-            resolved = _validate_noise_flag(val)
-        if key in c:
-            const_val = const_opts[key]
-            if const_val != resolved:
-                warnings.warn(
-                    f"{key} explicit kwarg {resolved!r} overrides constants value "
-                    f"{const_val!r} (kwarg wins).",
-                    UserWarning,
-                    stacklevel=2,
-                )
-        base[key] = resolved
-    return base
+            winner_src, winner = "module default", module_defaults[key]
+
+        if call_present[key] and eng_present[key] and call_vals[key] != eng_vals[key]:
+            _warn_implied_conflict(
+                key,
+                winner_source="per-call kwarg",
+                winner_value=call_vals[key],
+                loser_source="constructor kwarg",
+                loser_value=eng_vals[key],
+            )
+        if call_present[key] and const_present[key] and call_vals[key] != const_vals[key]:
+            _warn_implied_conflict(
+                key,
+                winner_source="per-call kwarg",
+                winner_value=call_vals[key],
+                loser_source="constants",
+                loser_value=const_vals[key],
+            )
+        if (
+            not call_present[key]
+            and eng_present[key]
+            and const_present[key]
+            and eng_vals[key] != const_vals[key]
+        ):
+            _warn_implied_conflict(
+                key,
+                winner_source="constructor kwarg",
+                winner_value=eng_vals[key],
+                loser_source="constants",
+                loser_value=const_vals[key],
+            )
+        # silence unused when winner is module default
+        _ = winner_src
+        resolved[key] = winner
+    return resolved
+
+
+def implied_scoring_settings_payload(
+    options: Mapping[str, Any],
+    *,
+    moju_version: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Compact provenance block for audit / evaluate / export reports."""
+    from moju import __version__ as _ver
+
+    metric = str(options.get("implied_metric", DEFAULT_IMPLIED_METRIC))
+    return {
+        "implied_metric": metric,
+        "implied_percentile": (
+            float(options.get("implied_percentile", DEFAULT_IMPLIED_PERCENTILE))
+            if metric == "percentile"
+            else None
+        ),
+        "implied_noise_normalization": bool(
+            options.get("implied_noise_normalization", False)
+        ),
+        "moju_version": moju_version if moju_version is not None else _ver,
+    }
 
 
 def _vec_norm_last(x: Any) -> jnp.ndarray:
@@ -342,6 +443,7 @@ __all__ = [
     "DEFAULT_IMPLIED_PERCENTILE",
     "parse_implied_scoring_options",
     "resolve_implied_scoring_options",
+    "implied_scoring_settings_payload",
     "property_noise_level",
     "noise_normalized_delta",
     "reduce_implied_magnitude",

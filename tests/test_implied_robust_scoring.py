@@ -349,7 +349,8 @@ def test_reduce_percentile_below_max():
     assert reduce_implied_magnitude(arr, metric="percentile", percentile=75) < 1.0
 
 
-def test_resolve_precedence_kwarg_over_constants_over_default():
+def test_resolve_precedence_call_over_ctor_over_constants_over_default():
+    """Precedence: per-call kwarg > constructor kwarg > constants > module default."""
     base = resolve_implied_scoring_options()
     assert base["implied_metric"] == "worst_point"
     assert base["implied_noise_normalization"] is False
@@ -366,21 +367,30 @@ def test_resolve_precedence_kwarg_over_constants_over_default():
     assert via_eng["implied_metric"] == "percentile"
     assert via_eng["implied_percentile"] == 80.0
 
-    # constants override engine defaults
-    mixed = resolve_implied_scoring_options(
-        constants={"implied_percentile": 90},
-        engine_defaults={"implied_metric": "percentile", "implied_percentile": 80},
-    )
+    # constructor overrides constants (new precedence)
+    with pytest.warns(UserWarning, match="constructor kwarg"):
+        mixed = resolve_implied_scoring_options(
+            constants={"implied_percentile": 90},
+            engine_defaults={"implied_metric": "percentile", "implied_percentile": 80},
+        )
     assert mixed["implied_metric"] == "percentile"
-    assert mixed["implied_percentile"] == 90.0
+    assert mixed["implied_percentile"] == 80.0
 
-    # explicit kwarg wins over constants
-    with pytest.warns(UserWarning, match="overrides constants"):
+    # per-call wins over constants
+    with pytest.warns(UserWarning, match="per-call kwarg"):
         won = resolve_implied_scoring_options(
             constants={"implied_metric": "percentile"},
             implied_metric="worst_point",
         )
     assert won["implied_metric"] == "worst_point"
+
+    # per-call wins over constructor
+    with pytest.warns(UserWarning, match="per-call kwarg"):
+        won2 = resolve_implied_scoring_options(
+            engine_defaults={"implied_metric": "percentile"},
+            implied_metric="worst_point",
+        )
+    assert won2["implied_metric"] == "worst_point"
 
 
 def test_resolve_conflict_warning_and_identical_kwargs_vs_constants():
@@ -390,6 +400,12 @@ def test_resolve_conflict_warning_and_identical_kwargs_vs_constants():
             implied_noise_normalization=True,
         )
     assert opts["implied_noise_normalization"] is True
+    # Warning names both sources and the value used
+    with pytest.warns(UserWarning, match=r"using True"):
+        resolve_implied_scoring_options(
+            constants={"implied_noise_normalization": False},
+            implied_noise_normalization=True,
+        )
 
     # No warning when values agree
     with warnings.catch_warnings(record=True) as caught:
@@ -399,7 +415,6 @@ def test_resolve_conflict_warning_and_identical_kwargs_vs_constants():
             implied_metric="percentile",
         )
     assert not [w for w in caught if issubclass(w.category, UserWarning)]
-
 
 def test_resolve_validation_errors():
     with pytest.raises(ValueError, match="implied_metric"):
@@ -495,3 +510,52 @@ def test_jax_torch_kwargs_ctor_parity():
     b = rep_t["per_key"][_MU_KEY]
     assert a["admissibility_score"] == pytest.approx(b["admissibility_score"], rel=0, abs=1e-8)
     assert a["admissibility_metric"] == b["admissibility_metric"]
+
+
+def test_audit_and_evaluate_record_implied_scoring_settings_provenance():
+    from moju import __version__
+    from moju.monitor import evaluate
+    from moju.monitor.monitor_log_export import export_monitor_log
+
+    state, _, _ = _kov_state(24)
+    eng = ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
+        law_implied_audits=True,
+        constants={"rho": 1.0, "U": 1.0, "L": 1.0},
+        implied_metric="percentile",
+        implied_percentile=95.0,
+        implied_noise_normalization=True,
+    )
+    eng.compute_residuals(state, weighted_norms=False)
+    rep = audit(eng.log)
+    settings = rep["implied_scoring_settings"]
+    assert settings["implied_metric"] == "percentile"
+    assert settings["implied_percentile"] == 95.0
+    assert settings["implied_noise_normalization"] is True
+    assert settings["moju_version"] == __version__
+    assert eng.log[-1]["implied_scoring_settings"] == settings
+    assert eng.log[-1]["monitor_settings"]["implied_scoring"] == settings
+
+    export = export_monitor_log(eng.log, scope="audit", persist=False)
+    assert export["summary"]["implied_scoring_settings"]["implied_metric"] == "percentile"
+    assert export["summary"]["implied_scoring_settings"]["moju_version"] == __version__
+
+    # Defaults path also records settings
+    eng_d = _ns_engine()
+    eng_d.compute_residuals(state, weighted_norms=False)
+    rep_d = audit(eng_d.log)
+    assert rep_d["implied_scoring_settings"]["implied_metric"] == "worst_point"
+    assert rep_d["implied_scoring_settings"]["implied_noise_normalization"] is False
+    assert rep_d["implied_scoring_settings"]["moju_version"] == __version__
+
+    reports = evaluate(
+        eng_d,
+        [state],
+        implied_metric="percentile",
+        implied_percentile=90.0,
+        implied_noise_normalization=False,
+        weighted_norms=False,
+    )
+    assert reports[0]["implied_scoring_settings"]["implied_metric"] == "percentile"
+    assert reports[0]["implied_scoring_settings"]["implied_percentile"] == 90.0
+    assert reports[0]["implied_scoring_settings"]["moju_version"] == __version__

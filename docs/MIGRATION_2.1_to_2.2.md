@@ -24,14 +24,21 @@ Accepted on:
 - `evaluate(..., implied_metric=..., ...)` (forces the Python loop when options are non-default)
 - `TorchResidualEngine(...)` constructor (forwarded into the JAX audit path)
 
-**Precedence:** explicit keyword argument → `constants` → constructor defaults → module default.
+**Precedence:** per-call keyword argument → constructor keyword argument → `constants` →
+module default.
 
-If an explicit kwarg and `constants` both set the same option to **different** values, the
-kwarg wins and a `UserWarning` is raised. The `constants` route remains fully supported
-(no deprecation in 2.2).
+Any conflict between two sources that set the same option to **different** values raises a
+`UserWarning` naming both sources and the value used. The `constants` route remains fully
+supported (no deprecation in 2.2).
 
 Unknown metrics, percentiles outside `(0, 100]`, and wrong types raise clear
 `ValueError` / `TypeError`.
+
+Every `audit` / `evaluate` report (and JSON export summary) includes
+`implied_scoring_settings` with `implied_metric`, `implied_percentile`,
+`implied_noise_normalization`, and `moju_version`. **Scores and tiers from default and
+opt-in settings are not directly comparable** — always record which settings produced a
+result before comparing runs.
 
 `MonitorConfig` does **not** yet carry these three fields (follow-up); pass them on the
 engine constructor / `constants` / per-call kwargs.

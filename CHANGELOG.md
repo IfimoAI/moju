@@ -28,11 +28,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - **Per-call configuration:** ``implied_metric``, ``implied_percentile``, and
     ``implied_noise_normalization`` are accepted on ``ResidualEngine`` /
     ``TorchResidualEngine`` constructors, ``compute_residuals``, ``audit``, and
-    ``evaluate``. Precedence: explicit kwarg > ``constants`` > constructor
-    default > module default. If kwarg and ``constants`` disagree, the kwarg
-    wins and a ``UserWarning`` is raised. The ``constants`` route remains
-    supported (no deprecation in 2.2). Invalid values raise clear errors.
-    ``MonitorConfig`` does not yet expose these fields (follow-up).
+    ``evaluate``. Precedence: **per-call kwarg > constructor kwarg >
+    ``constants`` > module default**. Any conflict between sources raises a
+    ``UserWarning`` naming both sources and the value used. The ``constants``
+    route remains supported (no deprecation in 2.2). Invalid values raise clear
+    errors. ``MonitorConfig`` does not yet expose these fields (follow-up).
+  - **Scoring provenance:** every ``audit`` / ``evaluate`` report (and JSON
+    export summary) records ``implied_scoring_settings``
+    (``implied_metric``, ``implied_percentile``, ``implied_noise_normalization``,
+    ``moju_version``). Scores and tiers from default vs opt-in settings are not
+    directly comparable.
   - Reports (Python ``audit()``, JSON export, PDF, Plotly worst-keys) record the
     metric / normalization used for every implied row and always show the raw
     worst-point ``max |δ|`` alongside (``r_max_raw``).

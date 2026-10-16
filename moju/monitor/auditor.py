@@ -936,7 +936,9 @@ def _apply_implied_scoring_to_entry(
                 stacklevel=3,
             )
         return
+    from moju import __version__ as _moju_version
     from moju.monitor.implied_scoring import (
+        implied_scoring_settings_payload,
         resolve_implied_scoring_options,
         score_implied_delta_array,
     )
@@ -950,6 +952,11 @@ def _apply_implied_scoring_to_entry(
         implied_percentile=implied_percentile,
         implied_noise_normalization=implied_noise_normalization,
     )
+    settings = implied_scoring_settings_payload(opts, moju_version=_moju_version)
+    entry["implied_scoring_settings"] = settings
+    ms = dict(entry.get("monitor_settings") or {})
+    ms["implied_scoring"] = settings
+    entry["monitor_settings"] = ms
     r_max = dict(entry.get("r_max") or {})
     implied_scoring: Dict[str, Any] = {}
     for k, arr in flat.items():
@@ -1029,6 +1036,27 @@ def audit(
             implied_percentile=implied_percentile,
             implied_noise_normalization=implied_noise_normalization,
         )
+    # Ensure scoring-settings provenance is present even when audit does not re-score.
+    if log[-1].get("implied_scoring_settings") is None:
+        from moju import __version__ as _moju_version
+        from moju.monitor.implied_scoring import (
+            implied_scoring_settings_payload,
+            resolve_implied_scoring_options,
+        )
+
+        _ms = log[-1].get("monitor_settings") or {}
+        if isinstance(_ms.get("implied_scoring"), dict):
+            log[-1]["implied_scoring_settings"] = dict(_ms["implied_scoring"])
+        else:
+            _opts = resolve_implied_scoring_options(
+                constants=constants if constants is not None else (log[-1].get("constants") or {}),
+                implied_metric=implied_metric,
+                implied_percentile=implied_percentile,
+                implied_noise_normalization=implied_noise_normalization,
+            )
+            log[-1]["implied_scoring_settings"] = implied_scoring_settings_payload(
+                _opts, moju_version=_moju_version
+            )
     step_metrics = _compute_log_step_metrics(log, r_ref)
     last_report_per_key: Dict[str, Any] = {}
     for entry, m in zip(log, step_metrics):
@@ -1045,6 +1073,7 @@ def audit(
         "overall_admissibility_score": overall,
         "overall_admissibility_level": admissibility_level(overall),
         "monitor_run_mode": (log[-1].get("run_mode") if log else None),
+        "implied_scoring_settings": dict(log[-1]["implied_scoring_settings"]),
     }
     if log[-1].get("derivative_provenance"):
         report["derivative_provenance"] = dict(log[-1]["derivative_provenance"])
@@ -3370,7 +3399,9 @@ class ResidualEngine:
                 implied_identifiability[str(bn)] = compact
 
         # Opt-in robust scoring for constitutive implied_delta (defaults = 2.1).
+        from moju import __version__ as _moju_version
         from moju.monitor.implied_scoring import (
+            implied_scoring_settings_payload,
             resolve_implied_scoring_options,
             score_implied_delta_array,
         )
@@ -3385,6 +3416,9 @@ class ResidualEngine:
             implied_metric=implied_metric,
             implied_percentile=implied_percentile,
             implied_noise_normalization=implied_noise_normalization,
+        )
+        implied_scoring_settings = implied_scoring_settings_payload(
+            implied_scoring_opts, moju_version=_moju_version
         )
         implied_scoring: Dict[str, Any] = {}
         for k, arr in flat.items():
@@ -3417,7 +3451,9 @@ class ResidualEngine:
             "monitor_settings": {
                 "law_scale_mode": eff_law_scale_mode,
                 "state_units": eff_state_units,
+                "implied_scoring": implied_scoring_settings,
             },
+            "implied_scoring_settings": implied_scoring_settings,
         }
         if implied_scoring:
             entry["implied_scoring"] = implied_scoring

@@ -141,7 +141,8 @@ Configure via constants: `implied_term_fraction`, `implied_fit_quality_fraction`
 
 Defaults match 2.1: ``implied_metric="worst_point"``, ``implied_noise_normalization=False``.
 Governing-law scoring is never changed. See [`MIGRATION_2.1_to_2.2.md`](MIGRATION_2.1_to_2.2.md)
-for the full formula, per-call API, and precedence (explicit kwarg > `constants` > default).
+for the full formula, per-call API, and precedence (per-call kwarg > constructor kwarg >
+`constants` > default).
 
 | Option | Default | Use when |
 |--------|---------|----------|
@@ -150,7 +151,10 @@ for the full formula, per-call API, and precedence (explicit kwarg > `constants`
 | `implied_noise_normalization` | `False` | See [when to prefer noise normalization](#when-to-prefer-noise-normalization) |
 
 Reports always keep raw ``max ‖δ‖`` as ``r_max_raw`` and record which metric/normalization
-produced ``score_for_admissibility``.
+produced ``score_for_admissibility``. Every ``audit`` / ``evaluate`` result also carries
+``implied_scoring_settings`` (metric, percentile, noise flag, Moju version). **Default and
+opt-in scores/tiers are not directly comparable** — cite the settings with any number you
+publish.
 
 #### When to prefer noise normalization
 
