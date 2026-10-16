@@ -360,6 +360,33 @@ def noise_normalized_delta(
     return raw_b / (jnp.abs(pred_b) + jnp.abs(eps_b) + _NORMALIZE_EPS)
 
 
+def reduce_implied_magnitude_arrays(
+    arr: Any,
+    *,
+    metric: str = DEFAULT_IMPLIED_METRIC,
+    percentile: float = DEFAULT_IMPLIED_PERCENTILE,
+) -> jnp.ndarray:
+    """
+    Jit-safe aggregate of a residual field to a scalar magnitude.
+
+    Uses NaN-masking (non-finite → NaN) so ``nanpercentile`` / ``nanmax`` match the
+    host ``reduce_implied_magnitude`` path under jit/vmap.
+    """
+    a = jnp.asarray(arr)
+    if a.ndim >= 1 and a.shape[-1] in (2, 3) and a.ndim >= 2:
+        mag = jnp.sqrt(jnp.sum(jnp.square(a), axis=-1) + 1e-30)
+    else:
+        mag = jnp.abs(a)
+    flat = jnp.reshape(mag, (-1,))
+    scored = jnp.where(jnp.isfinite(flat), flat, jnp.nan)
+    has = jnp.any(jnp.isfinite(scored))
+    if metric == "percentile":
+        v = jnp.nanpercentile(scored, float(percentile))
+    else:
+        v = jnp.nanmax(scored)
+    return jnp.where(has, v, jnp.asarray(jnp.nan, dtype=flat.dtype))
+
+
 def reduce_implied_magnitude(
     arr: Any,
     *,
@@ -367,18 +394,9 @@ def reduce_implied_magnitude(
     percentile: float = DEFAULT_IMPLIED_PERCENTILE,
 ) -> float:
     """Aggregate a residual field to a scalar magnitude for admissibility."""
-    a = jnp.asarray(arr)
-    if a.ndim >= 1 and a.shape[-1] in (2, 3) and a.ndim >= 2:
-        mag = jnp.sqrt(jnp.sum(jnp.square(a), axis=-1) + 1e-30)
-    else:
-        mag = jnp.abs(a)
-    flat = jnp.reshape(mag, (-1,))
-    finite = flat[jnp.isfinite(flat)]
-    if finite.size == 0:
-        return float("nan")
-    if metric == "percentile":
-        return float(jnp.percentile(finite, float(percentile)))
-    return float(jnp.max(finite))
+    return float(
+        reduce_implied_magnitude_arrays(arr, metric=metric, percentile=percentile)
+    )
 
 
 def score_implied_delta_array(
@@ -439,6 +457,8 @@ def score_from_r_max(r_max: float, *, scale_k: float = 1.0e-2) -> float:
 
 
 __all__ = [
+    "reduce_implied_magnitude_arrays",
+
     "DEFAULT_IMPLIED_METRIC",
     "DEFAULT_IMPLIED_PERCENTILE",
     "parse_implied_scoring_options",

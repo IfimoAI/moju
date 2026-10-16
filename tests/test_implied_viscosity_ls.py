@@ -580,8 +580,12 @@ def test_implied_fn_direct_matches_true_mu_on_kov():
     X, Y = jnp.meshgrid(x, y, indexing="ij")
     fields = kovasznay_2d(X, Y, re=40.0)
     state = {**fields, "rho": 1.0, "U": 1.0, "L": 1.0}
+    from moju.monitor.law_implied_diagnostics import materialize_identifiability_meta
+
     fn = implied_mu_momentum_navier_stokes(_ns_sm())
     out = fn(state, {})
     assert out is not None
-    assert out.meta["identifiable"] is True
+    meta = materialize_identifiability_meta(out.meta)
+    assert meta["identifiable"] is True
+    assert meta["status"] == "ok"
     assert float(jnp.nanmax(jnp.abs(out.value - 1.0 / 40.0))) < 1e-4
