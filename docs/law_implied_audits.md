@@ -160,9 +160,20 @@ points enter LSQ fits and score reductions (via 0/1 weights).
 runs inside each region. A region can be ``Not identifiable`` while another is
 ``ok``. Separately, if a region has fewer than ``region_min_points`` (default
 **16**), it is reported as ``Insufficient points`` rather than scored. That
-default is at least twice ``implied_min_identifiable_count`` (8), enough for a
-meaningful percentile, and matches the existing spatial-safeguard absolute floor —
-it is not tuned to any dataset.
+default is a **fit minimum** only (at least twice ``implied_min_identifiable_count``
+= 8, and matching the spatial-safeguard absolute floor). It is **not** a
+percentile-adequacy threshold and is not tuned to any dataset.
+
+**Percentile adequacy (when ``implied_metric="percentile"``).** For each region
+and for the global audit, Moju reports the expected excluded-tail count
+``n_points × (1 − p/100)`` with status:
+
+- ``equivalent_to_worst_point`` if ``tail < 1`` (p95 needs ``n ≥ 20`` to exclude
+  any point);
+- ``low_tail_count`` if ``1 ≤ tail < 5``;
+- ``ok`` otherwise (``n ≥ 100`` recommended for p95 so ``tail ≥ 5``).
+
+These flags appear in ``region_results`` and JSON export; they do not change scores.
 
 **Moju does not aggregate regions into a verdict.** There is no min/mean over
 regions and no automatic gate. The global audit score is exactly the 2.2 result.

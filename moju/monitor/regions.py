@@ -15,11 +15,50 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 import jax.numpy as jnp
 import numpy as np
 
-# Enough points for a meaningful p95 and ≥ 2× implied_min_identifiable_count (8).
-# Matches weighted_safeguard.DEFAULT_MIN_REGION_ABS. Not tuned to any dataset.
+# Fit minimum only (≥ 2× implied_min_identifiable_count=8; matches
+# weighted_safeguard.DEFAULT_MIN_REGION_ABS). Not a percentile-adequacy threshold
+# and not tuned to any dataset. See percentile_tail_adequacy().
 DEFAULT_REGION_MIN_POINTS: int = 16
-
 RegionsInput = Union[Mapping[str, Any], Tuple[Any, Mapping[Any, str]]]
+
+
+def percentile_tail_adequacy(
+    n_points: int,
+    percentile: float,
+) -> Dict[str, Any]:
+    """
+    Expected excluded-tail count for a percentile metric: ``n × (1 − p/100)``.
+
+    Status
+    ------
+    - ``equivalent_to_worst_point`` when ``tail < 1`` (percentile cannot exclude any point)
+    - ``low_tail_count`` when ``1 ≤ tail < 5``
+    - ``ok`` otherwise
+
+    For p95, ``tail < 1`` implies ``n < 20``; ``n ≥ 100`` is recommended for a
+    stable upper-tail estimate (tail ≥ 5). This is independent of
+    ``region_min_points`` (a fit floor, not a percentile threshold).
+    """
+    n = int(n_points)
+    p = float(percentile)
+    if n < 0:
+        raise ValueError(f"n_points must be >= 0, got {n}")
+    if not (0.0 < p <= 100.0):
+        raise ValueError(f"percentile must be in (0, 100], got {p}")
+    # n × (100 − p) / 100 avoids float drift on exact boundaries (e.g. 10×10/100 = 1).
+    tail = (float(n) * (100.0 - p)) / 100.0
+    if tail < 1.0:
+        status = "equivalent_to_worst_point"
+    elif tail < 5.0:
+        status = "low_tail_count"
+    else:
+        status = "ok"
+    return {
+        "percentile_status": status,
+        "percentile_tail_count": tail,
+        "n_points": n,
+        "percentile": p,
+    }
 
 
 def validate_region_min_points(value: Any) -> int:
@@ -613,7 +652,7 @@ def compute_region_results(
             )
             per_key[k] = key_row
 
-        out_regions[name] = {
+        region_block: Dict[str, Any] = {
             "n_points": n_pts,
             "status": region_status,
             "reason": region_reason,
@@ -621,12 +660,16 @@ def compute_region_results(
             "per_key": per_key,
             "viscosity": viscosity_meta,
         }
+        if metric == "percentile":
+            region_block.update(percentile_tail_adequacy(n_pts, pct))
+        out_regions[name] = region_block
 
     return {"provenance": prov, "regions": out_regions}
 
 
 __all__ = [
     "DEFAULT_REGION_MIN_POINTS",
+    "percentile_tail_adequacy",
     "validate_region_min_points",
     "normalize_regions",
     "regions_provenance",
@@ -636,4 +679,5 @@ __all__ = [
     "regional_viscosity_fit",
     "compute_region_results",
 ]
+
 

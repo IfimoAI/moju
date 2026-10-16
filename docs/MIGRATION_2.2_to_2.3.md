@@ -12,13 +12,15 @@ audit result is computed exactly as in 2.2 and is unaffected by regions.
 ### API
 
 Accepted on ``ResidualEngine`` / ``TorchResidualEngine`` constructors,
-``compute_residuals``, ``audit`` (via engine log), and ``evaluate``:
+``compute_residuals``, ``evaluate``, and ``audit`` (``audit`` also accepts the
+same kwargs; per-call > constructor / any ``region_results`` already on the log.
+``audit(..., regions=...)`` needs ``last_residual_dict``):
 
 | Argument | Default | Meaning |
 |----------|---------|---------|
 | `regions` | `None` | `dict[str, mask]` or integer label array |
 | `region_names` | `None` | label → name when using a label array |
-| `region_min_points` | `16` | below this → status ``Insufficient points`` |
+| `region_min_points` | `16` | fit floor; below this → ``Insufficient points`` |
 
 **Precedence:** per-call keyword argument > constructor. Regions are **not**
 accepted via ``constants``.
@@ -26,18 +28,33 @@ accepted via ``constants``.
 Masks are boolean or 0/1 arrays matching the point layout. Regions may overlap;
 the report records ``n_unassigned`` for points in no region.
 
-### Default ``region_min_points = 16``
+### Default ``region_min_points = 16`` (fit floor only)
 
 Chosen so that:
 
 1. A region has at least twice ``implied_min_identifiable_count`` (8) before a
    viscosity gate is even considered.
-2. A percentile metric (default p95 when opted in) has enough in-region points
-   to be meaningful.
-3. It matches the existing spatial safeguard floor
+2. It matches the existing spatial safeguard floor
    (``weighted_safeguard.DEFAULT_MIN_REGION_ABS``).
 
-It is **not** tuned to any dataset.
+It is **not** a percentile-adequacy threshold and is **not** tuned to any dataset.
+Percentile adequacy is reported separately (see below).
+
+### Percentile adequacy flags
+
+When ``implied_metric="percentile"``, Moju reports expected excluded-tail count
+``n_points × (1 − p/100)`` for each region and for the global audit:
+
+| Tail count | ``percentile_status`` |
+|------------|------------------------|
+| ``tail < 1`` | ``equivalent_to_worst_point`` |
+| ``1 ≤ tail < 5`` | ``low_tail_count`` |
+| otherwise | ``ok`` |
+
+For **p95**, ``tail < 1`` means ``n < 20`` (percentile cannot exclude any point);
+``n ≥ 100`` is recommended for a stable upper-tail estimate (``tail ≥ 5``).
+Flags and ``percentile_tail_count`` appear on each region block and on
+``percentile_adequacy`` in the audit report / JSON export.
 
 ### What Moju does not do
 

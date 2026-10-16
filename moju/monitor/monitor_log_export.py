@@ -263,6 +263,22 @@ def _build_summary(
         summary["region_results"] = region_block
         if isinstance(region_block.get("provenance"), dict):
             summary["regions_provenance"] = dict(region_block["provenance"])
+    pa = log[-1].get("percentile_adequacy") if isinstance(log[-1], dict) else None
+    if isinstance(pa, dict) and pa:
+        summary["percentile_adequacy"] = dict(pa)
+    elif isinstance(settings, dict) and str(settings.get("implied_metric", "")) == "percentile":
+        # Recompute global flag when metric is percentile but audit() was not called.
+        n_total = None
+        if isinstance(region_block, dict):
+            prov = region_block.get("provenance") or {}
+            if prov.get("n_total") is not None:
+                n_total = int(prov["n_total"])
+        if n_total is not None:
+            from moju.monitor.regions import percentile_tail_adequacy
+
+            summary["percentile_adequacy"] = percentile_tail_adequacy(
+                n_total, float(settings.get("implied_percentile", 95.0))
+            )
     return summary
 
 

@@ -990,6 +990,9 @@ def audit(
     implied_percentile: Optional[float] = None,
     implied_noise_normalization: Optional[bool] = None,
     constants: Optional[Mapping[str, Any]] = None,
+    regions: Any = None,
+    region_names: Optional[Mapping[Any, str]] = None,
+    region_min_points: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Physics admissibility from logged **R_eff** (field ``rms``) and scales.
@@ -1012,6 +1015,10 @@ def audit(
     present **laws** and **constitutive** category scores; for ``run_mode == \"eval\"``, minimum
     finite present category score (missing categories excluded); for legacy entries without
     ``run_mode``, minimum finite score across all present categories.
+
+    Optional ``regions`` / ``region_names`` / ``region_min_points`` (per-call > any
+    ``region_results`` already on the log from the engine) recompute per-region tables
+    when ``last_residual_dict`` is provided. Global scores are unchanged.
 
     The returned dict includes ``monitor_run_mode`` from the last log entry when present, plus
     ``schema_version`` (:data:`moju.monitor.types.REPORT_SCHEMA_VERSION`), ``moju_version``, and
@@ -1057,6 +1064,83 @@ def audit(
             log[-1]["implied_scoring_settings"] = implied_scoring_settings_payload(
                 _opts, moju_version=_moju_version
             )
+
+    # Per-call regions on audit() override / (re)compute region_results.
+    if regions is not None:
+        if last_residual_dict is None:
+            raise ValueError(
+                "audit(..., regions=...) requires last_residual_dict to build per-region tables"
+            )
+        from moju import __version__ as _moju_version
+        from moju.monitor.implied_scoring import resolve_implied_scoring_options
+        from moju.monitor.regions import (
+            DEFAULT_REGION_MIN_POINTS,
+            compute_region_results,
+            normalize_regions,
+            validate_region_min_points,
+        )
+
+        _opts = resolve_implied_scoring_options(
+            constants=constants if constants is not None else (log[-1].get("constants") or {}),
+            engine_defaults={
+                "implied_metric": (log[-1].get("implied_scoring_settings") or {}).get(
+                    "implied_metric"
+                ),
+                "implied_percentile": (log[-1].get("implied_scoring_settings") or {}).get(
+                    "implied_percentile"
+                ),
+                "implied_noise_normalization": (log[-1].get("implied_scoring_settings") or {}).get(
+                    "implied_noise_normalization"
+                ),
+            },
+            implied_metric=implied_metric,
+            implied_percentile=implied_percentile,
+            implied_noise_normalization=implied_noise_normalization,
+        )
+        ref_shape = None
+        for _content in (
+            list((last_residual_dict.get("laws") or {}).values())
+            + list((last_residual_dict.get("constitutive") or {}).values())
+        ):
+            a = jnp.asarray(_content)
+            if a.size > 0:
+                if a.ndim >= 2 and a.shape[-1] in (2, 3):
+                    ref_shape = a.shape[:-1]
+                else:
+                    ref_shape = a.shape
+                break
+        normalized = normalize_regions(
+            regions,
+            reference_shape=ref_shape,
+            region_names=region_names,
+        )
+        eff_rmin = (
+            validate_region_min_points(region_min_points)
+            if region_min_points is not None
+            else DEFAULT_REGION_MIN_POINTS
+        )
+        # Prefer an existing engine-stored floor when per-call omits region_min_points.
+        if region_min_points is None:
+            prev = (log[-1].get("region_results") or {}).get("provenance") or {}
+            if "region_min_points" in prev:
+                eff_rmin = int(prev["region_min_points"])
+            else:
+                ms_r = ((log[-1].get("monitor_settings") or {}).get("regions") or {})
+                if "region_min_points" in ms_r:
+                    eff_rmin = int(ms_r["region_min_points"])
+        region_block = compute_region_results(
+            residual_dict=last_residual_dict,
+            entry=log[-1],
+            normalized_regions=normalized,
+            region_min_points=eff_rmin,
+            implied_scoring_opts=_opts,
+            moju_version=_moju_version,
+        )
+        log[-1]["region_results"] = region_block
+        ms = dict(log[-1].get("monitor_settings") or {})
+        ms["regions"] = region_block.get("provenance")
+        log[-1]["monitor_settings"] = ms
+
     step_metrics = _compute_log_step_metrics(log, r_ref)
     last_report_per_key: Dict[str, Any] = {}
     for entry, m in zip(log, step_metrics):
@@ -1085,6 +1169,39 @@ def audit(
         report["implied_scoring"] = dict(log[-1]["implied_scoring"])
     if log[-1].get("region_results"):
         report["region_results"] = log[-1]["region_results"]
+
+    # Global percentile adequacy (same arithmetic as per-region flags).
+    if log[-1].get("percentile_adequacy"):
+        report["percentile_adequacy"] = dict(log[-1]["percentile_adequacy"])
+    else:
+        _iss = report.get("implied_scoring_settings") or {}
+        if str(_iss.get("implied_metric", "")) == "percentile":
+            from moju.monitor.regions import percentile_tail_adequacy
+
+            _pct = float(_iss.get("implied_percentile", 95.0))
+            n_global = None
+            if last_residual_dict is not None:
+                for _cat in ("laws", "constitutive"):
+                    for _arr in (last_residual_dict.get(_cat) or {}).values():
+                        a = jnp.asarray(_arr)
+                        if a.size == 0:
+                            continue
+                        if a.ndim >= 2 and a.shape[-1] in (2, 3):
+                            n_global = int(math.prod(a.shape[:-1]))
+                        else:
+                            n_global = int(a.size)
+                        break
+                    if n_global is not None:
+                        break
+            if n_global is None:
+                rr = report.get("region_results") or {}
+                prov = rr.get("provenance") or {}
+                if prov.get("n_total") is not None:
+                    n_global = int(prov["n_total"])
+            if n_global is not None:
+                pa = percentile_tail_adequacy(n_global, _pct)
+                report["percentile_adequacy"] = pa
+                log[-1]["percentile_adequacy"] = pa
     for opt_key in (
         "term_breakdown",
         "derivative_metadata",
@@ -3642,6 +3759,26 @@ class ResidualEngine:
             ms = dict(entry.get("monitor_settings") or {})
             ms["regions"] = region_block.get("provenance")
             entry["monitor_settings"] = ms
+
+        # Global percentile adequacy (independent of whether regions were set).
+        if str(implied_scoring_opts.get("implied_metric", "")) == "percentile":
+            from moju.monitor.regions import percentile_tail_adequacy
+
+            n_global = None
+            for _k, _arr in flat.items():
+                a = jnp.asarray(_arr)
+                if a.size == 0:
+                    continue
+                if a.ndim >= 2 and a.shape[-1] in (2, 3):
+                    n_global = int(math.prod(a.shape[:-1]))
+                else:
+                    n_global = int(a.size)
+                break
+            if n_global is not None:
+                entry["percentile_adequacy"] = percentile_tail_adequacy(
+                    n_global,
+                    float(implied_scoring_opts.get("implied_percentile", 95.0)),
+                )
 
         return residuals, entry
 

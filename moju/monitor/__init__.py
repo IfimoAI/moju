@@ -48,6 +48,7 @@ from moju.monitor.implied_scoring import (
 from moju.monitor.regions import (
     DEFAULT_REGION_MIN_POINTS,
     normalize_regions,
+    percentile_tail_adequacy,
     validate_region_min_points,
 )
 from moju.monitor.law_implied_diagnostics import (
@@ -155,6 +156,7 @@ __all__ = [
     "score_from_r_max",
     "DEFAULT_REGION_MIN_POINTS",
     "normalize_regions",
+    "percentile_tail_adequacy",
     "validate_region_min_points",
     "ImpliedPropertyResult",
     "effective_audit_specs_for_fragment",

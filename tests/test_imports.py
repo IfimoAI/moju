@@ -115,6 +115,7 @@ def test_monitor_module_has_all():
         "score_from_r_max",
         "DEFAULT_REGION_MIN_POINTS",
         "normalize_regions",
+        "percentile_tail_adequacy",
         "validate_region_min_points",
         "ImpliedPropertyResult",
         "merge_law_implied_audit_specs",

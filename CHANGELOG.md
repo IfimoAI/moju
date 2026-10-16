@@ -21,7 +21,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     identifiability / insufficient-points status, per-law score and tier,
     worst-point index. Global scores are unchanged and are not aggregated from
     regions.
-  - Default ``region_min_points=16`` (documented; not dataset-tuned).
+  - Default ``region_min_points=16`` is a **fit floor** only (not a percentile
+    adequacy threshold; documented; not dataset-tuned).
+  - When ``implied_metric="percentile"``, report ``percentile_status`` /
+    ``percentile_tail_count`` per region and globally
+    (``n × (1 − p/100)``; ``equivalent_to_worst_point`` / ``low_tail_count`` /
+    ``ok``).
+  - ``audit(..., regions=/region_names=/region_min_points=)`` supported
+    (per-call > constructor; needs ``last_residual_dict`` when setting regions).
   - Provenance: region names, point counts, mask SHA-256, ``region_min_points``,
     plus existing ``implied_scoring_settings`` and Moju version.
   - Docs: [`docs/MIGRATION_2.2_to_2.3.md`](docs/MIGRATION_2.2_to_2.3.md),
