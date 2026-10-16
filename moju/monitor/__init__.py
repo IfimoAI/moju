@@ -45,6 +45,11 @@ from moju.monitor.implied_scoring import (
     resolve_implied_scoring_options,
     score_from_r_max,
 )
+from moju.monitor.regions import (
+    DEFAULT_REGION_MIN_POINTS,
+    normalize_regions,
+    validate_region_min_points,
+)
 from moju.monitor.law_implied_diagnostics import (
     DEFAULT_IMPLIED_TERM_FRACTION,
     ImpliedPropertyResult,
@@ -148,6 +153,9 @@ __all__ = [
     "parse_implied_scoring_options",
     "resolve_implied_scoring_options",
     "score_from_r_max",
+    "DEFAULT_REGION_MIN_POINTS",
+    "normalize_regions",
+    "validate_region_min_points",
     "ImpliedPropertyResult",
     "effective_audit_specs_for_fragment",
     "law_implied_unsupported_reasons",

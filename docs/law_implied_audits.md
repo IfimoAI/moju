@@ -137,6 +137,63 @@ Configure via constants: `implied_term_fraction`, `implied_fit_quality_fraction`
 
 **When are implied properties identifiable?** Prefer regions where the constitutive term is not dwarfed by the rest of the balance (e.g. viscous-dominated Stokes/low-Re patches). Inertia-dominated high-Re patches may be excluded even when the PDE residual is small — that is intentional, not a law failure. Safe-division rows (Fourier \(\alpha\), Fick \(D\), …) already NaN-mask vanishing denominators; viscosity rows use the gate above.
 
+### Region-aware fitting and scoring (Moju 2.3)
+
+Optional named **regions** let you fit implied parameters (e.g. ν̃) and score every
+audited law **inside** user-defined subsets of the domain. With ``regions=None``,
+behaviour is bit-identical to 2.2.0.
+
+**What per-region fitting tells you.** A global LSQ ν̃ is a single blend across the
+whole field. Per-region fits recover local material values when the physics is
+piecewise (different viscosity bands) or when only part of the domain is
+identifiable. Per-region scores show where constitutive or residual failure is
+localized — a small noisy band can drop one region's score while others stay High,
+even when a global p95 metric still looks fine.
+
+**Why derivatives stay global.** Finite-difference / spectral / autodiff operators
+need the full stencil neighbourhood. Cutting the mesh before differentiating would
+corrupt boundary-adjacent points inside a region. Moju always differentiates (or
+accepts supplied derivatives) on the full field; region masks only select which
+points enter LSQ fits and score reductions (via 0/1 weights).
+
+**Identifiability per region.** The same term-fraction / fit-quality gate as 2.1+
+runs inside each region. A region can be ``Not identifiable`` while another is
+``ok``. Separately, if a region has fewer than ``region_min_points`` (default
+**16**), it is reported as ``Insufficient points`` rather than scored. That
+default is at least twice ``implied_min_identifiable_count`` (8), enough for a
+meaningful percentile, and matches the existing spatial-safeguard absolute floor —
+it is not tuned to any dataset.
+
+**Moju does not aggregate regions into a verdict.** There is no min/mean over
+regions and no automatic gate. The global audit score is exactly the 2.2 result.
+Region tables are additional reporting; you decide how to use them.
+
+**Generic example** (near-boundary band vs interior):
+
+```python
+import numpy as np
+from moju.monitor import ResidualEngine
+
+# Distance from a wall at x=0; band = near wall, core = interior
+x = state["x"]  # shape (nx, ny) or broadcastable
+dist = np.asarray(x)  # already distance from x=0 if wall is at 0
+band = dist < 0.1
+core = dist >= 0.1
+
+engine = ResidualEngine(
+    laws=[...],
+    constants={"rho": 1.0, "U": 1.0, "L": 1.0},
+    regions={"near_wall": band, "interior": core},
+    region_min_points=16,  # default
+)
+engine.compute_residuals(state, weighted_norms=False)
+report = audit(engine.log)
+# report["region_results"]["regions"]["near_wall"]["per_key"][...]
+# report overall / per_key global scores unchanged vs regions=None
+```
+
+See [`MIGRATION_2.2_to_2.3.md`](MIGRATION_2.2_to_2.3.md).
+
 ### Opt-in robust scoring (Moju 2.2)
 
 Defaults match 2.1: ``implied_metric="worst_point"``, ``implied_noise_normalization=False``.

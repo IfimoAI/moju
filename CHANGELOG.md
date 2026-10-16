@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-16
+
+### Added
+
+- **Region-aware implied-law fitting and per-region scoring.** Optional
+  ``regions`` (``dict[str, mask]`` or integer labels + ``region_names``) on
+  ``ResidualEngine`` / ``TorchResidualEngine``, ``compute_residuals``, and
+  ``evaluate``. Precedence: per-call > constructor (not via ``constants``).
+  With ``regions=None``, behaviour is bit-identical to 2.2.0.
+  - Derivatives always use the full field; regions only select points for LSQ
+    fits and score reductions (0/1 weights; jit/vmap-safe).
+  - Per region: ``n_points``, ν̃/μ̃ (viscosity implied rows), fit quality,
+    identifiability / insufficient-points status, per-law score and tier,
+    worst-point index. Global scores are unchanged and are not aggregated from
+    regions.
+  - Default ``region_min_points=16`` (documented; not dataset-tuned).
+  - Provenance: region names, point counts, mask SHA-256, ``region_min_points``,
+    plus existing ``implied_scoring_settings`` and Moju version.
+  - Docs: [`docs/MIGRATION_2.2_to_2.3.md`](docs/MIGRATION_2.2_to_2.3.md),
+    region section in [`docs/law_implied_audits.md`](docs/law_implied_audits.md).
+
 ## [2.2.0] - 2026-10-13
 
 ### Added

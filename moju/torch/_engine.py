@@ -158,6 +158,9 @@ class TorchResidualEngine:
         implied_metric: Optional[str] = None,
         implied_percentile: Optional[float] = None,
         implied_noise_normalization: Optional[bool] = None,
+        regions: Any = None,
+        region_names: Optional[Dict[Any, str]] = None,
+        region_min_points: Optional[int] = None,
     ) -> None:
         if derivatives not in ("auto", "supplied_only"):
             raise ValueError(f"derivatives must be 'auto' or 'supplied_only', got {derivatives!r}")
@@ -165,6 +168,9 @@ class TorchResidualEngine:
         self._implied_metric = implied_metric
         self._implied_percentile = implied_percentile
         self._implied_noise_normalization = implied_noise_normalization
+        self._regions = regions
+        self._region_names = dict(region_names) if region_names is not None else None
+        self._region_min_points = region_min_points
         from moju.registry import resolve_law_specs
 
         self._laws_spec: List[Dict[str, Any]] = resolve_law_specs(specs_to_engine_dicts(laws))
@@ -692,6 +698,9 @@ class TorchResidualEngine:
             implied_metric=self._implied_metric,
             implied_percentile=self._implied_percentile,
             implied_noise_normalization=self._implied_noise_normalization,
+            regions=self._regions,
+            region_names=self._region_names,
+            region_min_points=self._region_min_points,
         )
         from moju.monitor.path_b_derivatives import PathBGridConfig
 

@@ -258,6 +258,11 @@ def _build_summary(
         summary["implied_identifiability"] = dict(id_map)
     if isinstance(scoring_map, dict) and scoring_map:
         summary["implied_scoring"] = dict(scoring_map)
+    region_block = log[-1].get("region_results") if isinstance(log[-1], dict) else None
+    if isinstance(region_block, dict) and region_block:
+        summary["region_results"] = region_block
+        if isinstance(region_block.get("provenance"), dict):
+            summary["regions_provenance"] = dict(region_block["provenance"])
     return summary
 
 

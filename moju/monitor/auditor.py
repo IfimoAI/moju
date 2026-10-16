@@ -1083,6 +1083,8 @@ def audit(
         report["implied_identifiability"] = dict(log[-1]["implied_identifiability"])
     if log[-1].get("implied_scoring"):
         report["implied_scoring"] = dict(log[-1]["implied_scoring"])
+    if log[-1].get("region_results"):
+        report["region_results"] = log[-1]["region_results"]
     for opt_key in (
         "term_breakdown",
         "derivative_metadata",
@@ -2172,6 +2174,9 @@ class ResidualEngine:
         implied_metric: Optional[str] = None,
         implied_percentile: Optional[float] = None,
         implied_noise_normalization: Optional[bool] = None,
+        regions: Any = None,
+        region_names: Optional[Mapping[Any, str]] = None,
+        region_min_points: Optional[int] = None,
     ):
         law_implied_enabled = bool(law_implied_audits)
         cfg_law_scale_mode: Optional[str] = None
@@ -2277,6 +2282,7 @@ class ResidualEngine:
         self.implied_percentile = implied_percentile
         self.implied_noise_normalization = implied_noise_normalization
         from moju.monitor.implied_scoring import resolve_implied_scoring_options
+        from moju.monitor.regions import DEFAULT_REGION_MIN_POINTS, validate_region_min_points
 
         # Validate constructor / constants combination at init (raises on bad values).
         resolve_implied_scoring_options(
@@ -2286,6 +2292,14 @@ class ResidualEngine:
                 "implied_percentile": implied_percentile,
                 "implied_noise_normalization": implied_noise_normalization,
             },
+        )
+        # Regions (Moju 2.3): constructor defaults; not accepted via constants.
+        self.regions = regions
+        self.region_names = dict(region_names) if region_names is not None else None
+        self.region_min_points = (
+            validate_region_min_points(region_min_points)
+            if region_min_points is not None
+            else DEFAULT_REGION_MIN_POINTS
         )
 
         # Config-time validation (low effort)
@@ -2434,6 +2448,9 @@ class ResidualEngine:
         implied_metric: Optional[str] = None,
         implied_percentile: Optional[float] = None,
         implied_noise_normalization: Optional[bool] = None,
+        regions: Any = None,
+        region_names: Optional[Mapping[Any, str]] = None,
+        region_min_points: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Compute residuals.
@@ -2512,6 +2529,9 @@ class ResidualEngine:
             implied_metric=implied_metric,
             implied_percentile=implied_percentile,
             implied_noise_normalization=implied_noise_normalization,
+            regions=regions,
+            region_names=region_names,
+            region_min_points=region_min_points,
         )
         self._log.append(entry)
         self._index += 1
@@ -2549,6 +2569,9 @@ class ResidualEngine:
         implied_metric: Optional[str] = None,
         implied_percentile: Optional[float] = None,
         implied_noise_normalization: Optional[bool] = None,
+        regions: Any = None,
+        region_names: Optional[Mapping[Any, str]] = None,
+        region_min_points: Optional[int] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Compute residuals and one log entry without touching the engine log."""
         if run_mode not in ("training", "eval"):
@@ -3448,6 +3471,7 @@ class ResidualEngine:
             "scale": scale_per_key,
             "scale_source": scale_source_per_key,
             "run_mode": run_mode,
+            "constants": dict(self.constants),
             "monitor_settings": {
                 "law_scale_mode": eff_law_scale_mode,
                 "state_units": eff_state_units,
@@ -3574,6 +3598,51 @@ class ResidualEngine:
             cs = _coord_snapshot_from_merged(merged)
             if cs:
                 entry["coord_snapshot"] = cs
+
+        # Per-region fit/score (Moju 2.3). Global scores above are unchanged.
+        eff_regions = self.regions if regions is None else regions
+        eff_region_names = self.region_names if region_names is None else region_names
+        from moju.monitor.regions import (
+            DEFAULT_REGION_MIN_POINTS,
+            compute_region_results,
+            normalize_regions,
+            validate_region_min_points,
+        )
+
+        eff_rmin = (
+            validate_region_min_points(region_min_points)
+            if region_min_points is not None
+            else int(self.region_min_points or DEFAULT_REGION_MIN_POINTS)
+        )
+        if eff_regions is not None:
+            # Infer point count from a primary residual if available.
+            ref_shape = None
+            for _k, _arr in flat.items():
+                a = jnp.asarray(_arr)
+                if a.size > 0:
+                    if a.ndim >= 2 and a.shape[-1] in (2, 3):
+                        ref_shape = a.shape[:-1]
+                    else:
+                        ref_shape = a.shape
+                    break
+            normalized = normalize_regions(
+                eff_regions,
+                reference_shape=ref_shape,
+                region_names=eff_region_names,
+            )
+            region_block = compute_region_results(
+                residual_dict=residuals,
+                entry=entry,
+                normalized_regions=normalized,
+                region_min_points=eff_rmin,
+                implied_scoring_opts=implied_scoring_opts,
+                moju_version=_moju_version,
+            )
+            entry["region_results"] = region_block
+            ms = dict(entry.get("monitor_settings") or {})
+            ms["regions"] = region_block.get("provenance")
+            entry["monitor_settings"] = ms
+
         return residuals, entry
 
     def required_state_keys(
@@ -3621,6 +3690,9 @@ def evaluate(
     implied_metric: Optional[str] = None,
     implied_percentile: Optional[float] = None,
     implied_noise_normalization: Optional[bool] = None,
+    regions: Any = None,
+    region_names: Optional[Mapping[Any, str]] = None,
+    region_min_points: Optional[int] = None,
     **compute_kwargs: Any,
 ) -> List[Dict[str, Any]]:
     """
@@ -3633,8 +3705,8 @@ def evaluate(
 
     ``state_refs``, when given, must have the same length as ``candidates``. Further keywords are
     forwarded to :meth:`ResidualEngine._compute_entry` (``law_scale_mode``, ``state_units``,
-    ``implied_metric`` / ``implied_percentile`` / ``implied_noise_normalization``, and so on).
-    Explicit implied-scoring kwargs take precedence over ``engine.constants`` (see
+    ``implied_metric`` / ``implied_percentile`` / ``implied_noise_normalization``, ``regions``,
+    and so on). Explicit implied-scoring kwargs take precedence over ``engine.constants`` (see
     :func:`moju.monitor.implied_scoring.resolve_implied_scoring_options`).
     Set ``return_residuals=True`` to attach each candidate's residual dict under ``"residuals"``.
     """
@@ -3645,10 +3717,19 @@ def evaluate(
             "pass implied_metric / implied_percentile / implied_noise_normalization as "
             "explicit keyword arguments to evaluate(...), not via **compute_kwargs"
         )
+    for banned in ("regions", "region_names", "region_min_points"):
+        if banned in compute_kwargs:
+            raise TypeError(
+                f"pass {banned} as an explicit keyword argument to evaluate(...), "
+                "not via **compute_kwargs"
+            )
     scoring_kwargs = {
         "implied_metric": implied_metric,
         "implied_percentile": implied_percentile,
         "implied_noise_normalization": implied_noise_normalization,
+        "regions": regions,
+        "region_names": region_names,
+        "region_min_points": region_min_points,
     }
     from moju.monitor.implied_scoring import (
         is_default_implied_scoring,
@@ -3662,10 +3743,13 @@ def evaluate(
             "implied_percentile": engine.implied_percentile,
             "implied_noise_normalization": engine.implied_noise_normalization,
         },
-        **scoring_kwargs,
+        implied_metric=implied_metric,
+        implied_percentile=implied_percentile,
+        implied_noise_normalization=implied_noise_normalization,
     )
-    # Batched evaluate path scores with 2.1 worst-point only; opt-in settings use the loop.
-    force_loop = not is_default_implied_scoring(resolved_scoring)
+    eff_regions = engine.regions if regions is None else regions
+    # Batched evaluate path scores with 2.1 worst-point only; opt-in / regions use the loop.
+    force_loop = (not is_default_implied_scoring(resolved_scoring)) or (eff_regions is not None)
     n = len(candidates)
     if state_refs is None:
         refs: Sequence[Optional[Mapping[str, Any]]] = (None,) * n
