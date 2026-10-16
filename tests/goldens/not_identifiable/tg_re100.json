@@ -1,0 +1,30 @@
+{
+  "fixture": "taylor_green_2d",
+  "description": "Inertia-dominated TG vortex at Re=100: viscous term is negligible so the law-linked implied viscosity row is Not identifiable. Overall tier must follow the governing law (High), not Non-Admissible.",
+  "moju_version_introduced": "2.3.1",
+  "settings": {
+    "re": 100.0,
+    "t": 0.1,
+    "n": 32,
+    "rho": 1.0,
+    "U": 1.0,
+    "L": 1.0,
+    "mu": 0.01,
+    "law_implied_audits": true,
+    "implied_metric": "worst_point",
+    "weighted_norms": false
+  },
+  "keys": {
+    "law": "laws/momentum_navier_stokes",
+    "implied": "constitutive/dynamic_viscosity_from_re/law_momentum_navier_stokes/implied_delta",
+    "basename": "dynamic_viscosity_from_re/law_momentum_navier_stokes"
+  },
+  "expected": {
+    "overall_admissibility_level_prefix": "High",
+    "law_admissibility_level_prefix": "High",
+    "implied_admissibility_level": "Not identifiable",
+    "identifiability_status": "not_identifiable",
+    "implied_admissibility_score_isfinite": false,
+    "constitutive_category_absent_or_nonzero": true
+  }
+}

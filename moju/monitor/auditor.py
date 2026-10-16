@@ -831,6 +831,12 @@ def _compute_log_step_metrics(
             category_failed = False
             for kk in keys:
                 # Skip not-identifiable implied rows — they must not zero the category.
+                kr = per_key_report.get(kk) or {}
+                if (
+                    kr.get("identifiability_status") == "not_identifiable"
+                    or kr.get("admissibility_level") == "Not identifiable"
+                ):
+                    continue
                 if (
                     isinstance(id_map_entry, dict)
                     and kk.startswith("constitutive/")
