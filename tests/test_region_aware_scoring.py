@@ -489,7 +489,9 @@ def test_evaluate_with_regions_uses_batched_jit_vmap():
     assert prov["region_min_points"] == 8
     assert set(prov["region_names"]) == {"far", "near"}
     assert "mask_sha256" in prov
-    assert prov["moju_version"] == "2.3.0"
+    import moju
+
+    assert prov["moju_version"] == moju.__version__
 
 
 def test_mask_hashes_and_region_provenance_in_report_and_json():

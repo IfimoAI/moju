@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-10-16
+
+### Fixed
+
+- **Not-identifiable implied laws no longer drive the overall tier on batched
+  ``evaluate``.** Under default settings, a law-linked implied-parameter row
+  whose fit is ``Not identifiable`` (e.g. inertia-dominated region where the
+  viscous term is negligible) correctly reports ``identifiability_status=
+  "not_identifiable"``, keeps a non-finite (JSON-null) score, and is excluded
+  from category / overall rollup — matching 2.1.0 audit / loop semantics and
+  the documented behaviour. In 2.1–2.3.0 the **batched** ``evaluate`` path
+  NaN-gated the residual but omitted ``implied_identifiability`` on the host
+  entry, so ``audit`` treated the NaN as a category failure (score ``0.0`` →
+  ``Non-Admissible`` / ``Unknown``). Affected: batched ``evaluate`` with and
+  without ``regions``; audit and ``evaluate_debug_loop`` were already correct.
+  Per-region NI / insufficient-points reporting was already correct and is
+  unchanged. Defense-in-depth: category rollup also skips keys already marked
+  ``Not identifiable`` on the per-key report.
+- Golden fixture ``tests/goldens/not_identifiable/tg_re100.json`` plus path
+  coverage (audit, loop, batched, regions, mixed batch, loop↔batch equality)
+  so this cannot regress.
+
 ## [2.3.0] - 2026-10-16
 
 ### Added
