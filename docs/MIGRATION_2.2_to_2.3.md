@@ -32,8 +32,37 @@ computed inside the transform; status strings are derived afterward. There is no
 silent per-item loop when regions are set — pass ``evaluate_debug_loop=True`` only
 for debugging.
 
+``evaluate`` with opt-in implied scoring
+(``implied_metric="percentile"`` and/or ``implied_noise_normalization=True``) and
+**no** regions also uses the same batched path (jit-safe masked percentile /
+noise-normalized δ). Default worst-point settings remain bit-identical to 2.2.0.
+
 Masks are boolean or 0/1 arrays matching the point layout. Regions may overlap;
 the report records ``n_unassigned`` for points in no region.
+
+### Batched ``evaluate``: when it raises (no silent fallback)
+
+With ``regions`` set and/or opt-in implied scoring, batching is **required**.
+These cases raise ``RuntimeError`` unless ``evaluate_debug_loop=True``:
+
+| Situation | Behaviour |
+|-----------|-----------|
+| ``best_effort_partial=True`` | Cannot batch — raises |
+| ``user_fns`` present | Cannot batch — raises |
+| Non-uniform candidate shapes | Cannot batch — raises |
+| ``auto_path_b_derivatives`` / ``fill_law_fd`` **with** ``regions`` | Raises (see below) |
+
+Without regions and with default implied scoring, an untraceable batch still
+falls back to the per-item loop (same as 2.2).
+
+### Path B / ``fill_law_fd`` (existing limitation)
+
+Path B derivative fill is **loop-only** in ``evaluate``, with or without regions:
+the compiled batch path does not run Path B fill. Combining ``regions=...`` with
+``auto_path_b_derivatives`` / ``fill_law_fd`` therefore raises unless
+``evaluate_debug_loop=True``. Derivatives stay global when you fill outside
+``evaluate`` and then pass a complete state; regions only select points for
+fits and scores.
 
 ### Default ``region_min_points = 16`` (fit floor only)
 

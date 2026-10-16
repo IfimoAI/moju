@@ -3853,10 +3853,9 @@ def evaluate(
 
     Same-shaped candidates are scored in one :func:`jax.jit` / :func:`jax.vmap` call
     (``report["execution"] == "batched"``), including when ``regions`` is set (masks are
-    static across the batch). Mismatched shapes, an untraceable callable, or derivative
-    fill (``auto_path_b_derivatives`` / ``fill_law_fd``) keep the per-candidate loop
-    (``report["execution"] == "loop"``) when ``regions`` is ``None``. With ``regions`` set,
-    batching is required unless ``evaluate_debug_loop=True``.
+    static across the batch) and when opt-in implied scoring is used without regions.
+    Path B / ``fill_law_fd`` is loop-only. With ``regions`` and/or opt-in scoring,
+    batching is required unless ``evaluate_debug_loop=True`` (no silent fallback).
 
     ``state_refs``, when given, must have the same length as ``candidates``. Further keywords are
     forwarded to :meth:`ResidualEngine._compute_entry` (``law_scale_mode``, ``state_units``,
@@ -3903,12 +3902,9 @@ def evaluate(
         implied_noise_normalization=implied_noise_normalization,
     )
     eff_regions = engine.regions if regions is None else regions
-    # Opt-in global implied scoring (percentile / noise-norm) still uses the loop when
-    # regions are absent; with regions, the batch path always runs (region tables honor
-    # metric/percentile; global scores remain the default R_eff path inside the batch).
-    force_loop_optin = (not is_default_implied_scoring(resolved_scoring)) and (
-        eff_regions is None
-    )
+    optin = not is_default_implied_scoring(resolved_scoring)
+    # Path B / fill_law_fd is loop-only today (with or without regions). Regions + Path B
+    # raises unless evaluate_debug_loop=True; see MIGRATION_2.2_to_2.3.md.
     n = len(candidates)
     if state_refs is None:
         refs: Sequence[Optional[Mapping[str, Any]]] = (None,) * n
@@ -3923,11 +3919,13 @@ def evaluate(
     if eff_regions is not None and fd_fill and not use_debug_loop:
         raise RuntimeError(
             "evaluate(..., regions=...) cannot combine Path B / fill_law_fd with the "
-            "batched region path. Omit derivative fill, or pass evaluate_debug_loop=True."
+            "batched region path (Path B evaluate is loop-only regardless of regions). "
+            "Omit derivative fill, or pass evaluate_debug_loop=True."
         )
-    if not fd_fill and not force_loop_optin and not use_debug_loop:
+    if not fd_fill and not use_debug_loop:
         from moju.monitor.evaluate_batch import evaluate_batched
 
+        require_batch = (eff_regions is not None) or optin
         batched = evaluate_batched(
             engine,
             candidates,
@@ -3943,16 +3941,16 @@ def evaluate(
             implied_metric=implied_metric,
             implied_percentile=implied_percentile,
             implied_noise_normalization=implied_noise_normalization,
-            require_batch=(eff_regions is not None),
+            require_batch=require_batch,
         )
         if batched is not None:
             for report in batched:
                 report["execution"] = "batched"
             return batched
-        if eff_regions is not None:
-            # evaluate_batched raises when require_batch; defensive guard.
+        if require_batch:
             raise RuntimeError(
-                "evaluate(..., regions=...) requires the batched jit/vmap path"
+                "evaluate requires the batched jit/vmap path for regions and/or "
+                "opt-in implied scoring (percentile / noise normalization)"
             )
     reports: List[Dict[str, Any]] = []
     for i, (state, ref) in enumerate(zip(candidates, refs)):

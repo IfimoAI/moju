@@ -62,16 +62,14 @@ def evaluate_batched(
 
     def _fail(exc: Optional[BaseException] = None) -> Optional[List[Dict[str, Any]]]:
         if require_batch:
-            if exc is not None:
-                raise RuntimeError(
-                    "evaluate(..., regions=...) requires the batched jit/vmap path; "
-                    "batching failed. Pass evaluate_debug_loop=True only for debugging."
-                ) from exc
-            raise RuntimeError(
-                "evaluate(..., regions=...) requires the batched jit/vmap path; "
-                "batching is unavailable for this engine/candidate set. "
+            msg = (
+                "evaluate requires the batched jit/vmap path for regions and/or "
+                "opt-in implied scoring; batching failed or is unavailable. "
                 "Pass evaluate_debug_loop=True only for debugging."
             )
+            if exc is not None:
+                raise RuntimeError(msg) from exc
+            raise RuntimeError(msg)
         return None
 
     if not candidates:
@@ -102,6 +100,8 @@ def evaluate_batched(
     from moju.monitor.implied_scoring import (
         DEFAULT_IMPLIED_METRIC,
         DEFAULT_IMPLIED_PERCENTILE,
+        implied_scoring_settings_payload,
+        is_default_implied_scoring,
         resolve_implied_scoring_options,
         score_from_r_max,
     )
@@ -146,10 +146,8 @@ def evaluate_batched(
     )
     metric = str(scoring_opts.get("implied_metric", DEFAULT_IMPLIED_METRIC))
     pct = float(scoring_opts.get("implied_percentile", DEFAULT_IMPLIED_PERCENTILE))
-    # Batched path currently scores global residuals with default worst-point R_eff;
-    # region tables honor metric/percentile. Opt-in global noise-norm still uses loop
-    # unless regions force the batch path (region scores then use worst_point/percentile
-    # on raw δ unless noise-norm arrays are available in closure_debug).
+    use_noise = bool(scoring_opts.get("implied_noise_normalization", False))
+    apply_optin = not is_default_implied_scoring(scoring_opts)
     term_thr, fit_thr, min_frac, min_count = _gate_params(engine.constants)
 
     region_pack: Optional[Dict[str, Any]] = None
@@ -209,6 +207,8 @@ def evaluate_batched(
             fit_threshold=fit_thr,
             min_frac=min_frac,
             min_count=min_count,
+            apply_optin=apply_optin,
+            use_noise=use_noise,
         )
 
     try:
@@ -243,6 +243,32 @@ def evaluate_batched(
             run_mode=run_mode,
             worst=_key_uses_worst_point_admissibility,
         )
+        settings = implied_scoring_settings_payload(
+            scoring_opts, moju_version=_moju_version
+        )
+        entry["implied_scoring_settings"] = settings
+        ms = dict(entry.get("monitor_settings") or {})
+        ms["implied_scoring"] = settings
+        if apply_optin and "implied_optin" in out:
+            r_max = dict(entry.get("r_max") or {})
+            implied_scoring: Dict[str, Any] = {}
+            label = "max" if metric == "worst_point" else f"p{pct:g}"
+            if use_noise:
+                label = f"noise_norm+{label}"
+            for k, nums in out["implied_optin"].items():
+                v_eff = float(jnp.asarray(nums["v_eff"][i]).item())
+                r_raw = float(jnp.asarray(nums["r_max_raw"][i]).item())
+                r_max[k] = r_raw
+                implied_scoring[k] = {
+                    "implied_metric": metric,
+                    "implied_percentile": pct if metric == "percentile" else None,
+                    "implied_noise_normalization": use_noise,
+                    "admissibility_metric": label,
+                    "r_max_raw": r_raw,
+                    "v_eff": v_eff,
+                }
+            entry["r_max"] = r_max
+            entry["implied_scoring"] = implied_scoring
         if region_pack is not None and "region_numeric" in out:
             entry["region_results"] = _assemble_region_results(
                 out["region_numeric"],
@@ -254,9 +280,8 @@ def evaluate_batched(
                 percentile=pct,
                 score_from_r_max=score_from_r_max,
             )
-            ms = dict(entry.get("monitor_settings") or {})
             ms["regions"] = entry["region_results"].get("provenance")
-            entry["monitor_settings"] = ms
+        entry["monitor_settings"] = ms
         report = audit([entry], r_ref=r_ref)
         if return_residuals:
             report["residuals"] = residuals
@@ -373,7 +398,13 @@ def _score_one(
     fit_threshold: float = 0.1,
     min_frac: float = 0.05,
     min_count: int = 8,
+    apply_optin: bool = False,
+    use_noise: bool = False,
 ) -> Dict[str, Any]:
+    from moju.monitor.implied_scoring import (
+        noise_normalized_delta,
+        reduce_implied_magnitude_arrays,
+    )
     from moju.monitor.regions import (
         regional_viscosity_fit_arrays,
         weighted_reduce_magnitude_arrays,
@@ -399,12 +430,13 @@ def _score_one(
     for name, fn, state_map, _spec in plan.laws:
         laws[name] = fn(**_kwargs(merged, plan.constants, state_map))
     constitutive: Dict[str, Any] = {}
-    # Numeric sidecars for regional viscosity (kept inside the transform).
+    # Numeric sidecars for regional viscosity + opt-in global scoring (arrays only).
     visc_rhs = None
     visc_basis = None
     visc_tf = None
     visc_fq = None
     visc_scale = None
+    implied_debug: Dict[str, Dict[str, Any]] = {}
     for audit_spec in plan.audits:
         spec = audit_spec["spec"]
         reg = audit_spec["reg"]
@@ -441,20 +473,27 @@ def _score_one(
             )
             if arr is not None:
                 constitutive[f"{base}/implied_delta"] = jnp.asarray(arr)
-            if (
-                isinstance(dbg, dict)
-                and dbg.get("noise_rhs") is not None
-                and dbg.get("noise_basis") is not None
-                and dbg.get("term_fraction") is not None
-                and dbg.get("fit_quality") is not None
-                and visc_rhs is None
-            ):
-                visc_rhs = jnp.asarray(dbg["noise_rhs"])
-                visc_basis = jnp.asarray(dbg["noise_basis"])
-                visc_tf = jnp.asarray(dbg["term_fraction"])
-                visc_fq = jnp.asarray(dbg["fit_quality"])
-                if dbg.get("noise_scale") is not None:
-                    visc_scale = jnp.asarray(dbg["noise_scale"])
+            if isinstance(dbg, dict):
+                key = f"constitutive/{base}/implied_delta"
+                side: Dict[str, Any] = {}
+                for sk in ("pred", "implied", "raw", "noise_rhs", "noise_basis", "noise_scale"):
+                    if dbg.get(sk) is not None:
+                        side[sk] = jnp.asarray(dbg[sk])
+                if side:
+                    implied_debug[key] = side
+                if (
+                    dbg.get("noise_rhs") is not None
+                    and dbg.get("noise_basis") is not None
+                    and dbg.get("term_fraction") is not None
+                    and dbg.get("fit_quality") is not None
+                    and visc_rhs is None
+                ):
+                    visc_rhs = jnp.asarray(dbg["noise_rhs"])
+                    visc_basis = jnp.asarray(dbg["noise_basis"])
+                    visc_tf = jnp.asarray(dbg["term_fraction"])
+                    visc_fq = jnp.asarray(dbg["fit_quality"])
+                    if dbg.get("noise_scale") is not None:
+                        visc_scale = jnp.asarray(dbg["noise_scale"])
     for name, fn in plan.customs:
         constitutive[f"custom/{name}"] = jnp.asarray(fn(merged, plan.constants))
     for check in plan.bounds:
@@ -511,6 +550,29 @@ def _score_one(
         "scale": dynamic_scale,
         "recipe_ok": recipe_ok,
     }
+
+    if apply_optin:
+        # Global opt-in: same arithmetic as score_implied_delta_array, jit-safe.
+        optin: Dict[str, Dict[str, Any]] = {}
+        for k, arr in flat.items():
+            if not (str(k).startswith("constitutive/") and str(k).endswith("/implied_delta")):
+                continue
+            dbg = implied_debug.get(k) or {}
+            r_max_raw = reduce_implied_magnitude_arrays(arr, metric="worst_point")
+            scored = arr
+            if use_noise and dbg.get("pred") is not None and dbg.get("raw") is not None:
+                scored = noise_normalized_delta(
+                    pred=dbg["pred"],
+                    implied=dbg.get("implied"),
+                    raw=dbg["raw"],
+                    debug=dbg,
+                )
+            v_eff = reduce_implied_magnitude_arrays(
+                scored, metric=region_metric, percentile=region_percentile
+            )
+            optin[k] = {"v_eff": v_eff, "r_max_raw": r_max_raw}
+        if optin:
+            out["implied_optin"] = optin
 
     if region_weights is not None:
         # region_weights: (R, P). Static Python loop over R unrolls under jit.
@@ -789,6 +851,18 @@ def _entry(index, out, residuals, plan: _Plan, provenance: Dict[str, str], *, ru
         else:
             source[key] = "auto_fallback"
             scale[key] = plan.floor
+    # Nondimensional constitutive implied_delta / ref_delta use the fixed gauge
+    # (same as ResidualEngine._state_derived_scale_per_key).
+    from moju.monitor.auditor import _suffix_is_nd_closure
+
+    for key in flat_keys:
+        if key in scale:
+            continue
+        if "/" in key:
+            prefix, rest = key.split("/", 1)
+            if prefix == "constitutive" and _suffix_is_nd_closure(rest):
+                scale[key] = float(plan.floor)
+                source[key] = "fixed"
     entry: Dict[str, Any] = {
         "index": index,
         "rms": rms,
