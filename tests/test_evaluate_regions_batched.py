@@ -52,10 +52,13 @@ def _region_snapshot(rep: dict) -> dict:
     for name, block in rr.items():
         pk = block["per_key"][_MU_KEY]
         vis = block.get("viscosity") or {}
+        raw_score = pk.get("admissibility_score")
+        try:
+            score_f = float(raw_score) if raw_score is not None else float("nan")
+        except (TypeError, ValueError):
+            score_f = float("nan")
         out[name] = {
-            "score": float(pk["admissibility_score"])
-            if math.isfinite(float(pk.get("admissibility_score", float("nan"))))
-            else float("nan"),
+            "score": score_f if math.isfinite(score_f) else float("nan"),
             "v_eff": float(pk.get("score_for_admissibility", float("nan")))
             if pk.get("score_for_admissibility") is not None
             else float("nan"),

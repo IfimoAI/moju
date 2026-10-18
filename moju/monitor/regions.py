@@ -671,9 +671,9 @@ def compute_region_results(
                 key_row.update(
                     {
                         "status": "insufficient_points",
-                        "admissibility_score": float("nan"),
+                        "admissibility_score": None,
                         "admissibility_level": "Insufficient points",
-                        "score_for_admissibility": float("nan"),
+                        "score_for_admissibility": None,
                         "worst_point_index": None,
                         "reason": region_reason,
                     }
@@ -692,7 +692,7 @@ def compute_region_results(
                     key_row.update(
                         {
                             "status": "insufficient_points",
-                            "admissibility_score": float("nan"),
+                            "admissibility_score": None,
                             "admissibility_level": "Insufficient points",
                             "nu_tilde": viscosity_meta.get("nu_tilde"),
                             "mu_tilde": viscosity_meta.get("mu_tilde"),
@@ -708,7 +708,7 @@ def compute_region_results(
                     key_row.update(
                         {
                             "status": "not_identifiable",
-                            "admissibility_score": float("nan"),
+                            "admissibility_score": None,
                             "admissibility_level": "Not identifiable",
                             "nu_tilde": viscosity_meta.get("nu_tilde"),
                             "mu_tilde": viscosity_meta.get("mu_tilde"),

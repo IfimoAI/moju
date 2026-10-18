@@ -105,7 +105,10 @@ def evaluate_batched(
         resolve_implied_scoring_options,
         score_from_r_max,
     )
-    from moju.monitor.law_implied_diagnostics import _gate_params
+    from moju.monitor.law_implied_diagnostics import (
+        _gate_params,
+        materialize_identifiability_meta,
+    )
     from moju.monitor.regions import (
         DEFAULT_REGION_MIN_POINTS,
         normalize_regions,
@@ -281,6 +284,16 @@ def evaluate_batched(
                 score_from_r_max=score_from_r_max,
             )
             ms["regions"] = entry["region_results"].get("provenance")
+        # Host-side: materialise not-identifiable flags so audit rollup matches
+        # the loop / ResidualEngine path (NaN implied scores must not zero the tier).
+        if "implied_id" in out:
+            id_map: Dict[str, Any] = {}
+            for bn, nums in out["implied_id"].items():
+                compact: Dict[str, Any] = {}
+                for sk, arr in nums.items():
+                    compact[sk] = jnp.asarray(arr)[i]
+                id_map[str(bn)] = materialize_identifiability_meta(compact)
+            entry["implied_identifiability"] = id_map
         entry["monitor_settings"] = ms
         report = audit([entry], r_ref=r_ref)
         if return_residuals:
@@ -437,6 +450,8 @@ def _score_one(
     visc_fq = None
     visc_scale = None
     implied_debug: Dict[str, Dict[str, Any]] = {}
+    # Tracer-safe identifiability scalars (status strings materialised on the host).
+    implied_id: Dict[str, Dict[str, Any]] = {}
     for audit_spec in plan.audits:
         spec = audit_spec["spec"]
         reg = audit_spec["reg"]
@@ -481,6 +496,23 @@ def _score_one(
                         side[sk] = jnp.asarray(dbg[sk])
                 if side:
                     implied_debug[key] = side
+                if "identifiable" in dbg or dbg.get("status") == "not_identifiable":
+                    pack: Dict[str, Any] = {}
+                    if "identifiable" in dbg:
+                        pack["identifiable"] = jnp.asarray(dbg["identifiable"])
+                    elif dbg.get("status") == "not_identifiable":
+                        pack["identifiable"] = jnp.asarray(False)
+                    for sk in (
+                        "excluded_fraction",
+                        "n_identifiable",
+                        "n_total",
+                        "conditioning_threshold",
+                        "fit_quality_threshold",
+                    ):
+                        if dbg.get(sk) is not None:
+                            pack[sk] = jnp.asarray(dbg[sk])
+                    if pack:
+                        implied_id[str(base)] = pack
                 if (
                     dbg.get("noise_rhs") is not None
                     and dbg.get("noise_basis") is not None
@@ -550,6 +582,8 @@ def _score_one(
         "scale": dynamic_scale,
         "recipe_ok": recipe_ok,
     }
+    if implied_id:
+        out["implied_id"] = implied_id
 
     if apply_optin:
         # Global opt-in: same arithmetic as score_implied_delta_array, jit-safe.
@@ -712,9 +746,9 @@ def _assemble_region_results(
                 key_row.update(
                     {
                         "status": "insufficient_points",
-                        "admissibility_score": float("nan"),
+                        "admissibility_score": None,
                         "admissibility_level": "Insufficient points",
-                        "score_for_admissibility": float("nan"),
+                        "score_for_admissibility": None,
                         "worst_point_index": None,
                         "reason": flags.get("reason"),
                     }
@@ -728,7 +762,7 @@ def _assemble_region_results(
                 key_row.update(
                     {
                         "status": vis_status,
-                        "admissibility_score": float("nan"),
+                        "admissibility_score": None,
                         "admissibility_level": (
                             "Insufficient points"
                             if vis_status == "insufficient_points"
