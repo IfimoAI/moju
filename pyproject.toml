@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moju"
-version = "2.3.1"
-description = "Physics supervision and audit tools for SciML models, with JAX-native residuals and PyTorch support."
+version = "2.3.2"
+description = "Physics admissibility auditing for ML surrogates and simulation data: scores how well predicted fields satisfy governing laws and constitutive relations, with implied-parameter checks and admissibility tiers, for JAX and PyTorch."
 readme = "README.md"
 authors = [{ name = "Ifimo Lab (Ifimo Global Solutions LLC)", email = "lab@ifimoanalytics.com" }]
 maintainers = [
@@ -13,7 +13,17 @@ maintainers = [
 ]
 license = { text = "MIT" }
 requires-python = ">=3.10"
-keywords = ["physics", "jax", "torch", "pytorch", "sciml", "pinn", "dimensionless", "cfd", "differentiable", "residual"]
+keywords = [
+    "physics-informed machine learning",
+    "scientific machine learning",
+    "surrogate validation",
+    "verification and validation",
+    "admissibility",
+    "JAX",
+    "PyTorch",
+    "SciML",
+    "PINN",
+]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",

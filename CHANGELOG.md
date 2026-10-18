@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-10-18
+
+### Changed
+
+- Packaging metadata and README update only (package description, keywords,
+  README introduction). No code or behaviour changes.
+
 ## [2.3.1] - 2026-10-16
 
 ### Fixed

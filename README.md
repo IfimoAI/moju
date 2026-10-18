@@ -1,6 +1,6 @@
 # moju
 
-Physics supervision and audit tools for SciML and Physics AI.
+Moju audits predicted fields against governing-law residuals, constitutive and implied-parameter checks, and optional per-region diagnostics. It reports admissibility scores, qualitative tiers, and scoring provenance so you can see how well a state satisfies the physics you stated. It is for people validating ML surrogates or simulation fields. Secondary capabilities include composing laws, models, and dimensionless groups, and using governing-law residuals as a training-time loss.
 
 ```bash
 pip install moju
