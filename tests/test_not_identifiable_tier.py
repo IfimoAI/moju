@@ -63,7 +63,8 @@ def _assert_ni_semantics(report: dict, *, golden: dict | None = None) -> None:
     pk = report["per_key"][_NI_KEY]
     assert pk["admissibility_level"] == exp["implied_admissibility_level"]
     assert pk.get("identifiability_status") == exp["identifiability_status"]
-    assert math.isfinite(float(pk["admissibility_score"])) is exp["implied_admissibility_score_isfinite"]
+    assert pk["admissibility_score"] is None
+    assert pk["admissibility_score"] == exp["implied_admissibility_score"]
     assert report["per_key"][_LAW_KEY]["admissibility_level"].startswith(
         exp["law_admissibility_level_prefix"]
     )
@@ -124,7 +125,7 @@ def test_evaluate_batched_with_regions_not_identifiable_matches_golden():
         pk = blk["per_key"][_NI_KEY]
         assert pk["admissibility_level"] == "Not identifiable", name
         assert pk.get("status") == "not_identifiable", name
-        assert not math.isfinite(float(pk["admissibility_score"])), name
+        assert pk["admissibility_score"] is None, name
         assert blk["viscosity"]["status"] == "not_identifiable", name
 
 
@@ -172,12 +173,54 @@ def test_insufficient_points_does_not_zero_overall_tier():
     tiny_blk = rep["region_results"]["regions"]["tiny"]
     assert tiny_blk["status"] == "insufficient_points"
     assert tiny_blk["per_key"][_NI_KEY]["admissibility_level"] == "Insufficient points"
-    assert not math.isfinite(float(tiny_blk["per_key"][_NI_KEY]["admissibility_score"]))
+    assert tiny_blk["per_key"][_NI_KEY]["admissibility_score"] is None
     bat = evaluate(
         eng, [state], weighted_norms=False, regions=regions, region_min_points=16
     )[0]
     assert bat["overall_admissibility_level"].startswith("High")
     assert bat["region_results"]["regions"]["tiny"]["status"] == "insufficient_points"
+    assert bat["region_results"]["regions"]["tiny"]["per_key"][_NI_KEY][
+        "admissibility_score"
+    ] is None
+
+
+def test_json_export_ni_and_insufficient_scores_are_strict_null():
+    """JSON export must use null (allow_nan=False); never NaN or 0.0."""
+    from moju.monitor.monitor_log_export import (
+        export_monitor_log,
+        monitor_log_export_to_jsonable,
+    )
+
+    state, x = _ni_state()
+    near = np.asarray(x < jnp.pi)
+    tiny = np.zeros(np.asarray(x).shape, dtype=bool)
+    tiny.ravel()[:2] = True
+    regions = {"near": near & ~tiny, "tiny": tiny, "far": ~near}
+    eng = _engine(regions=regions, region_min_points=16)
+    eng.compute_residuals(state, weighted_norms=False)
+    export = export_monitor_log(eng.log, scope="audit", persist=False)
+    blob = monitor_log_export_to_jsonable(export)
+    text = json.dumps(blob, allow_nan=False)
+    parsed = json.loads(text)
+    pk = parsed["summary"]["per_key"][_NI_KEY]
+    assert pk["admissibility_level"] == "Not identifiable"
+    assert pk["admissibility_score"] is None
+    assert pk["admissibility_score"] != 0.0
+    # Batched evaluate export path
+    bat = evaluate(
+        eng, [state], weighted_norms=False, regions=regions, region_min_points=16
+    )[0]
+    # Re-export via a one-step log-shaped summary: dump report through jsonable helper
+    from moju.monitor.report import _residual_dict_to_json_serializable
+
+    bat_json = _residual_dict_to_json_serializable(bat)
+    bat_text = json.dumps(bat_json, allow_nan=False)
+    bat_parsed = json.loads(bat_text)
+    assert bat_parsed["per_key"][_NI_KEY]["admissibility_score"] is None
+    tiny_score = bat_parsed["region_results"]["regions"]["tiny"]["per_key"][_NI_KEY][
+        "admissibility_score"
+    ]
+    assert tiny_score is None
 
 
 def test_equivalent_to_worst_point_does_not_zero_overall_tier():

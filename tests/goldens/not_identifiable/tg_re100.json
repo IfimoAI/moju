@@ -24,7 +24,7 @@
     "law_admissibility_level_prefix": "High",
     "implied_admissibility_level": "Not identifiable",
     "identifiability_status": "not_identifiable",
-    "implied_admissibility_score_isfinite": false,
+    "implied_admissibility_score": null,
     "constitutive_category_absent_or_nonzero": true
   }
 }

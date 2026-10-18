@@ -10,23 +10,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
-- **Not-identifiable implied laws no longer drive the overall tier on batched
-  ``evaluate``.** Under default settings, a law-linked implied-parameter row
-  whose fit is ``Not identifiable`` (e.g. inertia-dominated region where the
-  viscous term is negligible) correctly reports ``identifiability_status=
-  "not_identifiable"``, keeps a non-finite (JSON-null) score, and is excluded
-  from category / overall rollup — matching 2.1.0 audit / loop semantics and
-  the documented behaviour. In 2.1–2.3.0 the **batched** ``evaluate`` path
-  NaN-gated the residual but omitted ``implied_identifiability`` on the host
-  entry, so ``audit`` treated the NaN as a category failure (score ``0.0`` →
-  ``Non-Admissible`` / ``Unknown``). Affected: batched ``evaluate`` with and
-  without ``regions``; audit and ``evaluate_debug_loop`` were already correct.
-  Per-region NI / insufficient-points reporting was already correct and is
-  unchanged. Defense-in-depth: category rollup also skips keys already marked
-  ``Not identifiable`` on the per-key report.
+- **Batched ``evaluate`` treated a Not-identifiable implied law as a category
+  failure (since 2.1.0).** When an implied-parameter fit was ``Not
+  identifiable`` (e.g. inertia-dominated flow where the viscous term is
+  negligible), the jit/vmap path NaN-gated the residual but omitted
+  ``implied_identifiability`` on the host entry. ``audit`` then scored the
+  constitutive category as ``0.0`` and the overall tier became
+  ``Non-Admissible`` / ``Unknown``. The audit and ``evaluate_debug_loop``
+  paths were already correct (overall tier followed the remaining laws).
+  Users of batched ``evaluate`` with inertia-dominated data should re-run.
+  Paper figures are unaffected (they use the audit / paper-golden path).
+  Also: Not-identifiable and Insufficient-points scores are ``null`` in
+  reports and JSON exports (never ``NaN`` or ``0.0``); serializers accept
+  ``json.dumps(..., allow_nan=False)``.
 - Golden fixture ``tests/goldens/not_identifiable/tg_re100.json`` plus path
-  coverage (audit, loop, batched, regions, mixed batch, loop↔batch equality)
-  so this cannot regress.
+  coverage (audit, loop, batched, regions, mixed batch, loop↔batch equality,
+  strict JSON export).
 
 ## [2.3.0] - 2026-10-16
 

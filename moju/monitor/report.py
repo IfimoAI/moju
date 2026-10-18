@@ -99,29 +99,60 @@ def _group_keys_by_category(per_key: Dict[str, Any]) -> List[Tuple[str, List[Tup
     return result
 
 
-def _residual_dict_to_json_serializable(residual_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Recursively convert residual dict (JAX/NumPy arrays) to JSON-serializable lists."""
+def _json_safe_value(val: Any) -> Any:
+    """Convert arrays / nested structures to JSON-safe Python; non-finite floats → ``None``."""
     try:
         import jax
     except ImportError:
         jax = None
     import numpy as np
 
-    out: Dict[str, Any] = {}
-    for key, val in residual_dict.items():
-        if isinstance(val, dict):
-            out[key] = _residual_dict_to_json_serializable(val)
-        elif hasattr(val, "tolist"):
-            try:
-                arr = val
-                if jax is not None and hasattr(arr, "__jax_array__"):
+    if val is None or isinstance(val, (str, bool)):
+        return val
+    if isinstance(val, dict):
+        return {str(k): _json_safe_value(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple)):
+        return [_json_safe_value(v) for v in val]
+    if isinstance(val, (int,)) and not isinstance(val, bool):
+        return int(val)
+    if isinstance(val, float):
+        return val if math.isfinite(val) else None
+    if hasattr(val, "tolist"):
+        try:
+            arr = val
+            if jax is not None:
+                try:
                     arr = jax.device_get(arr)
-                out[key] = np.asarray(arr).tolist()
-            except Exception:
-                out[key] = str(val)
-        else:
-            out[key] = val
-    return out
+                except Exception:
+                    pass
+            # 0-d numpy / jax scalars
+            as_np = np.asarray(arr)
+            if as_np.shape == ():
+                try:
+                    f = float(as_np.item())
+                except (TypeError, ValueError):
+                    return as_np.item()
+                return f if math.isfinite(f) else None
+            return _json_safe_value(as_np.tolist())
+        except Exception:
+            return str(val)
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return val
+    return f if math.isfinite(f) else None
+
+
+def _residual_dict_to_json_serializable(residual_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively convert residual dict (JAX/NumPy arrays) to JSON-serializable values.
+
+    Non-finite floats (``NaN`` / ``±Inf``) become ``None`` (JSON ``null``) so
+    ``json.dumps(..., allow_nan=False)`` succeeds. Used by residual JSON writers
+    and :func:`moju.monitor.monitor_log_export.monitor_log_export_to_jsonable`.
+    """
+    if not isinstance(residual_dict, dict):
+        return _json_safe_value(residual_dict)  # type: ignore[return-value]
+    return {str(k): _json_safe_value(v) for k, v in residual_dict.items()}
 
 
 def write_residuals_json(residual_dict: Dict[str, Any], path: str) -> None:
@@ -515,7 +546,13 @@ def write_audit_pdf(
         for label, data in items:
             score = data.get("admissibility_score", 0.0)
             level = data.get("admissibility_level", "Non-Admissible")
-            score_s = format_admissibility_pct(float(score)) if level != "Not identifiable" else "N/A"
+            if (
+                level in ("Not identifiable", "Insufficient points")
+                or score is None
+            ):
+                score_s = "N/A"
+            else:
+                score_s = format_admissibility_pct(float(score))
             if level == "Not identifiable" and data.get("excluded_fraction") is not None:
                 try:
                     excl_pct = 100.0 * float(data["excluded_fraction"])

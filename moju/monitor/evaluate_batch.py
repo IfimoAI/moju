@@ -746,9 +746,9 @@ def _assemble_region_results(
                 key_row.update(
                     {
                         "status": "insufficient_points",
-                        "admissibility_score": float("nan"),
+                        "admissibility_score": None,
                         "admissibility_level": "Insufficient points",
-                        "score_for_admissibility": float("nan"),
+                        "score_for_admissibility": None,
                         "worst_point_index": None,
                         "reason": flags.get("reason"),
                     }
@@ -762,7 +762,7 @@ def _assemble_region_results(
                 key_row.update(
                     {
                         "status": vis_status,
-                        "admissibility_score": float("nan"),
+                        "admissibility_score": None,
                         "admissibility_level": (
                             "Insufficient points"
                             if vis_status == "insufficient_points"

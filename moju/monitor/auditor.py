@@ -805,7 +805,9 @@ def _compute_log_step_metrics(
                     key_report["r_max"] = imp_score.get("r_max_raw")
             if id_meta is not None:
                 # Explicit per-key sidecar: never treat as passing; rollup skips this key.
+                # Score is null (not 0.0 / NaN) so JSON exports stay strict-compliant.
                 key_report["identifiability_status"] = "not_identifiable"
+                key_report["admissibility_score"] = None
                 key_report["excluded_fraction"] = id_meta.get("excluded_fraction")
                 key_report["n_identifiable"] = id_meta.get("n_identifiable")
                 key_report["n_total"] = id_meta.get("n_total")
@@ -1467,6 +1469,9 @@ def _worst_keys_table_rows(
                 row["r_max_raw"] = rep.get("r_max_raw")
         if is_ni:
             row["admissibility_level"] = "Not identifiable"
+            # Missing score → null in JSON (never NaN / 0.0).
+            row["admissibility"] = None
+            row["admissibility_score"] = None
             if rep.get("excluded_fraction") is not None:
                 row["excluded_fraction"] = rep.get("excluded_fraction")
             if rep.get("identifiability_reason"):
