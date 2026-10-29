@@ -10,17 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
-- Implied-audit evaluation coverage no longer treats identifiability exclusions
-  as ``n_nonfinite``. Coverage records gain ``n_not_identifiable``;
-  ``n_selected = n_total − n_masked − n_not_identifiable``, and ``n_nonfinite``
-  counts only non-finites among selected points. A point is not identifiable
-  only when the scoring-path conditioning test is finite and fails thresholds;
-  non-finite inputs/conditioning count as ``n_nonfinite``, never as not
-  identifiable. Under ``nonfinite_policy="strict"``, a partially identifiable
-  implied audit with finite selected samples stays scored (not Incomplete); a
-  genuine non-finite at a selected point still yields Incomplete. Fully
-  not-identifiable rows remain **Not identifiable**. Default ``"flag"`` scores
-  and tiers are unchanged.
+- Implied-audit evaluation coverage no longer treats not-identifiable points as
+  ``n_nonfinite`` under ``nonfinite_policy="strict"``. Coverage records gain
+  ``n_not_identifiable``; ``n_selected = n_total − n_masked − n_not_identifiable``.
+  Partially identifiable implied audits with finite selected samples stay scored
+  (not Incomplete). Fully not-identifiable rows remain **Not identifiable**.
+  Default ``"flag"`` scores and tiers are unchanged.
+- Non-finite inputs (or non-finite conditioning) at a point count as
+  ``n_nonfinite``, never as not identifiable. A point is not identifiable only
+  when the scoring-path conditioning test is finite and fails thresholds; a
+  genuine non-finite at a selected point still yields Incomplete under strict.
 
 ## [2.4.0] - 2026-10-29
 
