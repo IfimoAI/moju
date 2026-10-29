@@ -104,6 +104,15 @@ def _vec_norm_last(x: Any) -> jnp.ndarray:
     return jnp.sqrt(jnp.sum(a**2, axis=-1) + 1e-30)
 
 
+def _inputs_finite_at_points(arr: Any, point_ndim: int) -> jnp.ndarray:
+    """True where every component of ``arr`` is finite at each leading point index."""
+    a = jnp.asarray(arr)
+    fin = jnp.isfinite(a)
+    if a.ndim > point_ndim:
+        fin = fin.all(axis=tuple(range(point_ndim, a.ndim)))
+    return fin
+
+
 def _re_from_viscosity(
     U: Any,
     L: Any,
@@ -232,10 +241,21 @@ def _apply_viscosity_conditioning(
         tmax = jnp.maximum(tmax, _vec_norm_last(term))
     term_fraction = jnp.where(tmax > 0, pt / tmax, jnp.zeros_like(pt))
 
-    # Finite conditioning vs threshold failure are distinct for coverage:
-    # - not identifiable: conditioning is finite and fails thresholds
-    # - non-finite: conditioning itself is non-finite (counts as n_nonfinite)
-    conditioning_finite = (
+    # Classify by inputs first, then by the conditioning test (2.4.2):
+    # - non-finite: any required input (rhs / basis / balance terms) is non-finite
+    # - not identifiable: inputs finite, but conditioning fails *or* is undefined
+    #   (e.g. 0/0 → non-finite β / fit_quality from perfectly finite inputs)
+    # - selected: inputs finite and conditioning defined and passes thresholds
+    # β itself is *derived* and must not drive the non-finite bucket.
+    point_ndim = int(b.ndim)
+    inputs_finite = _inputs_finite_at_points(rhs_a, point_ndim) & _inputs_finite_at_points(
+        ba, point_ndim
+    )
+    for term in balance_terms:
+        if term is None:
+            continue
+        inputs_finite = inputs_finite & _inputs_finite_at_points(term, point_ndim)
+    conditioning_defined = (
         jnp.isfinite(fit_quality)
         & jnp.isfinite(term_fraction)
         & jnp.isfinite(b)
@@ -244,9 +264,9 @@ def _apply_viscosity_conditioning(
         term_fraction >= float(term_threshold)
     )
     # Scoring gate (same points used for β wipe / n_identifiable).
-    mask = conditioning_finite & passes_thresholds
-    # Coverage NI exclusions only (same function; not a parallel reimplementation).
-    not_identifiable_mask = conditioning_finite & (~passes_thresholds)
+    mask = inputs_finite & conditioning_defined & passes_thresholds
+    # Coverage NI exclusions (same function; not a parallel reimplementation).
+    not_identifiable_mask = inputs_finite & ~(conditioning_defined & passes_thresholds)
     # Keep counts / flags as JAX arrays so this path is jit/vmap-safe. Host code
     # converts with bool()/int() when building reports outside a transform.
     n_tot = int(mask.size)  # static shape → concrete Python int
@@ -268,9 +288,9 @@ def _apply_viscosity_conditioning(
         "n_identifiable": n_ok,
         "n_total": n_tot,
         "identifiable": identifiable,
-        # Scoring-identifiable points (finite conditioning ∧ thresholds).
+        # Scoring-identifiable points (finite inputs ∧ defined conditioning ∧ thresholds).
         "identifiable_mask": mask,
-        # Finite conditioning that failed thresholds — coverage n_not_identifiable.
+        # Finite inputs where conditioning fails or is undefined — n_not_identifiable.
         "not_identifiable_mask": not_identifiable_mask,
         # Status string is derived on the host from ``identifiable`` (see
         # ``materialize_identifiability_meta``); do not branch on tracers here.

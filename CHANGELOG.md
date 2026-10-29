@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.4.2] - 2026-10-29
+
+### Fixed
+
+- Corrects the 2.4.1 classification rule for implied-audit coverage: a point is
+  **non-finite** only when a required input (state fields / derivatives the law
+  and implied audit read, or a residual component) at that point is non-finite.
+  When inputs are finite but the conditioning test fails **or is undefined**
+  (for example a non-finite ratio from 0/0), the point is **not identifiable**.
+  Quiet regions with vanishing viscous and inertial terms no longer inflate
+  ``n_nonfinite`` or force strict **Incomplete**. Default ``"flag"`` scores and
+  tiers are unchanged.
+
 ## [2.4.1] - 2026-10-29
 
 ### Fixed
@@ -20,6 +33,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ``n_nonfinite``, never as not identifiable. A point is not identifiable only
   when the scoring-path conditioning test is finite and fails thresholds; a
   genuine non-finite at a selected point still yields Incomplete under strict.
+  Superseded in part by 2.4.2 (undefined conditioning from finite inputs is not
+  identifiable, not non-finite).
 
 ## [2.4.0] - 2026-10-29
 
