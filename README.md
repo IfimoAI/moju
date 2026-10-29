@@ -31,6 +31,32 @@ Moju is an open-source physics admissibility auditing library for scientific ML 
 
 A tier is computed from an admissibility score in `[0, 1]`: High at `≥ 0.909`, Moderate at `≥ 0.667`, Low at `≥ 0.5`, and Non-Admissible below that (see `moju.monitor.auditor.admissibility_level`). A passing tier indicates consistency with the stated physics within the audited conditions: the laws, constitutive models, sample points, and scales you supplied. It is not a guarantee of correctness.
 
+### Evaluation coverage
+
+Coverage counts residual elements, including trailing vector/tensor components.
+An evaluation mask excludes all components at each excluded spatial point.
+Audit-scope monitor-log exports preserve the non-finite policy recorded by
+`audit`, including incomplete per-key verdicts and null scores in JSON series.
+
+NaN-aware reductions may score on the finite subset of a residual. Every scored key and the aggregate now carry an evaluation-coverage record (`n_total`, `n_masked`, `n_selected`, `n_finite`, `n_nonfinite`, `coverage_status`). Default `nonfinite_policy="flag"` keeps scores and tiers unchanged; set `"strict"` to treat incomplete or empty coverage as tier **Incomplete** (not assessable — distinct from **Not identifiable**). Under `"flag"`, a NaN residual is dropped from the score while an infinite residual enters the RMS and drives the score to 0; both are reported as `coverage_status = "incomplete"`. `"strict"` treats NaN and inf identically (null score, Incomplete).
+
+**Known limitation.** Coverage counts non-finite values in the residual array. A required input that is non-finite while the law's residual stays finite (for example, a law that applies `jnp.where` or `zeros_like` to that input) is currently reported as `coverage_status = "ok"`. Counting non-finite inputs per sample needs a mapping from input samples to residual samples that holds for scalars, parameters and broadcast shapes; this is planned for a follow-up release.
+
+```python
+import jax.numpy as jnp
+from moju.monitor import ResidualEngine, LawSpec, Scoring, audit
+
+eng = ResidualEngine(
+    laws=[LawSpec(name="unit_law", fn=lambda r: r, state_map={"r": "r"},
+                  scoring=Scoring("rms", dimensionless=True))],
+    law_implied_audits=False,
+)
+eng.compute_residuals({"r": jnp.array([0.0, float("nan")])}, run_mode="eval")
+report = audit(eng.log)  # default flag: High score, coverage_status="incomplete"
+print(report["coverage_status"])
+print(report["per_key"]["laws/unit_law"]["evaluation_coverage"])
+```
+
 ## What Moju Does
 
 - Builds residuals from composable `Laws`, `Groups`, and `Models`.

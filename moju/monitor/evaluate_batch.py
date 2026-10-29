@@ -43,6 +43,8 @@ def evaluate_batched(
     implied_percentile: Optional[float] = None,
     implied_noise_normalization: Optional[bool] = None,
     require_batch: bool = False,
+    nonfinite_policy: Optional[str] = None,
+    eval_mask_label: Optional[str] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Score every candidate in one compiled call.
@@ -294,8 +296,24 @@ def evaluate_batched(
                     compact[sk] = jnp.asarray(arr)[i]
                 id_map[str(bn)] = materialize_identifiability_meta(compact)
             entry["implied_identifiability"] = id_map
+        if "coverage_nums" in out:
+            from moju.monitor.evaluation_coverage import materialize_coverage_counts
+
+            cov_map: Dict[str, Any] = {}
+            for k, nums in out["coverage_nums"].items():
+                host_nums = {sk: jnp.asarray(arr)[i] for sk, arr in nums.items()}
+                cov_map[str(k)] = materialize_coverage_counts(
+                    host_nums, eval_mask_label=eval_mask_label
+                )
+            entry["evaluation_coverage"] = cov_map
         entry["monitor_settings"] = ms
-        report = audit([entry], r_ref=r_ref)
+        report = audit(
+            [entry],
+            r_ref=r_ref,
+            last_residual_dict=residuals,
+            nonfinite_policy=nonfinite_policy,
+            eval_mask_label=eval_mask_label,
+        )
         if return_residuals:
             report["residuals"] = residuals
         reports.append(report)
@@ -558,6 +576,11 @@ def _score_one(
     flat = _flat(residuals)
     rms = {k: r_eff(v) for k, v in flat.items()}
     rmax = {k: r_max(v) for k, v in flat.items()}
+    from moju.monitor.evaluation_coverage import coverage_counts_arrays
+
+    coverage_nums: Dict[str, Dict[str, Any]] = {
+        k: coverage_counts_arrays(v) for k, v in flat.items()
+    }
     dynamic_scale: Dict[str, Any] = {}
     recipe_ok: Dict[str, Any] = {}
     for key, recipe, spec, _is_user in plan.auto_scale:
@@ -582,6 +605,8 @@ def _score_one(
         "scale": dynamic_scale,
         "recipe_ok": recipe_ok,
     }
+    if coverage_nums:
+        out["coverage_nums"] = coverage_nums
     if implied_id:
         out["implied_id"] = implied_id
 

@@ -20,6 +20,7 @@ informative annotation when required data is missing rather than raising.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -150,7 +151,15 @@ def build_overall_admissibility_kpi(
     last = _last_log_entry(bundle)
     if last is None:
         return _empty_card(title or "Overall Admissibility", "No log entries available", theme)
-    score = float(last.get("overall_admissibility_score") or 0.0)
+    raw_score = last.get("overall_admissibility_score")
+    if raw_score is None or last.get("overall_admissibility_level") == "Incomplete":
+        return _empty_card(title or "Overall Admissibility", "Incomplete (not assessable)", theme)
+    try:
+        score = float(raw_score)
+    except (TypeError, ValueError):
+        score = 0.0
+    if not math.isfinite(score):
+        return _empty_card(title or "Overall Admissibility", "No finite overall score", theme)
     fig = go.Figure(
         go.Indicator(
             mode="gauge+number",
@@ -710,10 +719,15 @@ def build_worst_keys_table_card(
         level = str(r.get("admissibility_level") or "")
         if level == "Not identifiable":
             return "Not identifiable"
+        if level == "Incomplete":
+            return "Incomplete"
         for field in ("admissibility_score", "admissibility"):
             if field in r:
                 try:
-                    return format_admissibility_pct(float(r.get(field)))
+                    val = r.get(field)
+                    if val is None:
+                        continue
+                    return format_admissibility_pct(float(val))
                 except (TypeError, ValueError):
                     continue
         return "N/A"

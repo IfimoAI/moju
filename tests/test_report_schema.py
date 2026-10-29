@@ -61,7 +61,9 @@ def test_report_header_fields():
     rep = audit(eng.log)
     assert rep["schema_version"] == REPORT_SCHEMA_VERSION
     assert rep["moju_version"] == moju.__version__
-    assert rep["tier_definition"]["meaning"].endswith("not a guarantee of correctness.")
+    assert "not a guarantee of correctness" in rep["tier_definition"]["meaning"]
+    assert "Incomplete" in rep["tier_definition"]["meaning"]
+    assert "Incomplete" in (rep["tier_definition"].get("non_scored_tiers") or [])
     names = [t["name"] for t in rep["tier_definition"]["tiers"]]
     assert names == ["High Admissibility", "Moderate Admissibility", "Low Admissibility", "Non-Admissible"]
 

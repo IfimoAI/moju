@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-29
+
+### Added
+
+- **Evaluation coverage on every verdict.** Each scored law / implied audit (and
+  the aggregate) reports ``n_total``, ``n_masked``, ``n_selected``, ``n_finite``,
+  ``n_nonfinite``, and ``coverage_status`` (``ok`` / ``incomplete`` / ``empty``).
+  Non-finite residual samples remain tolerated by NaN-aware reductions, but the
+  verdict now states what it was computed on. Optional ``eval_mask_label`` records
+  provenance for explicit exclusions (masked points never count as non-finite).
+- **``nonfinite_policy``** on ``audit`` / ``evaluate``: ``"ignore"``, ``"flag"``
+  (default; scores and tiers unchanged — backward compatible), ``"strict"``
+  (any non-``ok`` coverage → ``score = null``, tier ``Incomplete``, meaning not
+  assessable — distinct from ``Not identifiable``). Under ``"flag"``, an empty
+  evaluation still scores ``0`` with ``coverage_status = "empty"`` (no evidence,
+  not evidence of failure). Batched and loop evaluate paths share the same
+  coverage records.
+
+### Fixed
+
+- Preserve each step's recorded non-finite policy in audit-scope monitor-log
+  exports, including per-key verdicts, series, coverage metadata and enriched
+  log scores. Invalidate cached exports when the recorded policy changes.
+- Keep evaluation-coverage counts in residual-element units when applying a
+  spatial mask to vector/tensor residuals. Selected non-finite components remain
+  visible and make strict evaluation Incomplete; explicitly excluded components
+  do not. Masks ignored by the residual masker do not create fictitious exclusions.
+
+### Known limitations
+
+- Coverage counts non-finites in the **residual** array only; a non-finite
+  required input whose residual stays finite is still reported as
+  ``coverage_status = "ok"`` (input-sample mapping planned for a follow-up).
+
+Reported and patched by Massimiliano Brighindi.
+
 ## [2.3.2] - 2026-10-18
 
 ### Changed

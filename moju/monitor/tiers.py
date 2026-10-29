@@ -10,7 +10,7 @@ truth used at scoring time.
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from moju.monitor.auditor import (
     ADM_HIGH_THRESHOLD,
@@ -22,6 +22,7 @@ from moju.monitor.auditor import (
     DEFAULT_NONDIM_R_NORM_SCALE_K,
     admissibility_level,
 )
+from moju.monitor.evaluation_coverage import TIER_INCOMPLETE
 
 TIER_HIGH = "High Admissibility"
 TIER_MODERATE = "Moderate Admissibility"
@@ -29,7 +30,16 @@ TIER_LOW = "Low Admissibility"
 TIER_NON_ADMISSIBLE = "Non-Admissible"
 TIER_UNKNOWN = "Unknown"
 
+# Score-band tiers only (Incomplete / Not identifiable / Unknown are non-scored).
 TIER_ORDER: Tuple[str, ...] = (TIER_HIGH, TIER_MODERATE, TIER_LOW, TIER_NON_ADMISSIBLE)
+
+# Non-scored labels that must not KeyError when mapped alongside TIER_ORDER.
+TIER_NON_SCORED: Tuple[str, ...] = (
+    TIER_INCOMPLETE,
+    TIER_UNKNOWN,
+    "Not identifiable",
+    "Insufficient points",
+)
 
 # Inclusive lower bound on the admissibility score for each tier.
 TIER_CUTOFFS: Dict[str, float] = {
@@ -70,14 +80,30 @@ TIER_DEFINITION: Dict[str, Any] = {
     "meaning": (
         "A passing tier indicates consistency with the stated physics within the audited "
         "conditions (declared laws, constitutive models, sample points, and scales). "
-        "It is not a guarantee of correctness."
+        "It is not a guarantee of correctness. "
+        "Incomplete (nonfinite_policy='strict') means not assessable due to incomplete "
+        "coverage, distinct from Not identifiable."
     ),
+    "non_scored_tiers": list(TIER_NON_SCORED),
 }
 
 
-def tier_for_score(score: float) -> str:
-    """Tier name for an admissibility score (``Unknown`` if non-finite)."""
+def tier_for_score(score: Optional[float]) -> str:
+    """Tier name for an admissibility score (``Incomplete`` if ``None``; ``Unknown`` if non-finite)."""
     return admissibility_level(score)
+
+
+def tier_rank(level: Optional[str]) -> Optional[int]:
+    """
+    Index in :data:`TIER_ORDER` for scored bands, or ``None`` for non-scored labels
+    (``Incomplete``, ``Not identifiable``, ``Unknown``, …). Safe to call for any tier string.
+    """
+    if level is None:
+        return None
+    try:
+        return TIER_ORDER.index(str(level))
+    except ValueError:
+        return None
 
 
 def tier_definition() -> Dict[str, Any]:
