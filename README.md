@@ -31,6 +31,25 @@ Moju is an open-source physics admissibility auditing library for scientific ML 
 
 A tier is computed from an admissibility score in `[0, 1]`: High at `≥ 0.909`, Moderate at `≥ 0.667`, Low at `≥ 0.5`, and Non-Admissible below that (see `moju.monitor.auditor.admissibility_level`). A passing tier indicates consistency with the stated physics within the audited conditions: the laws, constitutive models, sample points, and scales you supplied. It is not a guarantee of correctness.
 
+### Evaluation coverage
+
+NaN-aware reductions may score on the finite subset of a residual. Every scored key and the aggregate now carry an evaluation-coverage record (`n_total`, `n_masked`, `n_selected`, `n_finite`, `n_nonfinite`, `coverage_status`). Default `nonfinite_policy="flag"` keeps scores and tiers unchanged; set `"strict"` to treat incomplete or empty coverage as tier **Incomplete** (not assessable — distinct from **Not identifiable**).
+
+```python
+import jax.numpy as jnp
+from moju.monitor import ResidualEngine, LawSpec, Scoring, audit
+
+eng = ResidualEngine(
+    laws=[LawSpec(name="unit_law", fn=lambda r: r, state_map={"r": "r"},
+                  scoring=Scoring("rms", dimensionless=True))],
+    law_implied_audits=False,
+)
+eng.compute_residuals({"r": jnp.array([0.0, float("nan")])}, run_mode="eval")
+report = audit(eng.log)  # default flag: High score, coverage_status="incomplete"
+print(report["coverage_status"])
+print(report["per_key"]["laws/unit_law"]["evaluation_coverage"])
+```
+
 ## What Moju Does
 
 - Builds residuals from composable `Laws`, `Groups`, and `Models`.

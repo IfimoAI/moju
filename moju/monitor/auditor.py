@@ -381,7 +381,7 @@ def _r_eff_scalar(x: jnp.ndarray) -> jnp.ndarray:
     return rms_r * jnp.power(q, p)
 
 
-def admissibility_level(score: float) -> str:
+def admissibility_level(score: Optional[float]) -> str:
     """
     Map admissibility score in ``[0, 1]`` to a qualitative label (``Unknown`` if non-finite).
 
@@ -389,14 +389,25 @@ def admissibility_level(score: float) -> str:
     ``scale_k`` (:data:`ADM_HIGH_THRESHOLD`, :data:`ADM_MODERATE_THRESHOLD`,
     :data:`ADM_LOW_THRESHOLD`). High requires ``score >= ADM_HIGH_THRESHOLD`` (~90.9% at ±0.1%
     fractional RMS); Moderate and Low use inclusive lower bounds at ~66.7% and 50%.
+
+    ``None`` maps to ``Incomplete`` (not assessable under ``nonfinite_policy=\"strict\"``;
+    distinct from ``Not identifiable``).
     """
-    if not math.isfinite(score):
+    if score is None:
+        from moju.monitor.evaluation_coverage import TIER_INCOMPLETE
+
+        return TIER_INCOMPLETE
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
         return "Unknown"
-    if score >= ADM_HIGH_THRESHOLD:
+    if not math.isfinite(s):
+        return "Unknown"
+    if s >= ADM_HIGH_THRESHOLD:
         return "High Admissibility"
-    if score >= ADM_MODERATE_THRESHOLD:
+    if s >= ADM_MODERATE_THRESHOLD:
         return "Moderate Admissibility"
-    if score >= ADM_LOW_THRESHOLD:
+    if s >= ADM_LOW_THRESHOLD:
         return "Low Admissibility"
     return "Non-Admissible"
 
@@ -982,6 +993,103 @@ def _apply_implied_scoring_to_entry(
         entry["implied_scoring"] = implied_scoring
 
 
+def _apply_evaluation_coverage_policy(
+    report: Dict[str, Any],
+    entry: Mapping[str, Any],
+    *,
+    policy: str,
+    last_residual_dict: Optional[Dict[str, Any]] = None,
+    eval_mask_label: Optional[str] = None,
+) -> None:
+    """Attach coverage records and apply ``nonfinite_policy`` to per-key / overall."""
+    from moju.monitor.evaluation_coverage import (
+        TIER_INCOMPLETE,
+        aggregate_coverage,
+        apply_nonfinite_policy_to_key,
+        coverage_map_from_flat,
+        is_incomplete_key,
+        validate_nonfinite_policy,
+    )
+
+    policy = validate_nonfinite_policy(policy)
+    cov_map: Dict[str, Any] = {}
+    raw = entry.get("evaluation_coverage")
+    if isinstance(raw, dict) and raw:
+        cov_map = {str(k): dict(v) for k, v in raw.items() if isinstance(v, dict)}
+    elif last_residual_dict is not None:
+        flat: Dict[str, Any] = {}
+        for cat, content in last_residual_dict.items():
+            if cat == "closure_debug" or not isinstance(content, dict):
+                continue
+            for name, arr in content.items():
+                flat[f"{cat}/{name}"] = arr
+        cov_map = coverage_map_from_flat(
+            flat,
+            eval_mask_label=eval_mask_label
+            or (entry.get("eval_mask") or {}).get("label"),
+            mask_meta=entry.get("eval_mask") if isinstance(entry.get("eval_mask"), dict) else None,
+        )
+    per_key = report.get("per_key") or {}
+    incomplete_keys: List[str] = []
+    for k, row in per_key.items():
+        if not isinstance(row, dict):
+            continue
+        cov = cov_map.get(k)
+        apply_nonfinite_policy_to_key(row, cov, policy=policy)
+        if is_incomplete_key(row):
+            incomplete_keys.append(str(k))
+    if cov_map:
+        report["evaluation_coverage"] = {
+            "per_key": cov_map,
+            "aggregate": aggregate_coverage(cov_map),
+        }
+        report["coverage_status"] = report["evaluation_coverage"]["aggregate"]["coverage_status"]
+    report["nonfinite_policy"] = policy
+    if policy == "strict" and incomplete_keys:
+        report["overall_admissibility_score"] = None
+        report["overall_admissibility_level"] = TIER_INCOMPLETE
+        report["incomplete_keys"] = incomplete_keys
+        # Drop incomplete keys from category numeric rollup already reflected via null scores;
+        # recompute categories excluding Incomplete / Not identifiable.
+        cats: Dict[str, float] = {}
+        buckets: Dict[str, List[float]] = {
+            "laws": [],
+            "constitutive": [],
+            "scaling": [],
+            "data": [],
+        }
+        for k, row in per_key.items():
+            if not isinstance(row, dict):
+                continue
+            if is_incomplete_key(row):
+                continue
+            if (
+                row.get("admissibility_level") == "Not identifiable"
+                or row.get("identifiability_status") == "not_identifiable"
+            ):
+                continue
+            if "/" not in k:
+                continue
+            prefix = k.split("/", 1)[0]
+            if prefix not in buckets:
+                continue
+            try:
+                vf = float(row.get("admissibility_score"))
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(vf):
+                continue
+            buckets[prefix].append(vf)
+        for cat, vals in buckets.items():
+            if not vals:
+                continue
+            if cat == "constitutive":
+                cats[cat] = _min_admissibility(vals)
+            else:
+                cats[cat] = _geom_mean_admissibility(vals)
+        report["per_category"] = cats
+
+
 def audit(
     log: List[Dict[str, Any]],
     r_ref: Optional[Dict[str, float]] = None,
@@ -999,6 +1107,8 @@ def audit(
     regions: Any = None,
     region_names: Optional[Mapping[Any, str]] = None,
     region_min_points: Optional[int] = None,
+    nonfinite_policy: Optional[str] = None,
+    eval_mask_label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Physics admissibility from logged **R_eff** (field ``rms``) and scales.
@@ -1225,6 +1335,14 @@ def audit(
     from moju.monitor.audit_meta import audit_meta
 
     report["audit_meta"] = audit_meta(log, r_ref=r_ref)
+
+    _apply_evaluation_coverage_policy(
+        report,
+        log[-1],
+        policy=nonfinite_policy,
+        last_residual_dict=last_residual_dict,
+        eval_mask_label=eval_mask_label,
+    )
 
     if export_dir:
         import zipfile
@@ -2560,6 +2678,7 @@ class ResidualEngine:
         nondim_scales: Any = None,
         derivative_metadata: Optional[Dict[str, Any]] = None,
         eval_mask: Any = None,
+        eval_mask_label: Optional[str] = None,
         state_pred_alt: Optional[Dict[str, Any]] = None,
         estimate_derivative_error: Optional[bool] = None,
         derivative_error_threshold: Optional[float] = None,
@@ -2610,6 +2729,8 @@ class ResidualEngine:
           - ``derivative_metadata``: optional per-key metadata for consistency warnings.
           - ``eval_mask``: boolean array (True = keep). When set, RMS/max for this call use
             masked points only.
+          - ``eval_mask_label``: optional string recorded on evaluation-coverage records for
+            this mask (provenance only; does not change scores).
           - ``state_pred_alt`` / ``estimate_derivative_error``: opt-in derivative-error estimates.
           - ``point_weights`` / ``weighted_norms`` (Moju 2.0 default ``True``): area-weighted
             R_eff for scoring, with a percentile safeguard (see ``weighted_safeguard``). Use
@@ -2641,6 +2762,7 @@ class ResidualEngine:
             nondim_scales=nondim_scales,
             derivative_metadata=derivative_metadata,
             eval_mask=eval_mask,
+            eval_mask_label=eval_mask_label,
             state_pred_alt=state_pred_alt,
             estimate_derivative_error=estimate_derivative_error,
             derivative_error_threshold=derivative_error_threshold,
@@ -2681,6 +2803,7 @@ class ResidualEngine:
         nondim_scales: Any = None,
         derivative_metadata: Optional[Dict[str, Any]] = None,
         eval_mask: Any = None,
+        eval_mask_label: Optional[str] = None,
         state_pred_alt: Optional[Dict[str, Any]] = None,
         estimate_derivative_error: Optional[bool] = None,
         derivative_error_threshold: Optional[float] = None,
@@ -3230,6 +3353,14 @@ class ResidualEngine:
 
             flat = mask_flat_residuals(flat, eval_mask)
             mask_meta = mask_provenance(eval_mask)
+        from moju.monitor.evaluation_coverage import coverage_map_from_flat
+
+        evaluation_coverage = coverage_map_from_flat(
+            flat,
+            eval_mask=eval_mask,
+            eval_mask_label=eval_mask_label,
+            mask_meta=mask_meta or None,
+        )
         rms_per_key = _rms_per_key(flat, to_python=log_to_python)
         r_max_per_key = _max_per_key(flat, to_python=log_to_python, scoring=self._scoring_by_key)
 
@@ -3649,6 +3780,8 @@ class ResidualEngine:
             entry["derivative_error"] = derivative_error_report
         if mask_meta:
             entry["eval_mask"] = mask_meta
+        if evaluation_coverage:
+            entry["evaluation_coverage"] = evaluation_coverage
         if rms_weighted is not None:
             entry["rms_weighted"] = rms_weighted
             entry["weighted_norms"] = {
@@ -3857,6 +3990,8 @@ def evaluate(
     region_names: Optional[Mapping[Any, str]] = None,
     region_min_points: Optional[int] = None,
     evaluate_debug_loop: bool = False,
+    nonfinite_policy: Optional[str] = None,
+    eval_mask_label: Optional[str] = None,
     **compute_kwargs: Any,
 ) -> List[Dict[str, Any]]:
     """
@@ -3953,6 +4088,8 @@ def evaluate(
             implied_percentile=implied_percentile,
             implied_noise_normalization=implied_noise_normalization,
             require_batch=require_batch,
+            nonfinite_policy=nonfinite_policy,
+            eval_mask_label=eval_mask_label,
         )
         if batched is not None:
             for report in batched:
@@ -3973,7 +4110,13 @@ def evaluate(
             **compute_kwargs,
         )
         entry["index"] = i
-        report = audit([entry], r_ref=r_ref)
+        report = audit(
+            [entry],
+            r_ref=r_ref,
+            last_residual_dict=residuals if return_residuals else residuals,
+            nonfinite_policy=nonfinite_policy,
+            eval_mask_label=eval_mask_label,
+        )
         if return_residuals:
             report["residuals"] = residuals
         report["execution"] = "loop"

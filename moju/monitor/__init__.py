@@ -45,6 +45,12 @@ from moju.monitor.implied_scoring import (
     resolve_implied_scoring_options,
     score_from_r_max,
 )
+from moju.monitor.evaluation_coverage import (
+    DEFAULT_NONFINITE_POLICY,
+    TIER_INCOMPLETE,
+    coverage_from_residual,
+    validate_nonfinite_policy,
+)
 from moju.monitor.regions import (
     DEFAULT_REGION_MIN_POINTS,
     normalize_regions,
@@ -154,6 +160,10 @@ __all__ = [
     "parse_implied_scoring_options",
     "resolve_implied_scoring_options",
     "score_from_r_max",
+    "DEFAULT_NONFINITE_POLICY",
+    "TIER_INCOMPLETE",
+    "coverage_from_residual",
+    "validate_nonfinite_policy",
     "DEFAULT_REGION_MIN_POINTS",
     "normalize_regions",
     "percentile_tail_adequacy",

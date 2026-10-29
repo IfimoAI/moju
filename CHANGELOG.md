@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-28
+
+### Added
+
+- **Evaluation coverage on every verdict.** Each scored law / implied audit (and
+  the aggregate) reports ``n_total``, ``n_masked``, ``n_selected``, ``n_finite``,
+  ``n_nonfinite``, and ``coverage_status`` (``ok`` / ``incomplete`` / ``empty``).
+  Non-finite residual samples remain tolerated by NaN-aware reductions, but the
+  verdict now states what it was computed on. Optional ``eval_mask_label`` records
+  provenance for explicit exclusions (masked points never count as non-finite).
+- **``nonfinite_policy``** on ``audit`` / ``evaluate``: ``"ignore"``, ``"flag"``
+  (default; scores and tiers unchanged — backward compatible), ``"strict"``
+  (any non-``ok`` coverage → ``score = null``, tier ``Incomplete``, meaning not
+  assessable — distinct from ``Not identifiable``). Under ``"flag"``, an empty
+  evaluation still scores ``0`` with ``coverage_status = "empty"`` (no evidence,
+  not evidence of failure). Batched and loop evaluate paths share the same
+  coverage records.
+
+Reported by: \<name, owner to fill\>
+
 ## [2.3.2] - 2026-10-18
 
 ### Changed
