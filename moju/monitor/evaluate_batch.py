@@ -472,6 +472,7 @@ def _score_one(
     implied_id: Dict[str, Dict[str, Any]] = {}
     # Pointwise NI masks / row-NI flags for coverage (keyed by residual basename).
     batch_id_masks: Dict[str, Any] = {}
+    batch_ni_masks: Dict[str, Any] = {}
     batch_id_row_ni: Dict[str, Any] = {}
     for audit_spec in plan.audits:
         spec = audit_spec["spec"]
@@ -536,6 +537,10 @@ def _score_one(
                         implied_id[str(base)] = pack
                     if dbg.get("identifiable_mask") is not None:
                         batch_id_masks[str(base)] = jnp.asarray(dbg["identifiable_mask"])
+                    if dbg.get("not_identifiable_mask") is not None:
+                        batch_ni_masks[str(base)] = jnp.asarray(
+                            dbg["not_identifiable_mask"]
+                        )
                     # Row-level wipe (tracer-safe 0-d bool): entire δ is NaN for scoring.
                     if "identifiable" in dbg:
                         batch_id_row_ni[str(base)] = jnp.logical_not(
@@ -593,14 +598,19 @@ def _score_one(
     coverage_nums: Dict[str, Dict[str, Any]] = {}
     for k, v in flat.items():
         id_mask = None
+        ni_mask = None
         row_ni: Any = False
         if str(k).startswith("constitutive/") and str(k).endswith("/implied_delta"):
             bn = str(k)[len("constitutive/") : -len("/implied_delta")]
             id_mask = batch_id_masks.get(bn)
+            ni_mask = batch_ni_masks.get(bn)
             if bn in batch_id_row_ni:
                 row_ni = batch_id_row_ni[bn]
         coverage_nums[k] = coverage_counts_arrays(
-            v, identifiable_mask=id_mask, row_not_identifiable=row_ni
+            v,
+            identifiable_mask=id_mask,
+            not_identifiable_mask=ni_mask,
+            row_not_identifiable=row_ni,
         )
     dynamic_scale: Dict[str, Any] = {}
     recipe_ok: Dict[str, Any] = {}

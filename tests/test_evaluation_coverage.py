@@ -248,25 +248,30 @@ def test_strict_implied_audit_nan_or_inf_at_identifiable_incomplete(poison):
 
 
 @pytest.mark.parametrize("poison", ["nan", "inf"])
-@pytest.mark.parametrize("debug_loop", [False, True])
-def test_tg_input_poison_counts_as_not_identifiable_not_incomplete(poison, debug_loop):
-    """Input-field NaN/inf that fails the gate is n_not_identifiable, not Incomplete."""
-    state = _tg_state_with_poison(poison)
-    eng = _ns_engine()
-    rep = evaluate(
-        eng,
-        [state],
-        weighted_norms=False,
-        nonfinite_policy="strict",
-        evaluate_debug_loop=debug_loop,
-    )[0]
-    assert rep["execution"] == ("loop" if debug_loop else "batched")
-    mu = rep["per_key"][_MU_KEY]
-    cov = mu["evaluation_coverage"]
-    assert cov["n_not_identifiable"] > 0
-    assert cov["n_nonfinite"] == 0
-    assert cov["coverage_status"] == "ok"
-    assert mu["admissibility_level"].startswith("High")
+def test_nonfinite_required_input_at_identifiable_point_is_n_nonfinite(poison):
+    """Non-finite required input at a viscous-dominant point → n_nonfinite, not NI."""
+    state, constants = _partial_ni_state()
+    # Point 0 is viscous-dominant (identifiable) on the clean field.
+    lap = jnp.asarray(state["u_laplacian"])
+    val = jnp.nan if poison == "nan" else jnp.inf
+    state = dict(state)
+    state["u_laplacian"] = lap.at[0, 0].set(val)
+    eng = ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
+        law_implied_audits=True,
+        constants=constants,
+    )
+    eng.compute_residuals(state, weighted_norms=False)
+    dbg = eng.last_residuals["closure_debug"][_BN]
+    # Scoring path: finite-fail NI mask must not claim the poisoned point.
+    ni_mask = jnp.asarray(dbg["not_identifiable_mask"])
+    assert not bool(ni_mask[0])
+    rep = audit(eng.log, nonfinite_policy="strict")
+    cov = rep["per_key"][_MU]["evaluation_coverage"]
+    assert cov["n_nonfinite"] == 1
+    assert cov["n_not_identifiable"] == 32  # right half still NI
+    assert cov["coverage_status"] == "incomplete"
+    assert rep["per_key"][_MU]["admissibility_level"] == TIER_INCOMPLETE
 
 
 def test_strict_three_laws_one_incomplete_aggregate_serialize():
@@ -412,11 +417,18 @@ def test_partial_identifiability_strict_ok_excludes_ni_from_nonfinite():
         constants=constants,
     )
     eng.compute_residuals(state, weighted_norms=False)
+    dbg = eng.last_residuals["closure_debug"][_BN]
+    # One source of truth: coverage NI count == scoring path's not_identifiable_mask.
+    scoring_ni = int(jnp.sum(jnp.asarray(dbg["not_identifiable_mask"])))
+    scoring_id = int(jnp.sum(jnp.asarray(dbg["identifiable_mask"])))
+    assert scoring_ni == 32
+    assert scoring_id == 32
+    assert int(dbg["n_identifiable"]) == scoring_id
     rep = audit(eng.log, nonfinite_policy="strict")
     cov = rep["per_key"][_MU]["evaluation_coverage"]
     assert cov["n_total"] == 64
     assert cov["n_masked"] == 0
-    assert cov["n_not_identifiable"] == 32
+    assert cov["n_not_identifiable"] == scoring_ni
     assert cov["n_selected"] == 32
     assert cov["n_finite"] == 32
     assert cov["n_nonfinite"] == 0
@@ -457,10 +469,15 @@ def test_zero_identifiable_stays_not_identifiable_under_strict():
     """Row-level NI (all points wiped) remains Not identifiable, not Incomplete."""
     from tests.test_implied_viscosity_ls import (
         _NI_KEY,
+        _NI_BN,
         _tg_re100_not_identifiable_engine,
     )
 
     eng = _tg_re100_not_identifiable_engine()
+    dbg = eng.last_residuals["closure_debug"][_NI_BN]
+    # Same scoring-path masks as coverage (row wipe ⇒ all points not assessable).
+    assert "identifiable_mask" in dbg and "not_identifiable_mask" in dbg
+    assert dbg["identifiable"] is False
     rep = audit(eng.log, nonfinite_policy="strict")
     pk = rep["per_key"][_NI_KEY]
     assert pk["admissibility_level"] == "Not identifiable"
@@ -469,6 +486,24 @@ def test_zero_identifiable_stays_not_identifiable_under_strict():
     assert cov["n_selected"] == 0
     assert cov["n_nonfinite"] == 0
     assert rep["overall_admissibility_level"] != TIER_INCOMPLETE
+
+
+def test_n_not_identifiable_matches_scoring_path_on_ni_golden():
+    """Golden TG Re=100: coverage NI count follows the scoring-path row wipe."""
+    from tests.test_implied_viscosity_ls import (
+        _NI_KEY,
+        _NI_BN,
+        _tg_re100_not_identifiable_engine,
+    )
+
+    eng = _tg_re100_not_identifiable_engine()
+    dbg = eng.last_residuals["closure_debug"][_NI_BN]
+    assert "not_identifiable_mask" in dbg  # produced by _apply_viscosity_conditioning
+    rep = audit(eng.log, nonfinite_policy="flag")
+    cov = rep["per_key"][_NI_KEY]["evaluation_coverage"]
+    # Row not identifiable ⇒ scoring excludes every sample (matches coverage).
+    assert cov["n_not_identifiable"] == cov["n_total"]
+    assert int(dbg["n_total"]) == cov["n_total"]
 
 
 @pytest.mark.parametrize("debug_loop", [False, True])

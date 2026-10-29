@@ -93,13 +93,19 @@ def count_finite_samples(
     arr: Any,
     *,
     identifiable_mask: Any = None,
+    not_identifiable_mask: Any = None,
 ) -> Dict[str, int]:
     """
     Host counts of finite / non-finite elements in a residual array.
 
-    When ``identifiable_mask`` is provided, non-identifiable points are excluded
-    from ``n_selected`` / ``n_finite`` / ``n_nonfinite`` and reported as
-    ``n_not_identifiable`` instead.
+    ``not_identifiable_mask`` (preferred) marks finite conditioning failures from
+    the scoring path; those points become ``n_not_identifiable``. Remaining points
+    are selected: residual non-finites count as ``n_nonfinite`` (including points
+    where conditioning itself was non-finite).
+
+    Legacy ``identifiable_mask`` (True = scoring-identifiable) is still accepted:
+    ``n_not_identifiable`` is then ``~identifiable_mask``, which conflates NI with
+    non-finite conditioning — prefer ``not_identifiable_mask`` when available.
     """
     a = _sample_flat(arr)
     n = int(a.size)
@@ -110,6 +116,20 @@ def count_finite_samples(
             "n_nonfinite": 0,
             "n_not_identifiable": 0,
         }
+    ni_aligned = _align_identifiable_mask(arr, not_identifiable_mask)
+    if ni_aligned is not None:
+        ni = _sample_flat(ni_aligned)
+        n_ni = int(jnp.sum(ni))
+        selected = a[~ni]
+        n_sel = int(selected.size)
+        n_finite = int(jnp.sum(jnp.isfinite(selected))) if n_sel else 0
+        return {
+            "n_selected": n_sel,
+            "n_finite": n_finite,
+            "n_nonfinite": n_sel - n_finite,
+            "n_not_identifiable": n_ni,
+        }
+    # Legacy fallback: identifiable_mask True = selected.
     aligned = _align_identifiable_mask(arr, identifiable_mask)
     if aligned is None:
         finite = jnp.isfinite(a)
@@ -181,6 +201,7 @@ def coverage_from_residual(
     n_total: Optional[int] = None,
     n_masked: Optional[int] = None,
     identifiable_mask: Any = None,
+    not_identifiable_mask: Any = None,
     row_not_identifiable: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -191,9 +212,10 @@ def coverage_from_residual(
     (as produced by :func:`moju.monitor.eval_mask.mask_flat_residuals`).
     Masked samples never count as non-finite.
 
-    ``identifiable_mask`` (True = identifiable) excludes not-identifiable points
-    from the selected set. When ``row_not_identifiable`` is True (row-level wipe),
-    every remaining sample after ``eval_mask`` is counted as not-identifiable.
+    ``not_identifiable_mask`` (from the scoring conditioning path) marks points that
+    are not identifiable; residual non-finites among the remaining points count as
+    ``n_nonfinite``. When ``row_not_identifiable`` is True (row-level wipe), every
+    remaining sample after ``eval_mask`` is counted as not-identifiable.
     """
     m = _as_bool_mask(eval_mask)
     if m is not None:
@@ -215,7 +237,11 @@ def coverage_from_residual(
             eval_mask_label=eval_mask_label,
         )
 
-    counts = count_finite_samples(arr, identifiable_mask=identifiable_mask)
+    counts = count_finite_samples(
+        arr,
+        identifiable_mask=identifiable_mask,
+        not_identifiable_mask=not_identifiable_mask,
+    )
     return coverage_record_from_counts(
         n_total=n_tot,
         n_masked=n_msk,
@@ -230,6 +256,7 @@ def coverage_counts_arrays(
     arr: Any,
     *,
     identifiable_mask: Any = None,
+    not_identifiable_mask: Any = None,
     row_not_identifiable: Any = False,
 ) -> Dict[str, Any]:
     """Tracer-safe finite / size counts for jit/vmap (0-d arrays)."""
@@ -238,19 +265,28 @@ def coverage_counts_arrays(
     zero = jnp.asarray(0, dtype=jnp.int32)
     row_ni = jnp.asarray(row_not_identifiable, dtype=bool)
 
-    aligned = _align_identifiable_mask(arr, identifiable_mask)
-    if aligned is None:
-        n_finite_raw = jnp.sum(jnp.isfinite(a)).astype(jnp.int32)
-        n_non_raw = (n - n_finite_raw).astype(jnp.int32)
-        n_sel_raw = n
-        n_ni_raw = zero
-    else:
-        m = _sample_flat(aligned)
-        n_ni_raw = jnp.sum(~m).astype(jnp.int32)
-        selected_finite = jnp.isfinite(a) & m
-        n_finite_raw = jnp.sum(selected_finite).astype(jnp.int32)
-        n_sel_raw = jnp.sum(m).astype(jnp.int32)
+    ni_aligned = _align_identifiable_mask(arr, not_identifiable_mask)
+    if ni_aligned is not None:
+        ni = _sample_flat(ni_aligned)
+        n_ni_raw = jnp.sum(ni).astype(jnp.int32)
+        selected = ~ni
+        n_sel_raw = jnp.sum(selected).astype(jnp.int32)
+        n_finite_raw = jnp.sum(jnp.isfinite(a) & selected).astype(jnp.int32)
         n_non_raw = (n_sel_raw - n_finite_raw).astype(jnp.int32)
+    else:
+        aligned = _align_identifiable_mask(arr, identifiable_mask)
+        if aligned is None:
+            n_finite_raw = jnp.sum(jnp.isfinite(a)).astype(jnp.int32)
+            n_non_raw = (n - n_finite_raw).astype(jnp.int32)
+            n_sel_raw = n
+            n_ni_raw = zero
+        else:
+            m = _sample_flat(aligned)
+            n_ni_raw = jnp.sum(~m).astype(jnp.int32)
+            selected_finite = jnp.isfinite(a) & m
+            n_finite_raw = jnp.sum(selected_finite).astype(jnp.int32)
+            n_sel_raw = jnp.sum(m).astype(jnp.int32)
+            n_non_raw = (n_sel_raw - n_finite_raw).astype(jnp.int32)
 
     # Row-level NI wipe: every element is not-identifiable for scoring.
     n_sel = jnp.where(row_ni, zero, n_sel_raw)
@@ -306,9 +342,13 @@ def identifiable_masks_from_closure_debug(
             continue
         flat_key = f"constitutive/{bn}/implied_delta"
         row_ni = is_not_identifiable(dbg)
-        mask = dbg.get("identifiable_mask")
         out[flat_key] = {
-            "mask": None if row_ni else mask,
+            # Scoring-identifiable points (legacy fallback for coverage).
+            "mask": None if row_ni else dbg.get("identifiable_mask"),
+            # Finite conditioning failures from the same scoring function.
+            "not_identifiable_mask": None
+            if row_ni
+            else dbg.get("not_identifiable_mask"),
             "row_not_identifiable": bool(row_ni),
         }
     return out
@@ -366,20 +406,25 @@ def coverage_map_from_flat(
 
         id_meta = id_info.get(str(key)) if id_info else None
         id_mask = None
+        ni_mask = None
         row_ni = False
         if isinstance(id_meta, Mapping):
             row_ni = bool(id_meta.get("row_not_identifiable"))
-            raw_mask = id_meta.get("mask")
-            if raw_mask is not None and eval_mask is not None and not row_ni:
-                # Align NI mask to the same selected points as the residual.
+
+            def _maybe_eval_mask(raw: Any) -> Any:
+                if raw is None or row_ni:
+                    return None
+                if eval_mask is None:
+                    return raw
                 try:
                     from moju.monitor.eval_mask import apply_mask_to_residual
 
-                    id_mask = apply_mask_to_residual(raw_mask, eval_mask)
+                    return apply_mask_to_residual(raw, eval_mask)
                 except (ValueError, TypeError):
-                    id_mask = raw_mask
-            elif raw_mask is not None and not row_ni:
-                id_mask = raw_mask
+                    return raw
+
+            id_mask = _maybe_eval_mask(id_meta.get("mask"))
+            ni_mask = _maybe_eval_mask(id_meta.get("not_identifiable_mask"))
         out[str(key)] = coverage_from_residual(
             arr,
             eval_mask=eval_mask,
@@ -387,6 +432,7 @@ def coverage_map_from_flat(
             n_total=key_total,
             n_masked=key_masked,
             identifiable_mask=id_mask,
+            not_identifiable_mask=ni_mask,
             row_not_identifiable=row_ni,
         )
     return out
