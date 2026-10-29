@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.4.2] - 2026-10-29
+
+### Fixed
+
+- Corrects the 2.4.1 classification rule: a point is **non-finite** only when a
+  required input or residual component is non-finite. Failed or undefined
+  conditioning with finite inputs (for example a 0/0 ratio) is **not
+  identifiable**, not non-finite. Quiet regions with vanishing viscous and
+  inertial terms no longer inflate ``n_nonfinite`` or force strict
+  **Incomplete**. Default ``"flag"`` scores and tiers are unchanged.
+
 ## [2.4.1] - 2026-10-29
 
 ### Fixed
@@ -20,6 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ``n_nonfinite``, never as not identifiable. A point is not identifiable only
   when the scoring-path conditioning test is finite and fails thresholds; a
   genuine non-finite at a selected point still yields Incomplete under strict.
+  Superseded in part by 2.4.2 (undefined conditioning from finite inputs is not
+  identifiable, not non-finite).
 
 ## [2.4.0] - 2026-10-29
 

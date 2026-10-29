@@ -7,8 +7,10 @@ explicit on every scored item and on the aggregate report.
 
 Identifiability exclusions for implied audits are counted via Moju's own
 identifiability mask (``n_not_identifiable``), not via NaN presence in the
-implied-δ array. Selected samples are those that remain after ``eval_mask`` and
-identifiability exclusions; ``n_nonfinite`` counts only non-finites among them.
+implied-δ array. A point is not identifiable when required inputs are finite but
+conditioning fails or is undefined; non-finite required inputs stay in the
+selected set and count as ``n_nonfinite``. Selected samples are those that remain
+after ``eval_mask`` and identifiability exclusions.
 """
 
 from __future__ import annotations
@@ -98,14 +100,14 @@ def count_finite_samples(
     """
     Host counts of finite / non-finite elements in a residual array.
 
-    ``not_identifiable_mask`` (preferred) marks finite conditioning failures from
-    the scoring path; those points become ``n_not_identifiable``. Remaining points
-    are selected: residual non-finites count as ``n_nonfinite`` (including points
-    where conditioning itself was non-finite).
+    ``not_identifiable_mask`` (preferred) marks scoring-path exclusions where
+    required inputs are finite but conditioning fails or is undefined; those
+    points become ``n_not_identifiable``. Remaining points are selected: residual
+    non-finites count as ``n_nonfinite`` (typically non-finite required inputs).
 
     Legacy ``identifiable_mask`` (True = scoring-identifiable) is still accepted:
     ``n_not_identifiable`` is then ``~identifiable_mask``, which conflates NI with
-    non-finite conditioning — prefer ``not_identifiable_mask`` when available.
+    input non-finites — prefer ``not_identifiable_mask`` when available.
     """
     a = _sample_flat(arr)
     n = int(a.size)
@@ -213,9 +215,10 @@ def coverage_from_residual(
     Masked samples never count as non-finite.
 
     ``not_identifiable_mask`` (from the scoring conditioning path) marks points that
-    are not identifiable; residual non-finites among the remaining points count as
-    ``n_nonfinite``. When ``row_not_identifiable`` is True (row-level wipe), every
-    remaining sample after ``eval_mask`` is counted as not-identifiable.
+    are not identifiable (finite inputs, conditioning fails or undefined); residual
+    non-finites among the remaining points count as ``n_nonfinite``. When
+    ``row_not_identifiable`` is True (row-level wipe), every remaining sample after
+    ``eval_mask`` is counted as not-identifiable.
     """
     m = _as_bool_mask(eval_mask)
     if m is not None:

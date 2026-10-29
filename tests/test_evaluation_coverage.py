@@ -550,3 +550,142 @@ def test_partial_identifiability_audit_export_carries_n_not_identifiable():
         parsed["summary"]["per_key"][_MU]["evaluation_coverage"]["n_not_identifiable"]
         == 32
     )
+
+
+def _quiet_region_state():
+    """Regional NS: left viscous, mid inertia, right quiet (0/0 conditioning, finite inputs)."""
+    from moju.monitor.law_implied_diagnostics import DEFAULT_IMPLIED_TERM_FRACTION
+
+    n, nu = 64, 0.2
+    re = 1.0 / nu
+    u = jnp.ones((n, 2)).at[:, 1].set(0.0)
+    lap = jnp.zeros((n, 2)).at[:32, 0].set(1.0).at[32:48, 0].set(0.05)
+    adv_x = jnp.zeros((n,)).at[:32].set(0.05).at[32:48].set(5.0)
+    # points 48:64 — u=const, lap=0, adv=0, p_grad=0 → undefined conditioning
+    u_grad = jnp.zeros((n, 2, 2)).at[:, 0, 0].set(adv_x)
+    adv = jnp.stack([adv_x, jnp.zeros((n,))], axis=-1)
+    p_grad = nu * lap - adv
+    state = {
+        "u": u,
+        "u_t": jnp.zeros((n, 2)),
+        "u_grad": u_grad,
+        "p_grad": p_grad,
+        "u_laplacian": lap,
+        "re": re,
+        "rho": 1.0,
+        "U": 1.0,
+        "L": 1.0,
+        "mu": nu,
+    }
+    constants = {
+        "rho": 1.0,
+        "U": 1.0,
+        "L": 1.0,
+        "implied_term_fraction": DEFAULT_IMPLIED_TERM_FRACTION,
+    }
+    return state, constants
+
+
+def test_quiet_region_undefined_conditioning_is_not_identifiable_not_nonfinite():
+    """Finite inputs with 0/0 conditioning → n_not_identifiable; strict stays ok."""
+    state, constants = _quiet_region_state()
+    for key in ("u", "u_t", "u_grad", "p_grad", "u_laplacian"):
+        assert bool(jnp.isfinite(state[key]).all()), key
+    eng = ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
+        law_implied_audits=True,
+        constants=constants,
+    )
+    eng.compute_residuals(state, weighted_norms=False)
+    dbg = eng.last_residuals["closure_debug"][_BN]
+    ni_mask = jnp.asarray(dbg["not_identifiable_mask"])
+    id_mask = jnp.asarray(dbg["identifiable_mask"])
+    # Quiet band must be NI (not left unclassified for residual-NaN → n_nonfinite).
+    assert bool(ni_mask[48:].all())
+    assert not bool(id_mask[48:].any())
+    scoring_ni = int(jnp.sum(ni_mask))
+    scoring_id = int(jnp.sum(id_mask))
+    assert scoring_ni + scoring_id == 64
+    assert scoring_id == 32
+    assert scoring_ni == 32  # mid inertia + quiet
+    rep = audit(eng.log, nonfinite_policy="strict")
+    cov = rep["per_key"][_MU]["evaluation_coverage"]
+    assert cov["n_not_identifiable"] == scoring_ni
+    assert cov["n_selected"] == scoring_id
+    assert cov["n_finite"] == scoring_id
+    assert cov["n_nonfinite"] == 0
+    assert cov["coverage_status"] == "ok"
+    assert cov["n_total"] == (
+        cov["n_masked"] + cov["n_not_identifiable"] + cov["n_selected"]
+    )
+    assert rep["per_key"][_MU]["admissibility_level"].startswith("High")
+    assert rep["overall_admissibility_level"] != TIER_INCOMPLETE
+
+
+@pytest.mark.parametrize("poison", ["nan", "inf"])
+def test_nonfinite_required_input_at_would_be_ni_point_wins(poison):
+    """Non-finite required input wins over would-be NI → n_nonfinite=1."""
+    state, constants = _partial_ni_state()
+    # Point 32 is inertia-gated (NI) on the clean field.
+    lap = jnp.asarray(state["u_laplacian"])
+    val = jnp.nan if poison == "nan" else jnp.inf
+    state = dict(state)
+    state["u_laplacian"] = lap.at[32, 0].set(val)
+    eng = ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
+        law_implied_audits=True,
+        constants=constants,
+    )
+    eng.compute_residuals(state, weighted_norms=False)
+    dbg = eng.last_residuals["closure_debug"][_BN]
+    ni_mask = jnp.asarray(dbg["not_identifiable_mask"])
+    assert not bool(ni_mask[32])  # non-finite wins; not classified as NI
+    rep = audit(eng.log, nonfinite_policy="strict")
+    cov = rep["per_key"][_MU]["evaluation_coverage"]
+    assert cov["n_nonfinite"] == 1
+    assert cov["n_not_identifiable"] == 31
+    assert cov["n_selected"] == 33  # 32 identifiable + 1 nonfinite
+    assert cov["n_total"] == (
+        cov["n_masked"] + cov["n_not_identifiable"] + cov["n_selected"]
+    )
+    assert cov["coverage_status"] == "incomplete"
+    assert rep["per_key"][_MU]["admissibility_level"] == TIER_INCOMPLETE
+
+
+@pytest.mark.parametrize("debug_loop", [False, True])
+def test_quiet_region_evaluate_path_parity(debug_loop):
+    state, constants = _quiet_region_state()
+    eng = ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
+        law_implied_audits=True,
+        constants=constants,
+    )
+    rep = evaluate(
+        eng,
+        [state],
+        weighted_norms=False,
+        nonfinite_policy="strict",
+        evaluate_debug_loop=debug_loop,
+    )[0]
+    assert rep["execution"] == ("loop" if debug_loop else "batched")
+    cov = rep["per_key"][_MU]["evaluation_coverage"]
+    assert cov["n_not_identifiable"] == 32
+    assert cov["n_nonfinite"] == 0
+    assert cov["coverage_status"] == "ok"
+    assert rep["per_key"][_MU]["admissibility_level"].startswith("High")
+
+
+def test_quiet_region_audit_export_parity():
+    state, constants = _quiet_region_state()
+    eng = ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
+        law_implied_audits=True,
+        constants=constants,
+    )
+    eng.compute_residuals(state, weighted_norms=False)
+    report = audit(eng.log, nonfinite_policy="strict")
+    exported = export_monitor_log(eng.log, scope="audit", persist=False)
+    row = exported["summary"]["per_key"][_MU]
+    assert row["evaluation_coverage"] == report["per_key"][_MU]["evaluation_coverage"]
+    assert row["evaluation_coverage"]["n_nonfinite"] == 0
+    assert row["evaluation_coverage"]["n_not_identifiable"] == 32
