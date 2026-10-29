@@ -123,6 +123,25 @@ def test_paper_figure_and_sha256_match_golden(arch: str, paper_data: Path):
             assert float(cat[key]) == pytest.approx(val, rel=0, abs=0.0)
 
 
+def test_paper_golden_n_not_identifiable_matches_scoring_path(paper_data: Path):
+    """
+    Paper Fourier implied δ has no viscosity NI gate; coverage must not invent
+    ``n_not_identifiable`` (equals the scoring-path exclusion count of zero).
+    """
+    from moju.monitor.evaluation_coverage import coverage_from_residual
+
+    arch = "4x4x4_sm"
+    zpath = paper_data / f"{arch}_moju_data.zip"
+    with tempfile.TemporaryDirectory() as td:
+        with zipfile.ZipFile(zpath) as zf:
+            zf.extractall(td)
+        root = Path(td) / f"{arch}_moju_data"
+        delta = np.load(root / "constitutive_fields.npz")["delta_grid"]
+        cov = coverage_from_residual(delta)
+        assert cov["n_not_identifiable"] == 0
+        assert cov["n_selected"] == cov["n_finite"] + cov["n_nonfinite"]
+
+
 @pytest.mark.parametrize("arch", ARCHS)
 def test_defaults_match_2_1_score_formula_on_fields(arch: str, paper_data: Path):
     """Differential vs Moju 2.1 formula: score = 1/(1 + max|δ|/1e-2) on identical δ."""

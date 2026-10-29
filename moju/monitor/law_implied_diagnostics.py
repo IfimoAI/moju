@@ -232,13 +232,21 @@ def _apply_viscosity_conditioning(
         tmax = jnp.maximum(tmax, _vec_norm_last(term))
     term_fraction = jnp.where(tmax > 0, pt / tmax, jnp.zeros_like(pt))
 
-    mask = (
+    # Finite conditioning vs threshold failure are distinct for coverage:
+    # - not identifiable: conditioning is finite and fails thresholds
+    # - non-finite: conditioning itself is non-finite (counts as n_nonfinite)
+    conditioning_finite = (
         jnp.isfinite(fit_quality)
         & jnp.isfinite(term_fraction)
         & jnp.isfinite(b)
-        & (fit_quality >= float(fit_threshold))
-        & (term_fraction >= float(term_threshold))
     )
+    passes_thresholds = (fit_quality >= float(fit_threshold)) & (
+        term_fraction >= float(term_threshold)
+    )
+    # Scoring gate (same points used for β wipe / n_identifiable).
+    mask = conditioning_finite & passes_thresholds
+    # Coverage NI exclusions only (same function; not a parallel reimplementation).
+    not_identifiable_mask = conditioning_finite & (~passes_thresholds)
     # Keep counts / flags as JAX arrays so this path is jit/vmap-safe. Host code
     # converts with bool()/int() when building reports outside a transform.
     n_tot = int(mask.size)  # static shape → concrete Python int
@@ -260,6 +268,10 @@ def _apply_viscosity_conditioning(
         "n_identifiable": n_ok,
         "n_total": n_tot,
         "identifiable": identifiable,
+        # Scoring-identifiable points (finite conditioning ∧ thresholds).
+        "identifiable_mask": mask,
+        # Finite conditioning that failed thresholds — coverage n_not_identifiable.
+        "not_identifiable_mask": not_identifiable_mask,
         # Status string is derived on the host from ``identifiable`` (see
         # ``materialize_identifiability_meta``); do not branch on tracers here.
         "min_identifiable_fraction": float(min_frac),

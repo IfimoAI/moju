@@ -1028,6 +1028,9 @@ def _apply_evaluation_coverage_policy(
             eval_mask_label=eval_mask_label
             or (entry.get("eval_mask") or {}).get("label"),
             mask_meta=entry.get("eval_mask") if isinstance(entry.get("eval_mask"), dict) else None,
+            closure_debug=last_residual_dict.get("closure_debug")
+            if isinstance(last_residual_dict.get("closure_debug"), dict)
+            else None,
         )
     per_key = report.get("per_key") or {}
     incomplete_keys: List[str] = []
@@ -3389,6 +3392,7 @@ class ResidualEngine:
             eval_mask_label=eval_mask_label,
             mask_meta=mask_meta or None,
             unmasked_flat=unmasked_flat,
+            closure_debug=closure_debug or None,
         )
         rms_per_key = _rms_per_key(flat, to_python=log_to_python)
         r_max_per_key = _max_per_key(flat, to_python=log_to_python, scoring=self._scoring_by_key)
