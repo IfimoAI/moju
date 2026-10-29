@@ -17,6 +17,51 @@ from moju.monitor.monitor_log_export import (
 )
 
 
+def _partial_coverage_engine():
+    import jax.numpy as jnp
+    from moju.monitor import ResidualEngine
+
+    engine = ResidualEngine(
+        laws=[{"name": "probe", "fn": lambda r: r, "state_map": {"r": "r"},
+               "scoring": {"metric": "rms", "dimensionless": True}}],
+        law_implied_audits=False,
+    )
+    engine.compute_residuals({"r": jnp.array([0., jnp.nan])},
+                             run_mode="eval", weighted_norms=False)
+    return engine
+
+
+@pytest.mark.parametrize("policy", ["flag", "strict"])
+@pytest.mark.parametrize("enrich", [False, True])
+def test_audit_export_preserves_coverage_policy(policy, enrich):
+    engine = _partial_coverage_engine()
+    report = audit(engine.log, nonfinite_policy=policy)
+    exported = export_monitor_log(engine.log, scope="audit", persist=False, enrich_log=enrich)
+    key = "laws/probe"
+    for row in (exported["steps"][0]["per_key_report"][key], exported["summary"]["per_key"][key]):
+        assert row["admissibility_level"] == report["per_key"][key]["admissibility_level"]
+        assert row["admissibility_score"] == report["per_key"][key]["admissibility_score"]
+        assert row["evaluation_coverage"] == report["per_key"][key]["evaluation_coverage"]
+    assert exported["summary"]["coverage_status"] == "incomplete"
+    assert exported["summary"]["nonfinite_policy"] == policy
+    assert exported["steps"][0]["overall_admissibility_score"] == report["overall_admissibility_score"]
+    parsed = json.loads(json.dumps(monitor_log_export_to_jsonable(exported), allow_nan=False))
+    assert parsed["series"]["overall_adm"][0] == report["overall_admissibility_score"]
+    assert engine.log[-1]["overall_admissibility_score"] == report["overall_admissibility_score"]
+
+
+def test_audit_export_cache_changes_with_coverage_policy():
+    engine = _partial_coverage_engine()
+    audit(engine.log, nonfinite_policy="flag")
+    high = export_monitor_log(engine.log, scope="audit")
+    audit(engine.log, nonfinite_policy="strict")
+    incomplete = export_monitor_log(engine.log, scope="audit")
+    assert incomplete is not high
+    assert incomplete["steps"][0]["overall_admissibility_score"] is None
+    assert incomplete["summary"]["overall_admissibility_level"] == "Incomplete"
+    assert export_monitor_log(engine.log, scope="audit") is incomplete
+
+
 def _two_step_log():
     return [
         {

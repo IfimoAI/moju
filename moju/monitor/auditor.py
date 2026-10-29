@@ -3374,6 +3374,7 @@ class ResidualEngine:
             }
 
         flat = _flatten_residual_dict(residuals)
+        unmasked_flat = flat
         mask_meta: Dict[str, Any] = {}
         if eval_mask is not None:
             from moju.monitor.eval_mask import mask_flat_residuals, mask_provenance
@@ -3387,6 +3388,7 @@ class ResidualEngine:
             eval_mask=eval_mask,
             eval_mask_label=eval_mask_label,
             mask_meta=mask_meta or None,
+            unmasked_flat=unmasked_flat,
         )
         rms_per_key = _rms_per_key(flat, to_python=log_to_python)
         r_max_per_key = _max_per_key(flat, to_python=log_to_python, scoring=self._scoring_by_key)

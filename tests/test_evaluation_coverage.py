@@ -134,6 +134,29 @@ def test_masked_vs_nonfinite_separation():
     assert rep["overall_admissibility_level"].startswith("High")
 
 
+@pytest.mark.parametrize(
+    "values,mask,counts,tier",
+    [
+        ([[0.0, float("nan")], [0.0, 0.0]], [True, False], (4, 2, 2, 1, 1), TIER_INCOMPLETE),
+        ([[0.0, 0.0], [float("nan"), 0.0]], [True, False], (4, 2, 2, 2, 0), "High Admissibility"),
+        ([[0.0, 0.0], [0.0, 0.0]], [False, False], (4, 4, 0, 0, 0), TIER_INCOMPLETE),
+        # Incompatible masks are ignored by the existing residual masker.
+        ([0.0, float("nan"), 0.0], [True, False], (3, 0, 3, 2, 1), TIER_INCOMPLETE),
+    ],
+)
+def test_masked_component_coverage_counts_elements(values, mask, counts, tier):
+    rep = _audit_case(
+        values, policy="strict", eval_mask=jnp.array(mask), eval_mask_label="domain"
+    )
+    cov = rep["per_key"]["laws/unit_law"]["evaluation_coverage"]
+    fields = ("n_total", "n_masked", "n_selected", "n_finite", "n_nonfinite")
+    assert tuple(cov[f] for f in fields) == counts
+    assert cov["n_total"] == cov["n_masked"] + cov["n_selected"]
+    assert cov["n_selected"] == cov["n_finite"] + cov["n_nonfinite"]
+    assert cov["eval_mask_label"] == "domain"
+    assert rep["overall_admissibility_level"] == tier
+
+
 def test_batched_vs_loop_coverage_parity():
     vals = [0.0, float("nan")]
     a = _eval_case(vals, policy="flag", debug_loop=False)

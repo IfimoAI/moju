@@ -24,13 +24,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   not evidence of failure). Batched and loop evaluate paths share the same
   coverage records.
 
+### Fixed
+
+- Preserve each step's recorded non-finite policy in audit-scope monitor-log
+  exports, including per-key verdicts, series, coverage metadata and enriched
+  log scores. Invalidate cached exports when the recorded policy changes.
+- Keep evaluation-coverage counts in residual-element units when applying a
+  spatial mask to vector/tensor residuals. Selected non-finite components remain
+  visible and make strict evaluation Incomplete; explicitly excluded components
+  do not. Masks ignored by the residual masker do not create fictitious exclusions.
+
 ### Known limitations
 
 - Coverage counts non-finites in the **residual** array only; a non-finite
   required input whose residual stays finite is still reported as
   ``coverage_status = "ok"`` (input-sample mapping planned for a follow-up).
 
-Reported by: \<name, owner to fill\>
+Reported and patched by Massimiliano Brighindi (owner confirms before release).
 
 ## [2.3.2] - 2026-10-18
 

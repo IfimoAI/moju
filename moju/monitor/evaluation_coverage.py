@@ -189,8 +189,13 @@ def coverage_map_from_flat(
     eval_mask: Any = None,
     eval_mask_label: Optional[str] = None,
     mask_meta: Optional[Mapping[str, Any]] = None,
+    unmasked_flat: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Build per-key coverage for a flat residual map (post-mask if applicable)."""
+    """Build per-key coverage for a flat residual map (post-mask if applicable).
+
+    Supply ``unmasked_flat`` to count exclusions in residual-element units,
+    including trailing components and keys to which the mask did not apply.
+    """
     n_total: Optional[int] = None
     n_masked = 0
     if mask_meta:
@@ -211,12 +216,19 @@ def coverage_map_from_flat(
     for key, arr in flat.items():
         if key == "closure_debug":
             continue
+        # Counts are residual elements, including trailing components. A spatial
+        # mask's point counts cannot be mixed with flattened element counts.
+        key_total = n_total
+        key_masked = n_masked if (eval_mask is not None or mask_meta) else 0
+        if unmasked_flat is not None and key in unmasked_flat:
+            key_total = int(jnp.asarray(unmasked_flat[key]).size)
+            key_masked = key_total - int(jnp.asarray(arr).size)
         out[str(key)] = coverage_from_residual(
             arr,
             eval_mask=eval_mask,
             eval_mask_label=eval_mask_label,
-            n_total=n_total,
-            n_masked=n_masked if (eval_mask is not None or mask_meta) else 0,
+            n_total=key_total,
+            n_masked=key_masked,
         )
     return out
 
