@@ -4,6 +4,11 @@ Evaluation coverage records for admissibility verdicts.
 Non-finite residual samples (NaN / ±inf) are tolerated by NaN-aware reductions so
 scoring can proceed on the finite subset. Coverage records make that subset
 explicit on every scored item and on the aggregate report.
+
+Identifiability exclusions for implied audits are counted via Moju's own
+identifiability mask (``n_not_identifiable``), not via NaN presence in the
+implied-δ array. Selected samples are those that remain after ``eval_mask`` and
+identifiability exclusions; ``n_nonfinite`` counts only non-finites among them.
 """
 
 from __future__ import annotations
@@ -68,18 +73,63 @@ def _sample_flat(arr: Any) -> jnp.ndarray:
     return jnp.asarray(arr).ravel()
 
 
-def count_finite_samples(arr: Any) -> Dict[str, int]:
-    """Host counts of finite / non-finite elements in a residual array."""
+def _align_identifiable_mask(arr: Any, identifiable_mask: Any) -> Optional[jnp.ndarray]:
+    """Broadcast / reshape a spatial identifiability mask onto residual elements."""
+    if identifiable_mask is None:
+        return None
+    a = jnp.asarray(arr)
+    m = jnp.asarray(identifiable_mask).astype(bool)
+    if m.size == a.size:
+        return m.reshape(a.shape)
+    if a.ndim == m.ndim + 1 and a.shape[:-1] == m.shape:
+        return jnp.broadcast_to(m[..., None], a.shape)
+    if a.ndim > m.ndim and a.shape[: m.ndim] == m.shape:
+        trail = a.shape[m.ndim :]
+        return jnp.broadcast_to(m.reshape(m.shape + (1,) * len(trail)), a.shape)
+    return None
+
+
+def count_finite_samples(
+    arr: Any,
+    *,
+    identifiable_mask: Any = None,
+) -> Dict[str, int]:
+    """
+    Host counts of finite / non-finite elements in a residual array.
+
+    When ``identifiable_mask`` is provided, non-identifiable points are excluded
+    from ``n_selected`` / ``n_finite`` / ``n_nonfinite`` and reported as
+    ``n_not_identifiable`` instead.
+    """
     a = _sample_flat(arr)
     n = int(a.size)
     if n == 0:
-        return {"n_selected": 0, "n_finite": 0, "n_nonfinite": 0}
-    finite = jnp.isfinite(a)
-    n_finite = int(jnp.sum(finite))
+        return {
+            "n_selected": 0,
+            "n_finite": 0,
+            "n_nonfinite": 0,
+            "n_not_identifiable": 0,
+        }
+    aligned = _align_identifiable_mask(arr, identifiable_mask)
+    if aligned is None:
+        finite = jnp.isfinite(a)
+        n_finite = int(jnp.sum(finite))
+        return {
+            "n_selected": n,
+            "n_finite": n_finite,
+            "n_nonfinite": n - n_finite,
+            "n_not_identifiable": 0,
+        }
+    m = _sample_flat(aligned)
+    n_ni = int(jnp.sum(~m))
+    selected = a[m]
+    n_sel = int(selected.size)
+    n_finite = int(jnp.sum(jnp.isfinite(selected))) if n_sel else 0
     return {
-        "n_selected": n,
+        "n_selected": n_sel,
         "n_finite": n_finite,
-        "n_nonfinite": n - n_finite,
+        "n_nonfinite": n_sel - n_finite,
+        "n_not_identifiable": n_ni,
     }
 
 
@@ -89,12 +139,14 @@ def coverage_record_from_counts(
     n_masked: int,
     n_finite: int,
     n_nonfinite: int,
+    n_not_identifiable: int = 0,
     eval_mask_label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build a JSON-serialisable coverage record from integer counts."""
     n_total_i = int(n_total)
     n_masked_i = max(0, int(n_masked))
-    n_selected = n_total_i - n_masked_i
+    n_ni_i = max(0, int(n_not_identifiable))
+    n_selected = n_total_i - n_masked_i - n_ni_i
     if n_selected < 0:
         n_selected = 0
     # Prefer explicit finite/nonfinite; clamp to selected.
@@ -110,6 +162,7 @@ def coverage_record_from_counts(
     rec: Dict[str, Any] = {
         "n_total": n_total_i,
         "n_masked": n_masked_i,
+        "n_not_identifiable": n_ni_i,
         "n_selected": int(n_selected),
         "n_finite": int(n_fin),
         "n_nonfinite": int(n_non),
@@ -127,6 +180,8 @@ def coverage_from_residual(
     eval_mask_label: Optional[str] = None,
     n_total: Optional[int] = None,
     n_masked: Optional[int] = None,
+    identifiable_mask: Any = None,
+    row_not_identifiable: bool = False,
 ) -> Dict[str, Any]:
     """
     Coverage for one residual array.
@@ -135,31 +190,79 @@ def coverage_from_residual(
     size / excluded count; ``arr`` must already be restricted to selected points
     (as produced by :func:`moju.monitor.eval_mask.mask_flat_residuals`).
     Masked samples never count as non-finite.
+
+    ``identifiable_mask`` (True = identifiable) excludes not-identifiable points
+    from the selected set. When ``row_not_identifiable`` is True (row-level wipe),
+    every remaining sample after ``eval_mask`` is counted as not-identifiable.
     """
-    counts = count_finite_samples(arr)
     m = _as_bool_mask(eval_mask)
     if m is not None:
         n_tot = int(n_total) if n_total is not None else int(m.size)
         n_msk = int(n_masked) if n_masked is not None else int(n_tot - int(jnp.sum(m)))
     else:
-        n_tot = int(n_total) if n_total is not None else int(counts["n_selected"])
+        base_n = int(jnp.asarray(arr).size)
+        n_tot = int(n_total) if n_total is not None else base_n
         n_msk = int(n_masked) if n_masked is not None else 0
+
+    if row_not_identifiable:
+        n_remain = max(0, n_tot - n_msk)
+        return coverage_record_from_counts(
+            n_total=n_tot,
+            n_masked=n_msk,
+            n_finite=0,
+            n_nonfinite=0,
+            n_not_identifiable=n_remain,
+            eval_mask_label=eval_mask_label,
+        )
+
+    counts = count_finite_samples(arr, identifiable_mask=identifiable_mask)
     return coverage_record_from_counts(
         n_total=n_tot,
         n_masked=n_msk,
         n_finite=counts["n_finite"],
         n_nonfinite=counts["n_nonfinite"],
+        n_not_identifiable=counts["n_not_identifiable"],
         eval_mask_label=eval_mask_label,
     )
 
 
-def coverage_counts_arrays(arr: Any) -> Dict[str, Any]:
+def coverage_counts_arrays(
+    arr: Any,
+    *,
+    identifiable_mask: Any = None,
+    row_not_identifiable: Any = False,
+) -> Dict[str, Any]:
     """Tracer-safe finite / size counts for jit/vmap (0-d arrays)."""
     a = _sample_flat(arr)
     n = jnp.asarray(a.size, dtype=jnp.int32)
-    n_finite = jnp.sum(jnp.isfinite(a)).astype(jnp.int32)
-    n_nonfinite = (n - n_finite).astype(jnp.int32)
-    return {"n_selected": n, "n_finite": n_finite, "n_nonfinite": n_nonfinite}
+    zero = jnp.asarray(0, dtype=jnp.int32)
+    row_ni = jnp.asarray(row_not_identifiable, dtype=bool)
+
+    aligned = _align_identifiable_mask(arr, identifiable_mask)
+    if aligned is None:
+        n_finite_raw = jnp.sum(jnp.isfinite(a)).astype(jnp.int32)
+        n_non_raw = (n - n_finite_raw).astype(jnp.int32)
+        n_sel_raw = n
+        n_ni_raw = zero
+    else:
+        m = _sample_flat(aligned)
+        n_ni_raw = jnp.sum(~m).astype(jnp.int32)
+        selected_finite = jnp.isfinite(a) & m
+        n_finite_raw = jnp.sum(selected_finite).astype(jnp.int32)
+        n_sel_raw = jnp.sum(m).astype(jnp.int32)
+        n_non_raw = (n_sel_raw - n_finite_raw).astype(jnp.int32)
+
+    # Row-level NI wipe: every element is not-identifiable for scoring.
+    n_sel = jnp.where(row_ni, zero, n_sel_raw)
+    n_finite = jnp.where(row_ni, zero, n_finite_raw)
+    n_nonfinite = jnp.where(row_ni, zero, n_non_raw)
+    n_ni = jnp.where(row_ni, n, n_ni_raw)
+    return {
+        "n_selected": n_sel,
+        "n_finite": n_finite,
+        "n_nonfinite": n_nonfinite,
+        "n_not_identifiable": n_ni,
+    }
 
 
 def materialize_coverage_counts(
@@ -173,14 +276,42 @@ def materialize_coverage_counts(
     n_sel = int(jnp.asarray(nums["n_selected"]).item())
     n_fin = int(jnp.asarray(nums["n_finite"]).item())
     n_non = int(jnp.asarray(nums["n_nonfinite"]).item())
-    n_tot = int(n_total) if n_total is not None else n_sel + int(n_masked)
+    n_ni = int(jnp.asarray(nums.get("n_not_identifiable", 0)).item())
+    n_tot = int(n_total) if n_total is not None else n_sel + int(n_masked) + n_ni
     return coverage_record_from_counts(
         n_total=n_tot,
         n_masked=n_masked,
         n_finite=n_fin,
         n_nonfinite=n_non,
+        n_not_identifiable=n_ni,
         eval_mask_label=eval_mask_label,
     )
+
+
+def identifiable_masks_from_closure_debug(
+    closure_debug: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Map flat implied_delta keys to pointwise identifiable masks / row-NI flags.
+
+    Returns ``{flat_key: {"mask": array|None, "row_not_identifiable": bool}}``.
+    """
+    from moju.monitor.law_implied_diagnostics import is_not_identifiable
+
+    out: Dict[str, Any] = {}
+    if not isinstance(closure_debug, Mapping):
+        return out
+    for bn, dbg in closure_debug.items():
+        if not isinstance(dbg, Mapping):
+            continue
+        flat_key = f"constitutive/{bn}/implied_delta"
+        row_ni = is_not_identifiable(dbg)
+        mask = dbg.get("identifiable_mask")
+        out[flat_key] = {
+            "mask": None if row_ni else mask,
+            "row_not_identifiable": bool(row_ni),
+        }
+    return out
 
 
 def coverage_map_from_flat(
@@ -190,12 +321,21 @@ def coverage_map_from_flat(
     eval_mask_label: Optional[str] = None,
     mask_meta: Optional[Mapping[str, Any]] = None,
     unmasked_flat: Optional[Mapping[str, Any]] = None,
+    identifiable_by_key: Optional[Mapping[str, Any]] = None,
+    closure_debug: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Build per-key coverage for a flat residual map (post-mask if applicable).
 
     Supply ``unmasked_flat`` to count exclusions in residual-element units,
     including trailing components and keys to which the mask did not apply.
+
+    ``identifiable_by_key`` or ``closure_debug`` supplies per-key identifiability
+    masks so NI-gated NaNs are not counted as ``n_nonfinite``.
     """
+    id_info = dict(identifiable_by_key or {})
+    if closure_debug is not None:
+        id_info.update(identifiable_masks_from_closure_debug(closure_debug))
+
     n_total: Optional[int] = None
     n_masked = 0
     if mask_meta:
@@ -223,12 +363,31 @@ def coverage_map_from_flat(
         if unmasked_flat is not None and key in unmasked_flat:
             key_total = int(jnp.asarray(unmasked_flat[key]).size)
             key_masked = key_total - int(jnp.asarray(arr).size)
+
+        id_meta = id_info.get(str(key)) if id_info else None
+        id_mask = None
+        row_ni = False
+        if isinstance(id_meta, Mapping):
+            row_ni = bool(id_meta.get("row_not_identifiable"))
+            raw_mask = id_meta.get("mask")
+            if raw_mask is not None and eval_mask is not None and not row_ni:
+                # Align NI mask to the same selected points as the residual.
+                try:
+                    from moju.monitor.eval_mask import apply_mask_to_residual
+
+                    id_mask = apply_mask_to_residual(raw_mask, eval_mask)
+                except (ValueError, TypeError):
+                    id_mask = raw_mask
+            elif raw_mask is not None and not row_ni:
+                id_mask = raw_mask
         out[str(key)] = coverage_from_residual(
             arr,
             eval_mask=eval_mask,
             eval_mask_label=eval_mask_label,
             n_total=key_total,
             n_masked=key_masked,
+            identifiable_mask=id_mask,
+            row_not_identifiable=row_ni,
         )
     return out
 
@@ -237,10 +396,11 @@ def aggregate_coverage(per_key: Mapping[str, Mapping[str, Any]]) -> Dict[str, An
     """Roll up per-key coverage into one aggregate record."""
     if not per_key:
         return coverage_record_from_counts(
-            n_total=0, n_masked=0, n_finite=0, n_nonfinite=0
+            n_total=0, n_masked=0, n_finite=0, n_nonfinite=0, n_not_identifiable=0
         )
     n_total = 0
     n_masked = 0
+    n_ni = 0
     n_finite = 0
     n_nonfinite = 0
     statuses = []
@@ -250,6 +410,7 @@ def aggregate_coverage(per_key: Mapping[str, Mapping[str, Any]]) -> Dict[str, An
             continue
         n_total += int(rec.get("n_total") or 0)
         n_masked += int(rec.get("n_masked") or 0)
+        n_ni += int(rec.get("n_not_identifiable") or 0)
         n_finite += int(rec.get("n_finite") or 0)
         n_nonfinite += int(rec.get("n_nonfinite") or 0)
         statuses.append(str(rec.get("coverage_status") or "ok"))
@@ -263,6 +424,7 @@ def aggregate_coverage(per_key: Mapping[str, Mapping[str, Any]]) -> Dict[str, An
         n_masked=n_masked,
         n_finite=n_finite,
         n_nonfinite=n_nonfinite,
+        n_not_identifiable=n_ni,
         eval_mask_label=label,
     )
     out["coverage_status"] = status
@@ -331,6 +493,7 @@ __all__ = [
     "coverage_record_from_counts",
     "coverage_status",
     "finite_score_or_none",
+    "identifiable_masks_from_closure_debug",
     "is_incomplete_key",
     "materialize_coverage_counts",
     "validate_nonfinite_policy",

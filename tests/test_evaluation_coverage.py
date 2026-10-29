@@ -151,7 +151,8 @@ def test_masked_component_coverage_counts_elements(values, mask, counts, tier):
     cov = rep["per_key"]["laws/unit_law"]["evaluation_coverage"]
     fields = ("n_total", "n_masked", "n_selected", "n_finite", "n_nonfinite")
     assert tuple(cov[f] for f in fields) == counts
-    assert cov["n_total"] == cov["n_masked"] + cov["n_selected"]
+    assert cov.get("n_not_identifiable", 0) == 0
+    assert cov["n_total"] == cov["n_masked"] + cov["n_not_identifiable"] + cov["n_selected"]
     assert cov["n_selected"] == cov["n_finite"] + cov["n_nonfinite"]
     assert cov["eval_mask_label"] == "domain"
     assert rep["overall_admissibility_level"] == tier
@@ -220,25 +221,36 @@ def test_implied_parameter_with_nonfinite_sample():
 
 
 @pytest.mark.parametrize("poison", ["nan", "inf"])
-def test_strict_implied_audit_nan_or_inf_score_none_incomplete(poison):
-    """Strict implied μ: one NaN or +inf → score None, tier Incomplete (audit path)."""
-    state = _tg_state_with_poison(poison)
-    eng = _ns_engine()
+def test_strict_implied_audit_nan_or_inf_at_identifiable_incomplete(poison):
+    """Strict: NaN/+inf at an identifiable implied point → Incomplete (not NI exclusion)."""
+    state, constants = _partial_ni_state()
+    eng = ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
+        law_implied_audits=True,
+        constants=constants,
+    )
     eng.compute_residuals(state, weighted_norms=False)
-    rep = audit(eng.log, nonfinite_policy="strict")
-    mu = rep["per_key"][_MU_KEY]
+    mask = eng.last_residuals["closure_debug"][_BN]["identifiable_mask"]
+    idx = int(jnp.where(jnp.asarray(mask))[0][0])
+    val = jnp.nan if poison == "nan" else jnp.inf
+    delta = jnp.asarray(eng.last_residuals["constitutive"][f"{_BN}/implied_delta"])
+    eng.last_residuals["constitutive"][f"{_BN}/implied_delta"] = delta.at[idx].set(val)
+    eng.log[-1].pop("evaluation_coverage", None)
+    rep = audit(
+        eng.log, nonfinite_policy="strict", last_residual_dict=eng.last_residuals
+    )
+    mu = rep["per_key"][_MU]
     assert mu["admissibility_score"] is None
     assert mu["admissibility_level"] == TIER_INCOMPLETE
+    assert mu["evaluation_coverage"]["n_nonfinite"] == 1
     assert mu["evaluation_coverage"]["coverage_status"] == "incomplete"
-    assert rep["overall_admissibility_score"] is None
     assert rep["overall_admissibility_level"] == TIER_INCOMPLETE
-    assert rep["coverage_status"] == "incomplete"
 
 
 @pytest.mark.parametrize("poison", ["nan", "inf"])
 @pytest.mark.parametrize("debug_loop", [False, True])
-def test_strict_implied_evaluate_paths_nan_or_inf_incomplete(poison, debug_loop):
-    """Strict implied μ: NaN/+inf Incomplete on batched and loop evaluate."""
+def test_tg_input_poison_counts_as_not_identifiable_not_incomplete(poison, debug_loop):
+    """Input-field NaN/inf that fails the gate is n_not_identifiable, not Incomplete."""
     state = _tg_state_with_poison(poison)
     eng = _ns_engine()
     rep = evaluate(
@@ -250,11 +262,11 @@ def test_strict_implied_evaluate_paths_nan_or_inf_incomplete(poison, debug_loop)
     )[0]
     assert rep["execution"] == ("loop" if debug_loop else "batched")
     mu = rep["per_key"][_MU_KEY]
-    assert mu["admissibility_score"] is None
-    assert mu["admissibility_level"] == TIER_INCOMPLETE
-    assert rep["overall_admissibility_score"] is None
-    assert rep["overall_admissibility_level"] == TIER_INCOMPLETE
-    assert rep["coverage_status"] == "incomplete"
+    cov = mu["evaluation_coverage"]
+    assert cov["n_not_identifiable"] > 0
+    assert cov["n_nonfinite"] == 0
+    assert cov["coverage_status"] == "ok"
+    assert mu["admissibility_level"].startswith("High")
 
 
 def test_strict_three_laws_one_incomplete_aggregate_serialize():
@@ -351,3 +363,155 @@ def test_flag_preserves_high_on_partial_nan():
     assert float(rep["overall_admissibility_score"]) == pytest.approx(0.99999999, rel=0, abs=1e-8)
     assert rep["overall_admissibility_level"].startswith("High")
     assert rep["coverage_status"] == "incomplete"
+
+
+def _partial_ni_state():
+    """Exact NS balance: left half identifiable, right half gated out (~50%)."""
+    from moju.monitor.law_implied_diagnostics import DEFAULT_IMPLIED_TERM_FRACTION
+
+    n = 64
+    nu = 0.2
+    re = 1.0 / nu
+    u = jnp.ones((n, 2)).at[:, 1].set(0.0)
+    lap = jnp.zeros((n, 2)).at[:32, 0].set(1.0).at[32:, 0].set(0.05)
+    adv_x = jnp.zeros((n,)).at[:32].set(0.05).at[32:].set(5.0)
+    u_grad = jnp.zeros((n, 2, 2)).at[:, 0, 0].set(adv_x)
+    adv = jnp.stack([adv_x, jnp.zeros((n,))], axis=-1)
+    p_grad = nu * lap - adv
+    state = {
+        "u": u,
+        "u_t": jnp.zeros((n, 2)),
+        "u_grad": u_grad,
+        "p_grad": p_grad,
+        "u_laplacian": lap,
+        "re": re,
+        "rho": 1.0,
+        "U": 1.0,
+        "L": 1.0,
+        "mu": nu,
+    }
+    constants = {
+        "rho": 1.0,
+        "U": 1.0,
+        "L": 1.0,
+        "implied_term_fraction": DEFAULT_IMPLIED_TERM_FRACTION,
+    }
+    return state, constants
+
+
+_MU = "constitutive/dynamic_viscosity_from_re/law_momentum_navier_stokes/implied_delta"
+_BN = "dynamic_viscosity_from_re/law_momentum_navier_stokes"
+
+
+def test_partial_identifiability_strict_ok_excludes_ni_from_nonfinite():
+    """NI-gated NaNs are n_not_identifiable, not n_nonfinite; strict stays High."""
+    state, constants = _partial_ni_state()
+    eng = ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
+        law_implied_audits=True,
+        constants=constants,
+    )
+    eng.compute_residuals(state, weighted_norms=False)
+    rep = audit(eng.log, nonfinite_policy="strict")
+    cov = rep["per_key"][_MU]["evaluation_coverage"]
+    assert cov["n_total"] == 64
+    assert cov["n_masked"] == 0
+    assert cov["n_not_identifiable"] == 32
+    assert cov["n_selected"] == 32
+    assert cov["n_finite"] == 32
+    assert cov["n_nonfinite"] == 0
+    assert cov["coverage_status"] == "ok"
+    assert cov["n_total"] == (
+        cov["n_masked"] + cov["n_not_identifiable"] + cov["n_selected"]
+    )
+    assert rep["per_key"][_MU]["admissibility_level"].startswith("High")
+    assert rep["overall_admissibility_level"] != TIER_INCOMPLETE
+
+
+def test_partial_identifiability_planted_nan_strict_incomplete():
+    """A genuine NaN on an identifiable point makes strict Incomplete (n_nonfinite=1)."""
+    state, constants = _partial_ni_state()
+    eng = ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
+        law_implied_audits=True,
+        constants=constants,
+    )
+    eng.compute_residuals(state, weighted_norms=False)
+    mask = eng.last_residuals["closure_debug"][_BN]["identifiable_mask"]
+    idx = int(jnp.where(jnp.asarray(mask))[0][0])
+    delta = jnp.asarray(eng.last_residuals["constitutive"][f"{_BN}/implied_delta"])
+    eng.last_residuals["constitutive"][f"{_BN}/implied_delta"] = delta.at[idx].set(jnp.nan)
+    eng.log[-1].pop("evaluation_coverage", None)
+    rep = audit(
+        eng.log, nonfinite_policy="strict", last_residual_dict=eng.last_residuals
+    )
+    cov = rep["per_key"][_MU]["evaluation_coverage"]
+    assert cov["n_not_identifiable"] == 32
+    assert cov["n_nonfinite"] == 1
+    assert cov["n_finite"] == 31
+    assert cov["coverage_status"] == "incomplete"
+    assert rep["per_key"][_MU]["admissibility_level"] == TIER_INCOMPLETE
+
+
+def test_zero_identifiable_stays_not_identifiable_under_strict():
+    """Row-level NI (all points wiped) remains Not identifiable, not Incomplete."""
+    from tests.test_implied_viscosity_ls import (
+        _NI_KEY,
+        _tg_re100_not_identifiable_engine,
+    )
+
+    eng = _tg_re100_not_identifiable_engine()
+    rep = audit(eng.log, nonfinite_policy="strict")
+    pk = rep["per_key"][_NI_KEY]
+    assert pk["admissibility_level"] == "Not identifiable"
+    cov = pk["evaluation_coverage"]
+    assert cov["n_not_identifiable"] == cov["n_total"]
+    assert cov["n_selected"] == 0
+    assert cov["n_nonfinite"] == 0
+    assert rep["overall_admissibility_level"] != TIER_INCOMPLETE
+
+
+@pytest.mark.parametrize("debug_loop", [False, True])
+def test_partial_identifiability_evaluate_path_parity(debug_loop):
+    state, constants = _partial_ni_state()
+    eng = ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
+        law_implied_audits=True,
+        constants=constants,
+    )
+    rep = evaluate(
+        eng,
+        [state],
+        weighted_norms=False,
+        nonfinite_policy="strict",
+        evaluate_debug_loop=debug_loop,
+    )[0]
+    assert rep["execution"] == ("loop" if debug_loop else "batched")
+    cov = rep["per_key"][_MU]["evaluation_coverage"]
+    assert cov["n_not_identifiable"] == 32
+    assert cov["n_nonfinite"] == 0
+    assert cov["coverage_status"] == "ok"
+    assert rep["per_key"][_MU]["admissibility_level"].startswith("High")
+
+
+def test_partial_identifiability_audit_export_carries_n_not_identifiable():
+    state, constants = _partial_ni_state()
+    eng = ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
+        law_implied_audits=True,
+        constants=constants,
+    )
+    eng.compute_residuals(state, weighted_norms=False)
+    report = audit(eng.log, nonfinite_policy="strict")
+    exported = export_monitor_log(eng.log, scope="audit", persist=False)
+    row = exported["summary"]["per_key"][_MU]
+    assert "n_not_identifiable" in row["evaluation_coverage"]
+    assert row["evaluation_coverage"]["n_not_identifiable"] == 32
+    assert row["evaluation_coverage"] == report["per_key"][_MU]["evaluation_coverage"]
+    parsed = json.loads(
+        json.dumps(monitor_log_export_to_jsonable(exported), allow_nan=False)
+    )
+    assert (
+        parsed["summary"]["per_key"][_MU]["evaluation_coverage"]["n_not_identifiable"]
+        == 32
+    )

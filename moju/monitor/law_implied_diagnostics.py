@@ -260,6 +260,8 @@ def _apply_viscosity_conditioning(
         "n_identifiable": n_ok,
         "n_total": n_tot,
         "identifiable": identifiable,
+        # Pointwise gate used by evaluation coverage (distinct from NaN presence).
+        "identifiable_mask": mask,
         # Status string is derived on the host from ``identifiable`` (see
         # ``materialize_identifiability_meta``); do not branch on tracers here.
         "min_identifiable_fraction": float(min_frac),

@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-10-29
+
+### Fixed
+
+- Implied-audit evaluation coverage no longer treats identifiability exclusions
+  as ``n_nonfinite``. Coverage records gain ``n_not_identifiable``;
+  ``n_selected = n_total − n_masked − n_not_identifiable``, and ``n_nonfinite``
+  counts only non-finites among identifiable selected points. Under
+  ``nonfinite_policy="strict"``, a partially identifiable implied audit with
+  finite identifiable samples stays scored (not Incomplete); a genuine
+  non-finite at an identifiable point still yields Incomplete. Fully
+  not-identifiable rows remain **Not identifiable**. Default ``"flag"`` scores
+  and tiers are unchanged.
+
 ## [2.4.0] - 2026-10-29
 
 ### Added
