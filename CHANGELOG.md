@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-## [2.4.0] - 2026-10-28
+## [2.4.0] - 2026-10-29
 
 ### Added
 
@@ -40,7 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   required input whose residual stays finite is still reported as
   ``coverage_status = "ok"`` (input-sample mapping planned for a follow-up).
 
-Reported and patched by Massimiliano Brighindi (owner confirms before release).
+Reported and patched by Massimiliano Brighindi.
 
 ## [2.3.2] - 2026-10-18
 
