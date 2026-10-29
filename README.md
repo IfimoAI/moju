@@ -33,7 +33,7 @@ A tier is computed from an admissibility score in `[0, 1]`: High at `≥ 0.909`,
 
 ### Evaluation coverage
 
-NaN-aware reductions may score on the finite subset of a residual. Every scored key and the aggregate now carry an evaluation-coverage record (`n_total`, `n_masked`, `n_selected`, `n_finite`, `n_nonfinite`, `coverage_status`). Default `nonfinite_policy="flag"` keeps scores and tiers unchanged; set `"strict"` to treat incomplete or empty coverage as tier **Incomplete** (not assessable — distinct from **Not identifiable**).
+NaN-aware reductions may score on the finite subset of a residual. Every scored key and the aggregate now carry an evaluation-coverage record (`n_total`, `n_masked`, `n_selected`, `n_finite`, `n_nonfinite`, `coverage_status`). Default `nonfinite_policy="flag"` keeps scores and tiers unchanged; set `"strict"` to treat incomplete or empty coverage as tier **Incomplete** (not assessable — distinct from **Not identifiable**). Under `"flag"`, a NaN residual is dropped from the score while an infinite residual enters the RMS and drives the score to 0; both are reported as `coverage_status = "incomplete"`. `"strict"` treats NaN and inf identically (null score, Incomplete).
 
 ```python
 import jax.numpy as jnp

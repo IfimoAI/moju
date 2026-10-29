@@ -1343,6 +1343,19 @@ def audit(
         last_residual_dict=last_residual_dict,
         eval_mask_label=eval_mask_label,
     )
+    # Keep log entry aligned with the returned report (strict may null scores).
+    if log:
+        log[-1]["overall_admissibility_score"] = report.get("overall_admissibility_score")
+        log[-1]["overall_admissibility_level"] = report.get("overall_admissibility_level")
+        if report.get("coverage_status") is not None:
+            log[-1]["coverage_status"] = report.get("coverage_status")
+        if report.get("nonfinite_policy") is not None:
+            log[-1]["nonfinite_policy"] = report.get("nonfinite_policy")
+        adm_map = log[-1].get("admissibility_score")
+        if isinstance(adm_map, dict):
+            for k, row in (report.get("per_key") or {}).items():
+                if isinstance(row, dict) and row.get("admissibility_level") == "Incomplete":
+                    adm_map[k] = None
 
     if export_dir:
         import zipfile
@@ -1542,11 +1555,12 @@ def _worst_keys_table_rows(
             continue
         level = str(rep.get("admissibility_level") or "")
         is_ni = level == "Not identifiable" or rep.get("identifiability_status") == "not_identifiable"
+        is_incomplete = level == "Incomplete" or rep.get("coverage_incomplete") is True
         try:
             rn_f = float(rep.get("r_norm"))
         except (TypeError, ValueError):
             rn_f = float("nan")
-        if not is_ni and not math.isfinite(rn_f):
+        if not is_ni and not is_incomplete and not math.isfinite(rn_f):
             continue
         try:
             r_eff = float(rep.get("rms"))
@@ -1563,7 +1577,8 @@ def _worst_keys_table_rows(
             else:
                 sk_f = float("nan")
         try:
-            adm_f = float(rep.get("admissibility_score"))
+            adm_raw = rep.get("admissibility_score")
+            adm_f = float(adm_raw) if adm_raw is not None else float("nan")
         except (TypeError, ValueError):
             adm_f = float("nan")
         prefix = k.split("/", 1)[0] if "/" in str(k) else "other"
@@ -1573,9 +1588,9 @@ def _worst_keys_table_rows(
             "r_eff": r_eff,
             "scale_k": sk_f,
             "r_norm": rn_f,
-            "admissibility": adm_f,
-            "admissibility_score": adm_f,
-            "admissibility_level": level or admissibility_level(adm_f),
+            "admissibility": adm_f if math.isfinite(adm_f) else None,
+            "admissibility_score": adm_f if math.isfinite(adm_f) else None,
+            "admissibility_level": level or admissibility_level(adm_f if math.isfinite(adm_f) else None),
             "category": prefix,
         }
         if rep.get("implied_metric") is not None:
@@ -1595,6 +1610,11 @@ def _worst_keys_table_rows(
             if rep.get("identifiability_reason"):
                 row["identifiability_reason"] = rep.get("identifiability_reason")
             not_ident_rows.append(row)
+        elif is_incomplete:
+            row["admissibility_level"] = "Incomplete"
+            row["admissibility"] = None
+            row["admissibility_score"] = None
+            rows.append(row)
         else:
             rows.append(row)
     rows.sort(key=lambda r: r["r_norm"], reverse=True)
@@ -1727,7 +1747,14 @@ def _build_visualize_bundle(
         "bar_display": bar_display,
         "bar_values": bar_values_arr,
         "bar_values_eff": bar_values_eff_arr,
-        "overall_adm": [float(metrics[i]["overall_admissibility_score"]) for i in range(n)],
+        "overall_adm": [
+            (
+                float(metrics[i]["overall_admissibility_score"])
+                if metrics[i].get("overall_admissibility_score") is not None
+                else float("nan")
+            )
+            for i in range(n)
+        ],
         "cats_fin": cats_fin,
         "cat_colors": cat_colors,
         "spatial": spatial_parsed,

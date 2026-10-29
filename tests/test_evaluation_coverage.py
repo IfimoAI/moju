@@ -145,7 +145,18 @@ def test_batched_vs_loop_coverage_parity():
     assert a["overall_admissibility_score"] == pytest.approx(b["overall_admissibility_score"])
 
 
-def test_implied_parameter_with_nonfinite_sample():
+_MU_KEY = "constitutive/dynamic_viscosity_from_re/law_momentum_navier_stokes/implied_delta"
+_NS_SM = {
+    "u_t": "u_t",
+    "u": "u",
+    "u_grad": "u_grad",
+    "p_grad": "p_grad",
+    "u_laplacian": "u_laplacian",
+    "re": "re",
+}
+
+
+def _tg_state_with_poison(poison: str):
     n = 16
     xs = jnp.linspace(0.0, 2.0 * jnp.pi, n, endpoint=False)
     x, y = jnp.meshgrid(xs, xs, indexing="ij")
@@ -153,38 +164,134 @@ def test_implied_parameter_with_nonfinite_sample():
     state = ns_state_from_analytic(fields, x, y, t=0.1)
     state.update({"rho": 1.0, "U": 1.0, "L": 1.0, "mu": 0.1, "re": 10.0})
     lap = jnp.array(state["u_laplacian"])
-    lap = lap.at[0, 0, 0].set(jnp.nan)
+    val = jnp.nan if poison == "nan" else jnp.inf
+    lap = lap.at[0, 0, 0].set(val)
     state["u_laplacian"] = lap
-    sm = {
-        "u_t": "u_t",
-        "u": "u",
-        "u_grad": "u_grad",
-        "p_grad": "p_grad",
-        "u_laplacian": "u_laplacian",
-        "re": "re",
-    }
-    eng = ResidualEngine(
-        laws=[{"name": "momentum_navier_stokes", "state_map": sm}],
+    return state
+
+
+def _ns_engine():
+    return ResidualEngine(
+        laws=[{"name": "momentum_navier_stokes", "state_map": _NS_SM}],
         law_implied_audits=True,
         constants={"rho": 1.0, "U": 1.0, "L": 1.0},
     )
+
+
+def test_implied_parameter_with_nonfinite_sample():
+    state = _tg_state_with_poison("nan")
+    eng = _ns_engine()
     eng.compute_residuals(state, weighted_norms=False)
     rep_flag = audit(eng.log, nonfinite_policy="flag")
     rep_strict = audit(eng.log, nonfinite_policy="strict")
-    mu = "constitutive/dynamic_viscosity_from_re/law_momentum_navier_stokes/implied_delta"
     law = "laws/momentum_navier_stokes"
     assert "evaluation_coverage" in rep_flag["per_key"][law]
-    assert "evaluation_coverage" in rep_flag["per_key"][mu]
-    # Aggregate present
+    assert "evaluation_coverage" in rep_flag["per_key"][_MU_KEY]
     assert "evaluation_coverage" in rep_flag
     assert rep_flag["evaluation_coverage"]["aggregate"]["coverage_status"] in (
         "ok",
         "incomplete",
         "empty",
     )
-    # Strict may or may not Incomplete depending on which keys have nonfinite;
-    # at least coverage is attached and policy recorded.
     assert rep_strict["nonfinite_policy"] == "strict"
+
+
+@pytest.mark.parametrize("poison", ["nan", "inf"])
+def test_strict_implied_audit_nan_or_inf_score_none_incomplete(poison):
+    """Strict implied μ: one NaN or +inf → score None, tier Incomplete (audit path)."""
+    state = _tg_state_with_poison(poison)
+    eng = _ns_engine()
+    eng.compute_residuals(state, weighted_norms=False)
+    rep = audit(eng.log, nonfinite_policy="strict")
+    mu = rep["per_key"][_MU_KEY]
+    assert mu["admissibility_score"] is None
+    assert mu["admissibility_level"] == TIER_INCOMPLETE
+    assert mu["evaluation_coverage"]["coverage_status"] == "incomplete"
+    assert rep["overall_admissibility_score"] is None
+    assert rep["overall_admissibility_level"] == TIER_INCOMPLETE
+    assert rep["coverage_status"] == "incomplete"
+
+
+@pytest.mark.parametrize("poison", ["nan", "inf"])
+@pytest.mark.parametrize("debug_loop", [False, True])
+def test_strict_implied_evaluate_paths_nan_or_inf_incomplete(poison, debug_loop):
+    """Strict implied μ: NaN/+inf Incomplete on batched and loop evaluate."""
+    state = _tg_state_with_poison(poison)
+    eng = _ns_engine()
+    rep = evaluate(
+        eng,
+        [state],
+        weighted_norms=False,
+        nonfinite_policy="strict",
+        evaluate_debug_loop=debug_loop,
+    )[0]
+    assert rep["execution"] == ("loop" if debug_loop else "batched")
+    mu = rep["per_key"][_MU_KEY]
+    assert mu["admissibility_score"] is None
+    assert mu["admissibility_level"] == TIER_INCOMPLETE
+    assert rep["overall_admissibility_score"] is None
+    assert rep["overall_admissibility_level"] == TIER_INCOMPLETE
+    assert rep["coverage_status"] == "incomplete"
+
+
+def test_strict_three_laws_one_incomplete_aggregate_serialize():
+    """Strict: three laws, one Incomplete → aggregate Incomplete; JSON + tier_rank safe."""
+    from moju.monitor.tiers import TIER_ORDER, tier_rank
+    from moju.monitor.visualize_plotly import (
+        _admissibility_status_bracket_plotly,
+        format_admissibility_status_label,
+    )
+
+    eng = ResidualEngine(
+        laws=[
+            LawSpec(
+                name="ok_a",
+                fn=lambda r: r,
+                state_map={"r": "a"},
+                scoring=Scoring("rms", dimensionless=True),
+            ),
+            LawSpec(
+                name="bad",
+                fn=lambda r: r,
+                state_map={"r": "b"},
+                scoring=Scoring("rms", dimensionless=True),
+            ),
+            LawSpec(
+                name="ok_c",
+                fn=lambda r: r,
+                state_map={"r": "c"},
+                scoring=Scoring("rms", dimensionless=True),
+            ),
+        ],
+        law_implied_audits=False,
+    )
+    eng.compute_residuals(
+        {
+            "a": jnp.array([0.0, 0.0]),
+            "b": jnp.array([0.0, float("nan")]),
+            "c": jnp.array([0.0, 0.0]),
+        },
+        run_mode="eval",
+        weighted_norms=False,
+    )
+    rep = audit(eng.log, nonfinite_policy="strict")
+    assert rep["overall_admissibility_score"] is None
+    assert rep["overall_admissibility_level"] == TIER_INCOMPLETE
+    assert rep["per_key"]["laws/bad"]["admissibility_level"] == TIER_INCOMPLETE
+    assert rep["per_key"]["laws/ok_a"]["admissibility_level"].startswith("High")
+    # score=None must not reach arithmetic / formatting helpers
+    assert format_admissibility_status_label(None) == TIER_INCOMPLETE
+    assert _admissibility_status_bracket_plotly(None) == "INCOMPLETE"
+    assert tier_rank(TIER_INCOMPLETE) is None
+    assert all(tier_rank(t) is not None for t in TIER_ORDER)
+    blob = _residual_dict_to_json_serializable(rep)
+    text = json.dumps(blob, allow_nan=False)
+    parsed = json.loads(text)
+    assert parsed["overall_admissibility_score"] is None
+    assert parsed["overall_admissibility_level"] == TIER_INCOMPLETE
+    # Log stays aligned for export consumers
+    assert eng.log[-1].get("overall_admissibility_level") == TIER_INCOMPLETE
+    assert eng.log[-1].get("overall_admissibility_score") is None
 
 
 def test_aggregate_status_propagation():

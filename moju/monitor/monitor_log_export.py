@@ -127,10 +127,15 @@ def _build_steps(
         idx = entry.get("index") if isinstance(entry, dict) else None
         if idx is None:
             idx = len(steps)
+        raw_ov = m.get("overall_admissibility_score", float("nan"))
+        try:
+            ov_f = float(raw_ov) if raw_ov is not None else float("nan")
+        except (TypeError, ValueError):
+            ov_f = float("nan")
         steps.append(
             {
                 "index": idx,
-                "overall_admissibility_score": float(m.get("overall_admissibility_score", float("nan"))),
+                "overall_admissibility_score": ov_f if math.isfinite(ov_f) else None,
                 "category_admissibility_score": dict(m.get("category_admissibility_score") or {}),
                 "admissibility_score": dict(m.get("admissibility_score") or {}),
                 "r_norm": dict(m.get("r_norm") or {}),
@@ -153,7 +158,11 @@ def _build_series(
     r_eff_series: Dict[str, List[float]] = {k: [] for k in flat_keys}
 
     for j, (entry, m) in enumerate(zip(log, metrics)):
-        overall_adm.append(float(m.get("overall_admissibility_score", float("nan"))))
+        raw_ov = m.get("overall_admissibility_score", float("nan"))
+        try:
+            overall_adm.append(float(raw_ov) if raw_ov is not None else float("nan"))
+        except (TypeError, ValueError):
+            overall_adm.append(float("nan"))
         cat_scores = m.get("category_admissibility_score") or {}
         if isinstance(cat_scores, dict):
             for cat, val in cat_scores.items():
@@ -212,9 +221,23 @@ def _build_summary(
 
     last_m = metrics[-1]
     last_report_per_key = dict(last_m.get("per_key_report") or {})
-    overall = float(last_m.get("overall_admissibility_score", 0.0))
-    if not math.isfinite(overall):
-        overall = 0.0
+    overall_raw = last_m.get("overall_admissibility_score", 0.0)
+    try:
+        overall = float(overall_raw) if overall_raw is not None else float("nan")
+    except (TypeError, ValueError):
+        overall = float("nan")
+    overall_finite = math.isfinite(overall)
+    # Prefer log-synced Incomplete from a prior strict audit over recomputed High.
+    log_level = log[-1].get("overall_admissibility_level") if isinstance(log[-1], dict) else None
+    if log_level == "Incomplete":
+        overall_out: Any = None
+        level_out = "Incomplete"
+    elif overall_finite:
+        overall_out = overall
+        level_out = admissibility_level(overall)
+    else:
+        overall_out = 0.0
+        level_out = admissibility_level(0.0)
     per_category = dict(last_m.get("category_admissibility_score") or {})
     plot_keys = list(keys) if keys is not None else list((log[0].get("rms") or {}).keys())
     worst_rows = _worst_keys_table_rows(log, plot_keys, metrics, top_n=worst_keys_top_n)
@@ -242,8 +265,8 @@ def _build_summary(
     summary: Dict[str, Any] = {
         "per_key": last_report_per_key,
         "per_category": per_category,
-        "overall_admissibility_score": overall,
-        "overall_admissibility_level": admissibility_level(overall),
+        "overall_admissibility_score": overall_out,
+        "overall_admissibility_level": level_out,
         "constitutive_closure_summary": build_constitutive_closure_summary(last_report_per_key),
         "audit_meta": audit_meta(log, r_ref=r_ref),
         "monitor_run_mode": log[-1].get("run_mode") if isinstance(log[-1], dict) else None,

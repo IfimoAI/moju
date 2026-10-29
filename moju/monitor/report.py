@@ -270,13 +270,23 @@ def write_audit_pdf(
 
     # Overall score and level (omitted when non-finite, e.g. eval mode)
     try:
-        _ov = float(overall_score)
+        _ov = float(overall_score) if overall_score is not None else float("nan")
     except (TypeError, ValueError):
         _ov = float("nan")
     if math.isfinite(_ov):
         story.append(Paragraph("Overall", heading_style))
         score_text = f"Admissibility score: {format_admissibility_pct(_ov)} &nbsp; — &nbsp; {overall_level}"
         story.append(Paragraph(score_text, body_style))
+        story.append(Spacer(1, 16))
+    elif str(overall_level) == "Incomplete":
+        story.append(Paragraph("Overall", heading_style))
+        story.append(
+            Paragraph(
+                "Admissibility score: N/A &nbsp; — &nbsp; Incomplete "
+                "(coverage not assessable under nonfinite_policy=&quot;strict&quot;).",
+                body_style,
+            )
+        )
         story.append(Spacer(1, 16))
     else:
         story.append(
@@ -547,7 +557,7 @@ def write_audit_pdf(
             score = data.get("admissibility_score", 0.0)
             level = data.get("admissibility_level", "Non-Admissible")
             if (
-                level in ("Not identifiable", "Insufficient points")
+                level in ("Not identifiable", "Insufficient points", "Incomplete")
                 or score is None
             ):
                 score_s = "N/A"

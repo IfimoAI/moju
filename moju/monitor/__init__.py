@@ -107,9 +107,11 @@ from moju.monitor.visualize_labels import pretty_category_name, pretty_residual_
 from moju.monitor.tiers import (
     TIER_CUTOFFS,
     TIER_DEFINITION,
+    TIER_NON_SCORED,
     TIER_ORDER,
     tier_definition,
     tier_for_score,
+    tier_rank,
 )
 from moju.monitor.types import (
     REPORT_SCHEMA_VERSION,
@@ -186,9 +188,11 @@ __all__ = [
     "merge_implied_groups_first",
     "TIER_CUTOFFS",
     "TIER_DEFINITION",
+    "TIER_NON_SCORED",
     "TIER_ORDER",
     "tier_definition",
     "tier_for_score",
+    "tier_rank",
     "REPORT_SCHEMA_VERSION",
     "AuditReport",
     "BoundCheck",

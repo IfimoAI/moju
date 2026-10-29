@@ -367,29 +367,41 @@ def _three_pillar_labels_values(metrics: List[Dict[str, Any]]) -> Tuple[List[str
     return labels, vals
 
 
-def _admissibility_status_bracket_plotly(score: float) -> str:
+def _admissibility_status_bracket_plotly(score: Optional[float]) -> str:
     """Short status tag for the Plotly header bracket (matches :func:`admissibility_level` bands)."""
-    if not math.isfinite(score):
+    if score is None:
+        return "INCOMPLETE"
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
         return "N/A"
-    if is_high_admissibility(score):
+    if not math.isfinite(s):
+        return "N/A"
+    if is_high_admissibility(s):
         return "HIGH"
-    if score >= ADM_MODERATE_THRESHOLD:
+    if s >= ADM_MODERATE_THRESHOLD:
         return "MODERATE"
-    if score >= ADM_LOW_THRESHOLD:
+    if s >= ADM_LOW_THRESHOLD:
         return "LOW"
     return "NON-ADM"
 
 
-def format_admissibility_status_label(score: float) -> str:
+def format_admissibility_status_label(score: Optional[float]) -> str:
     """
     Human-readable admissibility band for captions (e.g. Moju Studio).
 
-    Uses the same thresholds as :func:`moju.monitor.auditor.admissibility_level`; returns ``N/A`` when
-    the score is non-finite.
+    Uses the same thresholds as :func:`moju.monitor.auditor.admissibility_level`; returns
+    ``Incomplete`` when ``score is None``, and ``N/A`` when the score is non-finite.
     """
-    if not math.isfinite(score):
+    if score is None:
+        return "Incomplete"
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
         return "N/A"
-    return admissibility_level(score)
+    if not math.isfinite(s):
+        return "N/A"
+    return admissibility_level(s)
 
 
 def _status_bracket_color(tag: str, *, warn_color: str) -> str:

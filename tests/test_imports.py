@@ -136,9 +136,11 @@ def test_monitor_module_has_all():
 NEW_1_2_0_MONITOR_EXPORTS = {
     "TIER_CUTOFFS",
     "TIER_DEFINITION",
+    "TIER_NON_SCORED",
     "TIER_ORDER",
     "tier_definition",
     "tier_for_score",
+    "tier_rank",
     "REPORT_SCHEMA_VERSION",
     "AuditReport",
     "BoundCheck",
