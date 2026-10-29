@@ -24,6 +24,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   not evidence of failure). Batched and loop evaluate paths share the same
   coverage records.
 
+### Known limitations
+
+- Coverage counts non-finites in the **residual** array only; a non-finite
+  required input whose residual stays finite is still reported as
+  ``coverage_status = "ok"`` (input-sample mapping planned for a follow-up).
+
 Reported by: \<name, owner to fill\>
 
 ## [2.3.2] - 2026-10-18
