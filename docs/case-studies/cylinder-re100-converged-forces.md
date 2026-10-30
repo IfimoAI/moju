@@ -72,7 +72,6 @@ We are generating simulation data intended for training specialized neural surro
 - A tier means consistency with the stated physics on the sampled points. It is not a certification and does not replace validation against experiments.
 - Moderate at order 6 is not "perfect": on Moju's scale, High starts at 90.9%.
 - Scores were computed with Moju 2.3.2 and re-checked with 2.4.2 (strict evaluation coverage), with identical outcomes.
-- We are verifying the audit pipeline itself against exact Navier–Stokes solutions sampled through the same mesh and derivative path. A steady exact solution (Kovasznay flow) passes; an unsteady check (Taylor–Green) is still being worked through. Both orders go through the same pipeline, so any pipeline effect applies equally to both. We will update this page when the check is complete.
 - The simulation fields themselves are not published in this repository.
 
 ## Try it on your own fields
