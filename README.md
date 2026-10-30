@@ -204,6 +204,7 @@ Training demos that use **optax** (e.g. [`examples/slab_cooling_demo.py`](https:
 
 ## Examples
 
+- **Case study:** converged forces, unconverged near-wall physics (2D cylinder, Re = 100, Nektar++): [`docs/case-studies/cylinder-re100-converged-forces.md`](https://github.com/IfimoAI/moju/blob/main/docs/case-studies/cylinder-re100-converged-forces.md)
 - Full 1D slab cooling demo: [`examples/slab_cooling_demo.py`](https://github.com/IfimoAI/moju/blob/main/examples/slab_cooling_demo.py)
 - Burgers end-to-end (law + implied **ν**): [`examples/monitor_burgers_end_to_end.py`](https://github.com/IfimoAI/moju/blob/main/examples/monitor_burgers_end_to_end.py)
 - CFD snapshot audit: [`examples/cfd_snapshot_cookbook_heat_1d.py`](https://github.com/IfimoAI/moju/blob/main/examples/cfd_snapshot_cookbook_heat_1d.py)
